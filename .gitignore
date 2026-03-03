@@ -1,0 +1,52 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# Go mod cache
+go.sum.lock
+.gocache/
+.gomodcache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# baton specific
+baton
+/tmp/
+*.log
+
+# calude
+.claude/docs/
+.claude/logs/
+.claude/state/
+.claude/checkpoints/
+.claude/Plans.md
+
+# Local config overrides
+.claude/config/**/*.local.yaml
+.claude/config/**/*.local.json
+
+# Environment variables
+.env
+.env.local
