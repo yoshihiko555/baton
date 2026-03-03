@@ -28,10 +28,11 @@ var stateColors = map[core.SessionState]lipgloss.Color{
 	core.Error:    lipgloss.Color("196"),
 }
 
-// View implements tea.Model.
+// View は tea.Model の描画文字列を返す。
 func (m Model) View() string {
 	totalWidth := m.width
 	if totalWidth <= 0 {
+		// 初回描画時など WindowSize 未受信ならデフォルトサイズを使う。
 		totalWidth = defaultListWidth*2 + 4
 	}
 
@@ -66,6 +67,7 @@ func (m Model) View() string {
 	view := lipgloss.JoinVertical(lipgloss.Left, panes, statusBar)
 
 	if m.err != nil {
+		// エラー時は上段に明示表示する。
 		errLine := stateStyle(core.Error).Render(fmt.Sprintf("error: %v", m.err))
 		return lipgloss.JoinVertical(lipgloss.Left, errLine, view)
 	}
@@ -98,6 +100,7 @@ func (m Model) renderStatusBar(totalWidth int) string {
 
 	lastUpdateLabel := "-"
 	if !lastUpdate.IsZero() {
+		// 表示はローカル時刻に寄せる。
 		lastUpdateLabel = lastUpdate.Local().Format("15:04:05")
 	}
 
@@ -114,6 +117,7 @@ func (m Model) renderStatusBar(totalWidth int) string {
 func stateStyle(state core.SessionState) lipgloss.Style {
 	color, ok := stateColors[state]
 	if !ok {
+		// 未知状態は控えめな色で表示する。
 		color = lipgloss.Color("240")
 	}
 	return lipgloss.NewStyle().Foreground(color)

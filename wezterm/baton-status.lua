@@ -1,14 +1,14 @@
--- Usage:
+-- 使い方:
 --   local baton_status = require 'wezterm.baton-status'
 --   baton_status.setup({
---     path = '/tmp/baton-status.json', -- optional
---     interval = 5, -- optional (seconds)
+--     path = '/tmp/baton-status.json', -- 省略可
+--     interval = 5, -- 省略可（秒）
 --   })
 
 local M = {}
 local wezterm = require 'wezterm'
 
--- Cache
+-- 状態ファイル読み取り結果の短期キャッシュ
 local cache = { data = nil, last_read = 0 }
 
 local CACHE_TTL_SECONDS = 5
@@ -19,6 +19,7 @@ local function now_seconds()
 end
 
 local function values(tbl)
+  -- table 以外が来た場合も for-in が安全に回せるよう、空イテレータを返す
   if type(tbl) ~= 'table' then
     return function()
       return nil
@@ -37,6 +38,7 @@ end
 function M.read_status(path)
   path = path or DEFAULT_STATUS_PATH
 
+  -- 直近読み取りから TTL 以内ならファイル再読込を避ける
   local now = now_seconds()
   if cache.data ~= nil and (now - cache.last_read) < CACHE_TTL_SECONDS then
     return cache.data
@@ -54,17 +56,20 @@ function M.read_status(path)
     return nil
   end
 
+  -- JSON の破損で落ちないように pcall で保護
   local ok, parsed = pcall(wezterm.json_parse, content)
   if not ok or type(parsed) ~= 'table' then
     return nil
   end
 
+  -- 正常時のみキャッシュ更新
   cache.data = parsed
   cache.last_read = now
   return parsed
 end
 
 local function count_session_state(session)
+  -- セッション state を集計用の論理値に正規化する
   local active = false
   local thinking = false
   local tool_use = false
@@ -93,6 +98,7 @@ local function count_session_state(session)
 end
 
 function M.format_status(data)
+  -- JSON が読めない場合はグレー表示で明示
   if type(data) ~= 'table' then
     return wezterm.format({
       { Foreground = { Color = '#808080' } },
@@ -107,6 +113,7 @@ function M.format_status(data)
   local error_count = 0
 
   local projects = data.projects
+  -- projects[].sessions[] 形式のデータを集計
   if type(projects) == 'table' then
     for project in values(projects) do
       project_count = project_count + 1
@@ -132,8 +139,10 @@ function M.format_status(data)
   end
 
   local standalone_sessions = data.sessions
+  -- projects が無く sessions だけある旧/簡易形式にも対応
   if type(standalone_sessions) == 'table' then
     if project_count == 0 then
+      -- standalone のみでも表示上は 1 プロジェクトとして扱う
       project_count = 1
     end
     for session in values(standalone_sessions) do
@@ -170,6 +179,7 @@ function M.format_status(data)
     { Text = ' thinking' },
   }
 
+  -- 0 件の指標は省略してステータスを短く保つ
   if tool_use_count > 0 then
     table.insert(chunks, { Foreground = { Color = '#A0A0A0' } })
     table.insert(chunks, { Text = ' | ' })
@@ -197,6 +207,7 @@ function M.setup(config)
   local interval = config.interval or 5
   local last_update = 0
 
+  -- WezTerm の update-right-status は高頻度で呼ばれるため、更新間隔で間引く
   wezterm.on('update-right-status', function(window, _)
     local now = now_seconds()
     if (now - last_update) < interval then

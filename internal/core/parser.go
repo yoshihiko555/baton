@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// ParseRecord parses a JSONL record into an Entry and stores the raw payload.
+// ParseRecord は JSONL の1行を Entry に変換し、元の JSON も保持する。
 func ParseRecord(line []byte) (*Entry, error) {
 	record := bytes.TrimSpace(line)
 	if len(record) == 0 {
@@ -26,7 +26,7 @@ func ParseRecord(line []byte) (*Entry, error) {
 	return entry, nil
 }
 
-// DetermineSessionState determines the session state from the last entry type.
+// DetermineSessionState は末尾エントリの type からセッション状態を判定する。
 func DetermineSessionState(entries []*Entry) SessionState {
 	if len(entries) == 0 || entries[len(entries)-1] == nil {
 		return Idle
@@ -47,19 +47,19 @@ func DetermineSessionState(entries []*Entry) SessionState {
 	}
 }
 
-// IncrementalReader incrementally reads appended JSONL records from files.
+// IncrementalReader はファイル追記分だけを増分読み取りする。
 type IncrementalReader struct {
 	offsets map[string]int64
 }
 
-// NewIncrementalReader creates a new IncrementalReader.
+// NewIncrementalReader は IncrementalReader を初期化して返す。
 func NewIncrementalReader() *IncrementalReader {
 	return &IncrementalReader{
 		offsets: make(map[string]int64),
 	}
 }
 
-// ReadNew reads only newly appended complete lines from filepath.
+// ReadNew は filepath から未読の追記分のみを読み取る。
 func (r *IncrementalReader) ReadNew(filepath string) ([]*Entry, error) {
 	if r.offsets == nil {
 		r.offsets = make(map[string]int64)
@@ -78,6 +78,7 @@ func (r *IncrementalReader) ReadNew(filepath string) ([]*Entry, error) {
 
 	offset := r.offsets[filepath]
 	if info.Size() < offset {
+		// ローテーション等でファイルが短くなった場合は先頭から読み直す。
 		offset = 0
 	}
 
@@ -93,7 +94,7 @@ func (r *IncrementalReader) ReadNew(filepath string) ([]*Entry, error) {
 		line, err := reader.ReadBytes('\n')
 
 		if err == nil {
-			// Complete line (ends with '\n') — always advance offset.
+			// 改行終端の完全な1行は常に消費済みとしてオフセットを進める。
 			nextOffset += int64(len(line))
 			if len(bytes.TrimSpace(line)) == 0 {
 				continue
@@ -105,10 +106,9 @@ func (r *IncrementalReader) ReadNew(filepath string) ([]*Entry, error) {
 		}
 
 		if errors.Is(err, io.EOF) {
-			// Trailing data without '\n'. If it parses as valid JSON,
-			// treat it as a final entry and advance offset. Otherwise
-			// leave offset unchanged so the data is re-read once the
-			// writer appends more bytes.
+			// 末尾に改行なしデータがある場合:
+			// - JSON として妥当なら最終エントリとして採用しオフセットを進める
+			// - 不完全ならオフセットを据え置き、次回追記時に再読する
 			if len(bytes.TrimSpace(line)) > 0 {
 				if entry, parseErr := ParseRecord(line); parseErr == nil {
 					entries = append(entries, entry)
@@ -125,7 +125,7 @@ func (r *IncrementalReader) ReadNew(filepath string) ([]*Entry, error) {
 	return entries, nil
 }
 
-// Reset clears the stored offset for filepath.
+// Reset は指定ファイルの読み取りオフセットを破棄する。
 func (r *IncrementalReader) Reset(filepath string) {
 	if r.offsets == nil {
 		return

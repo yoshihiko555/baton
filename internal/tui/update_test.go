@@ -11,7 +11,7 @@ import (
 	"github.com/yoshihiko555/baton/internal/terminal"
 )
 
-// --- Mocks ---
+// --- モック ---
 
 type mockStateReader struct {
 	projects []core.Project
@@ -71,7 +71,7 @@ func (m *mockTerminal) Name() string {
 	return "mock"
 }
 
-// --- Helper ---
+// --- ヘルパー ---
 
 func newTestModel() (Model, *mockStateReader, *mockStateWriter, *mockEventSource, *mockTerminal) {
 	reader := &mockStateReader{}
@@ -84,7 +84,7 @@ func newTestModel() (Model, *mockStateReader, *mockStateWriter, *mockEventSource
 	return model, reader, writer, events, term
 }
 
-// --- Tests ---
+// --- テスト ---
 
 func TestProjectItem(t *testing.T) {
 	item := ProjectItem{Project: core.Project{
@@ -161,7 +161,7 @@ func TestUpdateQuitKey(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected quit command, got nil")
 	}
-	// tea.Quit returns a tea.QuitMsg
+	// tea.Quit は tea.QuitMsg を返す。
 	result := cmd()
 	if _, ok := result.(tea.QuitMsg); !ok {
 		t.Errorf("expected tea.QuitMsg, got %T", result)
@@ -194,7 +194,7 @@ func TestUpdateTabKey(t *testing.T) {
 func TestUpdateArrowKeys(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
-	// Right arrow → pane 1
+	// 右矢印 -> pane 1
 	msg := tea.KeyMsg{Type: tea.KeyRight}
 	updated, _ := m.Update(msg)
 	m = updated.(Model)
@@ -202,7 +202,7 @@ func TestUpdateArrowKeys(t *testing.T) {
 		t.Errorf("activePane after right = %d, want 1", m.activePane)
 	}
 
-	// Left arrow → pane 0
+	// 左矢印 -> pane 0
 	msg = tea.KeyMsg{Type: tea.KeyLeft}
 	updated, _ = m.Update(msg)
 	m = updated.(Model)

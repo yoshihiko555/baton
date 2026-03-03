@@ -7,6 +7,7 @@ import (
 )
 
 func TestParseRecordValid(t *testing.T) {
+	// 正常な JSONL 1行を Entry に変換できることを確認する。
 	line := []byte(`{"type":"thinking","role":"assistant","created_at":"2026-03-01T10:00:00Z"}` + "\n")
 
 	entry, err := ParseRecord(line)
@@ -29,7 +30,7 @@ func TestParseRecordValid(t *testing.T) {
 		t.Fatalf("unexpected Raw: got %q, want %q", string(entry.Raw), wantRaw)
 	}
 
-	// Verify Raw is copied and not tied to the original input buffer.
+	// Raw が入力バッファを参照せず、コピー保持されることを確認する。
 	line[2] = 'X'
 	if string(entry.Raw) != wantRaw {
 		t.Fatalf("Raw should not change after source mutation: got %q", string(entry.Raw))
@@ -37,6 +38,7 @@ func TestParseRecordValid(t *testing.T) {
 }
 
 func TestParseRecordInvalidJSON(t *testing.T) {
+	// 不正 JSON はエラーになることを確認する。
 	_, err := ParseRecord([]byte(`{"type":"thinking"` + "\n"))
 	if err == nil {
 		t.Fatalf("expected error, got nil")
@@ -44,6 +46,7 @@ func TestParseRecordInvalidJSON(t *testing.T) {
 }
 
 func TestParseRecordEmptyLine(t *testing.T) {
+	// 空行（空白のみ含む）を拒否することを確認する。
 	_, err := ParseRecord([]byte(" \t \n"))
 	if err == nil {
 		t.Fatalf("expected error, got nil")
@@ -51,6 +54,7 @@ func TestParseRecordEmptyLine(t *testing.T) {
 }
 
 func TestDetermineSessionState(t *testing.T) {
+	// 末尾エントリの type から状態が決定されることを確認する。
 	tests := []struct {
 		name    string
 		entries []*Entry
@@ -117,6 +121,7 @@ func TestDetermineSessionState(t *testing.T) {
 }
 
 func TestNewIncrementalReader(t *testing.T) {
+	// コンストラクタが内部オフセットマップを初期化することを確認する。
 	r := NewIncrementalReader()
 	if r == nil {
 		t.Fatalf("NewIncrementalReader returned nil")
@@ -130,6 +135,7 @@ func TestNewIncrementalReader(t *testing.T) {
 }
 
 func TestIncrementalReaderReadNewBasicAndOffset(t *testing.T) {
+	// 追記分のみ取得し、オフセットが維持されることを確認する。
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
 	content := `{"type":"thinking","role":"assistant"}` + "\n" +
@@ -171,6 +177,7 @@ func TestIncrementalReaderReadNewBasicAndOffset(t *testing.T) {
 }
 
 func TestIncrementalReaderReadNewSkipsIncompleteLine(t *testing.T) {
+	// 改行なし末尾データの扱い（有効 JSON は採用）を確認する。
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
 
@@ -203,8 +210,7 @@ func TestIncrementalReaderReadNewSkipsIncompleteLine(t *testing.T) {
 		t.Fatalf("Close failed: %v", err)
 	}
 
-	// The trailing entry (no newline) is valid JSON, so it is parsed
-	// and the offset advances past it.
+	// 改行なし末尾でも JSON が妥当なら採用し、オフセットも進む。
 	entries, err = r.ReadNew(path)
 	if err != nil {
 		t.Fatalf("ReadNew for appended content failed: %v", err)
@@ -221,7 +227,7 @@ func TestIncrementalReaderReadNewSkipsIncompleteLine(t *testing.T) {
 		t.Fatalf("offset should include valid trailing entry: got %d, want %d", r.offsets[path], wantOffset)
 	}
 
-	// Appending a newline should not produce duplicate entries.
+	// その後に改行だけ追記しても重複エントリが出ないことを確認する。
 	file, err = os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		t.Fatalf("OpenFile failed: %v", err)
@@ -252,6 +258,7 @@ func TestIncrementalReaderReadNewSkipsIncompleteLine(t *testing.T) {
 }
 
 func TestIncrementalReaderReadNewDetectsRotation(t *testing.T) {
+	// ローテーション等でファイルが短くなっても先頭から再読できることを確認する。
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
 
@@ -289,6 +296,7 @@ func TestIncrementalReaderReadNewDetectsRotation(t *testing.T) {
 }
 
 func TestIncrementalReaderReadNewInvalidLineSkipped(t *testing.T) {
+	// 途中に不正行があっても有効行だけを返すことを確認する。
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
 	content := `{"type":"thinking","role":"assistant"}` + "\n" +
@@ -311,6 +319,7 @@ func TestIncrementalReaderReadNewInvalidLineSkipped(t *testing.T) {
 }
 
 func TestIncrementalReaderReset(t *testing.T) {
+	// Reset 後は先頭から再読することを確認する。
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
 	content := `{"type":"thinking","role":"assistant"}` + "\n"

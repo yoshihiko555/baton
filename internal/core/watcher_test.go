@@ -11,6 +11,7 @@ import (
 )
 
 func TestDiscoverProjects(t *testing.T) {
+	// セッションファイルを含むディレクトリのみをプロジェクトとして列挙できることを確認する。
 	baseDir := t.TempDir()
 
 	mustWriteFile(t, filepath.Join(baseDir, "project-a", "session-1.jsonl"), []byte("a"))
@@ -41,6 +42,7 @@ func TestDiscoverProjects(t *testing.T) {
 }
 
 func TestDiscoverSessions(t *testing.T) {
+	// json/jsonl のみをセッションとして抽出し、ネストパスも ID 化できることを確認する。
 	baseDir := t.TempDir()
 	projectPath := filepath.Join(baseDir, "project-a")
 
@@ -68,6 +70,7 @@ func TestDiscoverSessions(t *testing.T) {
 }
 
 func TestWatcher_Start_Stop(t *testing.T) {
+	// Start 直後の初期 Create イベントと、Stop 後の停止挙動を確認する。
 	baseDir := t.TempDir()
 	projectPath := filepath.Join(baseDir, "project-a")
 	sessionPath := filepath.Join(projectPath, "session-1.jsonl")
@@ -85,14 +88,13 @@ func TestWatcher_Start_Stop(t *testing.T) {
 	cancel()
 	watcher.Stop()
 
-	// After Stop(), no new events should be emitted.
-	// Drain any remaining buffered events.
+	// Stop 後は新規イベントを期待しない。残バッファのみドレインする。
 	timer := time.NewTimer(500 * time.Millisecond)
 	defer timer.Stop()
 	for {
 		select {
 		case <-watcher.Events():
-			// drain
+			// 残っているイベントを読み捨てる
 		case <-timer.C:
 			return
 		}
@@ -100,6 +102,7 @@ func TestWatcher_Start_Stop(t *testing.T) {
 }
 
 func TestWatcher_FileModified(t *testing.T) {
+	// 既存セッション更新で Modified イベントが届くことを確認する。
 	baseDir := t.TempDir()
 	projectPath := filepath.Join(baseDir, "project-a")
 	sessionPath := filepath.Join(projectPath, "session-1.jsonl")
@@ -125,6 +128,7 @@ func TestWatcher_FileModified(t *testing.T) {
 }
 
 func TestWatcher_Debounce(t *testing.T) {
+	// 短時間の連続更新が 1 件にデバウンスされることを確認する。
 	baseDir := t.TempDir()
 	sessionPath := filepath.Join(baseDir, "project-a", "session-1.jsonl")
 	mustWriteFile(t, sessionPath, []byte("init"))

@@ -6,6 +6,7 @@ import (
 )
 
 func TestListPanes(t *testing.T) {
+	// list コマンド結果を Pane 構造体へ正規化できることを確認する。
 	sampleJSON := `[
 		{"pane_id": 1, "title": "editor", "tab_id": "2", "cwd": "file:///tmp/project"},
 		{"pane_id": "3", "title": "logs", "tab_id": 4, "cwd": "file:///tmp/logs"}
@@ -47,6 +48,7 @@ func TestListPanes(t *testing.T) {
 }
 
 func TestFocusPane(t *testing.T) {
+	// activate-pane コマンドに正しい引数を渡すことを確認する。
 	var gotArgs []string
 
 	wez := &WezTerminal{
@@ -67,6 +69,7 @@ func TestFocusPane(t *testing.T) {
 }
 
 func TestName(t *testing.T) {
+	// 実装識別子が固定値 "wezterm" であることを確認する。
 	wez := NewWezTerminal()
 	if got, want := wez.Name(), "wezterm"; got != want {
 		t.Fatalf("unexpected terminal name: got=%q want=%q", got, want)

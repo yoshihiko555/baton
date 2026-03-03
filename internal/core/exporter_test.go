@@ -11,6 +11,7 @@ import (
 )
 
 func TestExporterWriteStatusJSONValidJSON(t *testing.T) {
+	// 正常系: 整形 JSON が出力され、構文としても妥当であることを確認する。
 	destPath := filepath.Join(t.TempDir(), "status.json")
 	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 
@@ -58,6 +59,7 @@ func TestExporterWriteStatusJSONValidJSON(t *testing.T) {
 }
 
 func TestExporterWriteStatusJSONAtomicReplace(t *testing.T) {
+	// 置換時に新旧ファイル記述子が分離される（原子的置換）ことを確認する。
 	destPath := filepath.Join(t.TempDir(), "status.json")
 	oldContent := []byte("old-content\n")
 
@@ -111,6 +113,7 @@ func TestExporterWriteStatusJSONAtomicReplace(t *testing.T) {
 }
 
 func TestExporterWriteStatusJSONInvalidPath(t *testing.T) {
+	// 異常系: 親ディレクトリが無いパスではエラーになることを確認する。
 	destPath := filepath.Join(t.TempDir(), "missing", "status.json")
 
 	err := WriteStatusJSON(StatusOutput{}, destPath)

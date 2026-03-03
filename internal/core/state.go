@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// StateManager aggregates watcher events into in-memory project/session state.
+// StateManager は watcher イベントをプロジェクト/セッション単位で集約管理する。
 type StateManager struct {
 	watcher           *Watcher
 	incrementalReader *IncrementalReader
@@ -17,7 +17,7 @@ type StateManager struct {
 	mu                sync.RWMutex
 }
 
-// NewStateManager creates a new StateManager.
+// NewStateManager は StateManager を初期化して返す。
 func NewStateManager(watcher *Watcher) *StateManager {
 	return &StateManager{
 		watcher:           watcher,
@@ -26,7 +26,7 @@ func NewStateManager(watcher *Watcher) *StateManager {
 	}
 }
 
-// InitialScan performs a full scan and rebuilds in-memory aggregated state.
+// InitialScan はフルスキャンを実行し、集約状態を再構築する。
 func (s *StateManager) InitialScan() error {
 	return s.initialScan()
 }
@@ -36,7 +36,7 @@ func (s *StateManager) initialScan() error {
 		return errors.New("watcher is required")
 	}
 
-	// Phase 1: discover projects and sessions outside the lock (I/O heavy).
+	// 第1段階: I/O が重い探索処理はロック外で実行する。
 	projectPaths, err := s.watcher.DiscoverProjects()
 	if err != nil {
 		return err
@@ -71,7 +71,7 @@ func (s *StateManager) initialScan() error {
 		}
 	}
 
-	// Phase 2: acquire lock and build state from discovered data.
+	// 第2段階: 収集結果をもとにロック下で状態を再構築する。
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -90,7 +90,7 @@ func (s *StateManager) initialScan() error {
 	return nil
 }
 
-// HandleEvent applies a single watcher event to in-memory state.
+// HandleEvent は単一イベントを集約状態へ反映する。
 func (s *StateManager) HandleEvent(event WatchEvent) error {
 	return s.handleEvent(event)
 }
@@ -117,6 +117,7 @@ func (s *StateManager) handleEvent(event WatchEvent) error {
 			sessionPath = resolvedPath
 		}
 
+		// 新規作成イベントは既存オフセットを捨てて先頭から読む。
 		reset := event.Type == Created
 		if err := s.upsertFromFile(event.ProjectPath, event.SessionID, sessionPath, reset); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -131,7 +132,7 @@ func (s *StateManager) handleEvent(event WatchEvent) error {
 	}
 }
 
-// GetProjects returns a snapshot copy of all projects.
+// GetProjects は全プロジェクトのスナップショット（コピー）を返す。
 func (s *StateManager) GetProjects() []Project {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -153,6 +154,7 @@ func (s *StateManager) GetProjects() []Project {
 			projectCopy.Sessions = append(projectCopy.Sessions, &sessionCopy)
 		}
 
+		// 呼び出し側で扱いやすいようセッション順を安定化する。
 		sort.Slice(projectCopy.Sessions, func(i, j int) bool {
 			return projectCopy.Sessions[i].ID < projectCopy.Sessions[j].ID
 		})
@@ -160,6 +162,7 @@ func (s *StateManager) GetProjects() []Project {
 		projects = append(projects, projectCopy)
 	}
 
+	// プロジェクト順も安定化する。
 	sort.Slice(projects, func(i, j int) bool {
 		return projects[i].Path < projects[j].Path
 	})
@@ -167,7 +170,7 @@ func (s *StateManager) GetProjects() []Project {
 	return projects
 }
 
-// GetStatus returns the aggregated status payload.
+// GetStatus は現在時刻付きのステータス出力を生成する。
 func (s *StateManager) GetStatus() StatusOutput {
 	return StatusOutput{
 		Projects:  s.GetProjects(),
@@ -186,6 +189,7 @@ func (s *StateManager) upsertFromFileLocked(projectPath, sessionID, sessionPath 
 		s.incrementalReader = NewIncrementalReader()
 	}
 	if reset {
+		// Created などで再読込したい場合はオフセットを初期化する。
 		s.incrementalReader.Reset(sessionPath)
 	}
 
@@ -207,6 +211,7 @@ func (s *StateManager) upsertFromFileLocked(projectPath, sessionID, sessionPath 
 
 	session.FilePath = sessionPath
 	if len(entries) > 0 {
+		// 新規エントリがある場合のみ状態と最終活動時刻を更新する。
 		session.State = DetermineSessionState(entries)
 		if lastCreatedAt := latestEntryCreatedAt(entries); !lastCreatedAt.IsZero() {
 			session.LastActivity = lastCreatedAt
@@ -214,6 +219,7 @@ func (s *StateManager) upsertFromFileLocked(projectPath, sessionID, sessionPath 
 	}
 
 	if session.LastActivity.IsZero() {
+		// created_at が無い場合はファイル更新時刻をフォールバックに使う。
 		if info, statErr := os.Stat(sessionPath); statErr == nil {
 			session.LastActivity = info.ModTime()
 		}
@@ -232,7 +238,7 @@ func (s *StateManager) removeSession(projectPath, sessionID, sessionPath string)
 		return
 	}
 
-	// Collect file paths to reset from the incremental reader.
+	// 削除対象に紐づくファイルのオフセットをリセット対象として収集する。
 	var pathsToReset []string
 	if sessionPath != "" && sessionPath != "." {
 		pathsToReset = append(pathsToReset, sessionPath)
@@ -247,6 +253,7 @@ func (s *StateManager) removeSession(projectPath, sessionID, sessionPath string)
 		matchedByID := sessionID != "" && session.ID == sessionID
 		matchedByPath := sessionID == "" && sessionPath != "" && sessionPath != "." && session.FilePath == sessionPath
 		if matchedByID || matchedByPath {
+			// ID で一致した場合でも FilePath が異なれば併せてリセットする。
 			if session.FilePath != "" && session.FilePath != sessionPath {
 				pathsToReset = append(pathsToReset, session.FilePath)
 			}
@@ -277,7 +284,8 @@ func (s *StateManager) getOrCreateProject(projectPath string) *Project {
 	}
 
 	project := &Project{
-		Path:        projectPath,
+		Path: projectPath,
+		// 表示名は最後のディレクトリ名を利用する。
 		DisplayName: filepath.Base(projectPath),
 		Sessions:    []*Session{},
 	}
@@ -286,6 +294,7 @@ func (s *StateManager) getOrCreateProject(projectPath string) *Project {
 }
 
 func resolveSessionFilePath(projectPath, sessionID string) (string, error) {
+	// 互換性のため jsonl/json の両方を探索する。
 	candidates := []string{
 		filepath.Join(projectPath, sessionID+".jsonl"),
 		filepath.Join(projectPath, sessionID+".json"),
@@ -318,6 +327,7 @@ func findSession(sessions []*Session, sessionID string) *Session {
 }
 
 func latestEntryCreatedAt(entries []*Entry) time.Time {
+	// 末尾側が最新想定のため逆順に最初の有効時刻を返す。
 	for i := len(entries) - 1; i >= 0; i-- {
 		entry := entries[i]
 		if entry == nil || entry.CreatedAt.IsZero() {
@@ -329,6 +339,7 @@ func latestEntryCreatedAt(entries []*Entry) time.Time {
 }
 
 func refreshActiveCount(project *Project) {
+	// active は Thinking / ToolUse のみをカウントする。
 	count := 0
 	for _, session := range project.Sessions {
 		if session == nil {

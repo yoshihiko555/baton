@@ -12,7 +12,7 @@ import (
 func TestViewContainsProjectsTitle(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
-	// Set size to avoid zero-size rendering
+	// 0 サイズ描画を避けるため、先にウィンドウサイズを設定する。
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = updated.(Model)
 
@@ -31,7 +31,7 @@ func TestViewContainsStatusBar(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = updated.(Model)
 
-	// Add a project with sessions
+	// セッション付きプロジェクトを投入してステータスバー表示を確認する。
 	projects := []core.Project{
 		{
 			Path:        "/project-a",

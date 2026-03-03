@@ -8,12 +8,12 @@ import (
 	"strconv"
 )
 
-// WezTerminal implements Terminal for wezterm.
+// WezTerminal は wezterm 向けの Terminal 実装。
 type WezTerminal struct {
 	execFn func(args ...string) ([]byte, error)
 }
 
-// NewWezTerminal creates a wezterm-backed terminal implementation.
+// NewWezTerminal は wezterm CLI を利用する実装を生成する。
 func NewWezTerminal() *WezTerminal {
 	return &WezTerminal{
 		execFn: func(args ...string) ([]byte, error) {
@@ -22,7 +22,7 @@ func NewWezTerminal() *WezTerminal {
 	}
 }
 
-// ListPanes lists wezterm panes via wezterm cli.
+// ListPanes は wezterm CLI からペイン一覧を取得する。
 func (w *WezTerminal) ListPanes() ([]Pane, error) {
 	if w == nil || w.execFn == nil {
 		return nil, fmt.Errorf("wezterm exec function is not configured")
@@ -34,6 +34,7 @@ func (w *WezTerminal) ListPanes() ([]Pane, error) {
 	}
 
 	var rawPanes []struct {
+		// pane_id / tab_id は環境により数値または文字列になるため RawMessage で受ける。
 		ID         json.RawMessage `json:"pane_id"`
 		Title      string          `json:"title"`
 		TabID      json.RawMessage `json:"tab_id"`
@@ -66,7 +67,7 @@ func (w *WezTerminal) ListPanes() ([]Pane, error) {
 	return panes, nil
 }
 
-// FocusPane activates the given pane in wezterm.
+// FocusPane は指定ペインをアクティブ化する。
 func (w *WezTerminal) FocusPane(paneID string) error {
 	if w == nil || w.execFn == nil {
 		return fmt.Errorf("wezterm exec function is not configured")
@@ -80,18 +81,19 @@ func (w *WezTerminal) FocusPane(paneID string) error {
 	return nil
 }
 
-// IsAvailable reports whether wezterm exists on PATH.
+// IsAvailable は PATH 上に wezterm 実行ファイルがあるかを返す。
 func (w *WezTerminal) IsAvailable() bool {
 	_, err := exec.LookPath("wezterm")
 	return err == nil
 }
 
-// Name returns terminal identifier.
+// Name は terminal 識別子を返す。
 func (w *WezTerminal) Name() string {
 	return "wezterm"
 }
 
 func mapWeztermExecError(err error) error {
+	// 実行ファイル未検出は呼び出し側で扱いやすい共通エラーへ変換する。
 	if errors.Is(err, exec.ErrNotFound) {
 		return fmt.Errorf("%w: %v", ErrTerminalNotFound, err)
 	}
@@ -111,6 +113,7 @@ func jsonValueToString(raw json.RawMessage) (string, error) {
 
 	var i int64
 	if err := json.Unmarshal(raw, &i); err == nil {
+		// 数値 ID は内部表現をそろえるため文字列へ正規化する。
 		return strconv.FormatInt(i, 10), nil
 	}
 

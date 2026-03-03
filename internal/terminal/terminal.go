@@ -2,19 +2,19 @@ package terminal
 
 import "errors"
 
-// Terminal defines the interface for terminal integrations.
+// Terminal は各ターミナル実装で共通利用するインターフェースを定義する。
 type Terminal interface {
-	// ListPanes returns all available panes in the terminal.
+	// ListPanes はターミナル上の全ペイン情報を返す。
 	ListPanes() ([]Pane, error)
-	// FocusPane focuses the pane identified by paneID.
+	// FocusPane は指定 paneID のペインをアクティブにする。
 	FocusPane(paneID string) error
-	// IsAvailable reports whether the terminal is accessible.
+	// IsAvailable はターミナルが利用可能かを返す。
 	IsAvailable() bool
-	// Name returns the terminal identifier (e.g., "wezterm").
+	// Name はターミナル識別子（例: "wezterm"）を返す。
 	Name() string
 }
 
-// Pane represents a terminal pane or tab.
+// Pane はターミナルのペイン（タブ情報含む）を表す。
 type Pane struct {
 	ID         string `json:"pane_id"`
 	Title      string `json:"title"`
@@ -22,7 +22,7 @@ type Pane struct {
 	WorkingDir string `json:"cwd"`
 }
 
-// Sentinel errors returned by Terminal implementations.
+// Terminal 実装が返す代表的なエラー。
 var (
 	ErrTerminalNotFound = errors.New("terminal not found")
 	ErrPaneNotFound     = errors.New("pane not found")

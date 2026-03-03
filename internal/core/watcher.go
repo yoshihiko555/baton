@@ -15,7 +15,7 @@ import (
 
 const debounceDuration = 200 * time.Millisecond
 
-// Watcher watches session files and emits normalized events.
+// Watcher はセッションファイルを監視し、正規化したイベントを配信する。
 type Watcher struct {
 	watcher        *fsnotify.Watcher
 	basePath       string
@@ -26,7 +26,7 @@ type Watcher struct {
 	stopOnce       sync.Once
 }
 
-// NewWatcher creates a new file watcher rooted at basePath.
+// NewWatcher は basePath 配下を監視する Watcher を生成する。
 func NewWatcher(basePath string) (*Watcher, error) {
 	absBasePath, err := filepath.Abs(basePath)
 	if err != nil {
@@ -55,7 +55,7 @@ func NewWatcher(basePath string) (*Watcher, error) {
 	}, nil
 }
 
-// Start starts file watching and initial discovery.
+// Start は監視開始と初期探索イベントの送出を行う。
 func (w *Watcher) Start(ctx context.Context) error {
 	if err := w.addRecursive(w.basePath); err != nil {
 		return err
@@ -115,7 +115,7 @@ func (w *Watcher) Start(ctx context.Context) error {
 					continue
 				}
 
-				captured := watchEvent // capture loop variable for closure
+				captured := watchEvent // クロージャで参照するためループ変数を退避する
 				key := captured.Type.String() + ":" + filepath.ToSlash(captured.Path)
 				w.debounce(key, func() {
 					select {
@@ -138,7 +138,8 @@ func (w *Watcher) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops file watching and pending debounce timers. Safe to call multiple times.
+// Stop は監視と保留中デバウンスタイマーを停止する。
+// 複数回呼び出しても安全。
 func (w *Watcher) Stop() {
 	w.stopOnce.Do(func() {
 		close(w.done)
@@ -155,12 +156,12 @@ func (w *Watcher) Stop() {
 	})
 }
 
-// Events returns a read-only event channel.
+// Events は読み取り専用イベントチャネルを返す。
 func (w *Watcher) Events() <-chan WatchEvent {
 	return w.events
 }
 
-// DiscoverProjects discovers project directories that contain session files.
+// DiscoverProjects はセッションファイルを含むプロジェクトディレクトリを列挙する。
 func (w *Watcher) DiscoverProjects() ([]string, error) {
 	entries, err := os.ReadDir(w.basePath)
 	if err != nil {
@@ -188,7 +189,7 @@ func (w *Watcher) DiscoverProjects() ([]string, error) {
 	return projects, nil
 }
 
-// DiscoverSessions discovers session IDs under a project path.
+// DiscoverSessions はプロジェクト配下のセッション ID を列挙する。
 func (w *Watcher) DiscoverSessions(projectPath string) ([]string, error) {
 	absProjectPath, err := filepath.Abs(projectPath)
 	if err != nil {
@@ -231,6 +232,7 @@ func (w *Watcher) DiscoverSessions(projectPath string) ([]string, error) {
 func (w *Watcher) debounce(key string, fn func()) {
 	w.mu.Lock()
 	if existing, ok := w.debounceTimers[key]; ok {
+		// 同一キーの既存タイマーを止め、最後のイベントのみを残す。
 		existing.Stop()
 	}
 
@@ -266,6 +268,7 @@ func (w *Watcher) pathToWatchEvent(filePath string, op fsnotify.Op) (WatchEvent,
 	}
 	relPath = filepath.ToSlash(relPath)
 	if relPath == "." || relPath == ".." || strings.HasPrefix(relPath, "../") {
+		// basePath 外や無効相対パスは無視する。
 		return WatchEvent{}, false
 	}
 	if !isSessionFile(relPath) {
@@ -274,6 +277,7 @@ func (w *Watcher) pathToWatchEvent(filePath string, op fsnotify.Op) (WatchEvent,
 
 	segments := strings.Split(relPath, "/")
 	if len(segments) < 2 {
+		// <project>/<session-file> 形式でないパスは対象外。
 		return WatchEvent{}, false
 	}
 
@@ -319,6 +323,7 @@ func (w *Watcher) addRecursive(root string) error {
 }
 
 func opToWatchEventType(op fsnotify.Op) (WatchEventType, bool) {
+	// Rename は実体的には削除扱いとして集約側で処理する。
 	switch {
 	case op&(fsnotify.Remove|fsnotify.Rename) != 0:
 		return Removed, true

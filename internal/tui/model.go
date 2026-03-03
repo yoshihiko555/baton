@@ -19,24 +19,24 @@ const (
 	defaultListHeight = 16
 )
 
-// TickMsg is emitted when the periodic refresh timer fires.
+// TickMsg は定期リフレッシュタイマー発火時に送られる。
 type TickMsg struct{}
 
-// StateUpdateMsg carries the latest project snapshot.
+// StateUpdateMsg は最新のプロジェクト一覧スナップショットを運ぶ。
 type StateUpdateMsg []core.Project
 
-// ErrMsg carries an async command error.
+// ErrMsg は非同期コマンドで発生したエラーを運ぶ。
 type ErrMsg error
 
-// WatchEventMsg carries a file watcher event.
+// WatchEventMsg はファイル監視イベントを運ぶ。
 type WatchEventMsg core.WatchEvent
 
-// ProjectItem represents a project row in the project list.
+// ProjectItem はプロジェクト一覧の1行を表す。
 type ProjectItem struct {
 	Project core.Project
 }
 
-// Title returns the list title for the project row.
+// Title はプロジェクト行のタイトル文字列を返す。
 func (i ProjectItem) Title() string {
 	if i.Project.DisplayName != "" {
 		return i.Project.DisplayName
@@ -44,27 +44,27 @@ func (i ProjectItem) Title() string {
 	return i.Project.Path
 }
 
-// Description returns the list description for the project row.
+// Description はプロジェクト行の補足説明文字列を返す。
 func (i ProjectItem) Description() string {
 	return fmt.Sprintf("sessions: %d / active: %d", len(i.Project.Sessions), i.Project.ActiveCount)
 }
 
-// FilterValue returns searchable text for the project row.
+// FilterValue はプロジェクト行の検索対象文字列を返す。
 func (i ProjectItem) FilterValue() string {
 	return strings.Join([]string{i.Project.DisplayName, i.Project.Path}, " ")
 }
 
-// SessionItem represents a session row in the session list.
+// SessionItem はセッション一覧の1行を表す。
 type SessionItem struct {
 	Session core.Session
 }
 
-// Title returns the list title for the session row.
+// Title はセッション行のタイトル文字列を返す。
 func (i SessionItem) Title() string {
 	return i.Session.ID
 }
 
-// Description returns the list description for the session row.
+// Description はセッション行の補足説明文字列を返す。
 func (i SessionItem) Description() string {
 	if i.Session.LastActivity.IsZero() {
 		return i.Session.State.String()
@@ -73,12 +73,12 @@ func (i SessionItem) Description() string {
 	return fmt.Sprintf("%s / %s", i.Session.State.String(), i.Session.LastActivity.Format(time.RFC3339))
 }
 
-// FilterValue returns searchable text for the session row.
+// FilterValue はセッション行の検索対象文字列を返す。
 func (i SessionItem) FilterValue() string {
 	return strings.Join([]string{i.Session.ID, i.Session.ProjectPath, i.Session.State.String()}, " ")
 }
 
-// Model is the root Bubble Tea model for the TUI.
+// Model は TUI 全体を表す Bubble Tea のルートモデル。
 type Model struct {
 	projectList list.Model
 	sessionList list.Model
@@ -96,7 +96,7 @@ type Model struct {
 	selectedProject string
 }
 
-// NewModel creates a new TUI model with default list delegates.
+// NewModel はデフォルト delegate を使って TUI モデルを初期化する。
 func NewModel(
 	stateReader core.StateReader,
 	stateWriter core.StateWriter,
@@ -121,7 +121,7 @@ func NewModel(
 	}
 }
 
-// Init implements tea.Model.
+// Init は tea.Model の初期コマンドを返す。
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		tickCmd(m.config.RefreshInterval),
@@ -131,6 +131,7 @@ func (m Model) Init() tea.Cmd {
 
 func tickCmd(interval time.Duration) tea.Cmd {
 	if interval <= 0 {
+		// 無効値が来た場合のフォールバック
 		interval = time.Second
 	}
 

@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config represents baton runtime configuration loaded from YAML.
+// Config は YAML から読み込む baton の実行時設定を表す。
 type Config struct {
 	WatchPath        string        `yaml:"watch_path"`
 	StatusOutputPath string        `yaml:"status_output_path"`
@@ -20,7 +20,7 @@ type Config struct {
 	LogLevel         string        `yaml:"log_level"`
 }
 
-// Default returns the default configuration values.
+// Default はデフォルト設定値を返す。
 func Default() Config {
 	return Config{
 		WatchPath:        "~/.claude/projects",
@@ -31,8 +31,9 @@ func Default() Config {
 	}
 }
 
-// Load reads the YAML configuration file and merges it with defaults.
+// Load は YAML 設定ファイルを読み込み、デフォルト設定に上書きして返す。
 func Load(path string) (Config, error) {
+	// まずデフォルト値を起点にし、指定された値だけを上書きする。
 	cfg := Default()
 
 	if path != "" {
@@ -41,6 +42,7 @@ func Load(path string) (Config, error) {
 			if !errors.Is(err, os.ErrNotExist) {
 				return Config{}, fmt.Errorf("read config %q: %w", path, err)
 			}
+			// 設定ファイルが存在しない場合はデフォルト値を使って続行する。
 		} else if len(strings.TrimSpace(string(data))) > 0 {
 			var loaded Config
 			if err := yaml.Unmarshal(data, &loaded); err != nil {
@@ -50,6 +52,7 @@ func Load(path string) (Config, error) {
 		}
 	}
 
+	// "~" や "~/" を実際のホームディレクトリへ展開する。
 	var err error
 	cfg.WatchPath, err = expandHome(cfg.WatchPath)
 	if err != nil {
@@ -63,6 +66,7 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
+// mergeConfig は非ゼロ値のみで base を上書きする。
 func mergeConfig(base *Config, override Config) {
 	if override.WatchPath != "" {
 		base.WatchPath = override.WatchPath
@@ -81,6 +85,7 @@ func mergeConfig(base *Config, override Config) {
 	}
 }
 
+// expandHome は "~" プレフィックスをユーザーホームへ展開する。
 func expandHome(path string) (string, error) {
 	if path == "" {
 		return path, nil

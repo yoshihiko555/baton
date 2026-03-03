@@ -10,6 +10,7 @@ import (
 )
 
 func TestStateManagerInitialScan(t *testing.T) {
+	// 初期スキャンで複数プロジェクト/ネストセッションを正しく集約できることを確認する。
 	baseDir := t.TempDir()
 	projectAPath := filepath.Join(baseDir, "project-a")
 	projectBPath := filepath.Join(baseDir, "project-b")
@@ -81,6 +82,7 @@ func TestStateManagerInitialScan(t *testing.T) {
 }
 
 func TestStateManagerHandleEvent(t *testing.T) {
+	// Modified/Created/Removed の各イベントが状態へ反映されることを確認する。
 	baseDir := t.TempDir()
 	projectPath := filepath.Join(baseDir, "project-a")
 	session1Path := filepath.Join(projectPath, "session-1.jsonl")
@@ -165,6 +167,7 @@ func TestStateManagerHandleEvent(t *testing.T) {
 }
 
 func TestStateManagerGetProjects(t *testing.T) {
+	// GetProjects がソート済みかつ防御的コピーを返すことを確認する。
 	baseDir := t.TempDir()
 	projectAPath := filepath.Join(baseDir, "project-a")
 	projectBPath := filepath.Join(baseDir, "project-b")
@@ -220,6 +223,7 @@ func TestStateManagerGetProjects(t *testing.T) {
 }
 
 func TestStateManagerGetStatus(t *testing.T) {
+	// GetStatus が現在時刻と最新プロジェクト一覧を返すことを確認する。
 	baseDir := t.TempDir()
 	projectPath := filepath.Join(baseDir, "project-a")
 

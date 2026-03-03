@@ -8,6 +8,7 @@ import (
 )
 
 func TestDefault(t *testing.T) {
+	// デフォルト値が意図した固定値になっていることを確認する。
 	got := Default()
 
 	if got.WatchPath != "~/.claude/projects" {
@@ -28,6 +29,7 @@ func TestDefault(t *testing.T) {
 }
 
 func TestLoadValidYAML(t *testing.T) {
+	// 全項目を指定した YAML から正しく読み込めることを確認する。
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	content := `watch_path: ~/custom/projects
@@ -68,6 +70,7 @@ log_level: debug
 }
 
 func TestLoadPartialYAML(t *testing.T) {
+	// 一部項目のみ指定した場合、未指定項目はデフォルト値が維持されることを確認する。
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	content := `terminal: alacritty
@@ -105,6 +108,7 @@ status_output_path: ~/tmp/baton-status.json
 }
 
 func TestLoadMissingYAML(t *testing.T) {
+	// 設定ファイルが存在しない場合でもエラーにせずデフォルト値を返すことを確認する。
 	path := filepath.Join(t.TempDir(), "not-found.yaml")
 
 	got, err := Load(path)
@@ -135,6 +139,7 @@ func TestLoadMissingYAML(t *testing.T) {
 }
 
 func TestExpandHome(t *testing.T) {
+	// "~" 展開ルールをテーブル駆動で検証する。
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatalf("UserHomeDir failed: %v", err)

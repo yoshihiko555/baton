@@ -5,21 +5,21 @@ import (
 	"time"
 )
 
-// SessionState represents the current state of a session.
+// SessionState はセッションの現在状態を表す。
 type SessionState int
 
 const (
-	// Idle means the session is not doing any work.
+	// Idle は作業していない状態。
 	Idle SessionState = iota
-	// Thinking means the session is currently reasoning.
+	// Thinking は推論中の状態。
 	Thinking
-	// ToolUse means the session is currently using a tool.
+	// ToolUse はツール実行中の状態。
 	ToolUse
-	// Error means the session is in an error state.
+	// Error はエラー状態。
 	Error
 )
 
-// String returns the string representation of the session state.
+// String は SessionState の文字列表現を返す。
 func (s SessionState) String() string {
 	switch s {
 	case Idle:
@@ -35,12 +35,12 @@ func (s SessionState) String() string {
 	}
 }
 
-// MarshalJSON marshals the session state as a quoted string.
+// MarshalJSON は状態値を JSON 文字列として出力する。
 func (s SessionState) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.String())
 }
 
-// Entry represents a raw session entry from the stream.
+// Entry は JSONL ストリームの1レコードを表す。
 type Entry struct {
 	Type      string          `json:"type"`
 	Role      string          `json:"role,omitempty"`
@@ -48,7 +48,7 @@ type Entry struct {
 	Raw       json.RawMessage `json:"-"`
 }
 
-// Session represents an AI monitor session.
+// Session は監視対象となる1セッションの集約情報。
 type Session struct {
 	ID           string       `json:"id"`
 	ProjectPath  string       `json:"project_path"`
@@ -58,7 +58,7 @@ type Session struct {
 	FilePath     string       `json:"-"`
 }
 
-// Project represents sessions grouped by project.
+// Project はプロジェクト単位にまとめたセッション情報。
 type Project struct {
 	Path        string     `json:"path"`
 	DisplayName string     `json:"display_name"`
@@ -66,25 +66,25 @@ type Project struct {
 	ActiveCount int        `json:"active_count"`
 }
 
-// StatusOutput represents the status response payload.
+// StatusOutput は外部出力向けのステータスペイロード。
 type StatusOutput struct {
 	Projects  []Project `json:"projects"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// WatchEventType represents the type of file watch event.
+// WatchEventType はファイル監視イベント種別を表す。
 type WatchEventType int
 
 const (
-	// Created indicates a new session file was created.
+	// Created は新規セッションファイル作成を表す。
 	Created WatchEventType = iota
-	// Modified indicates a session file was modified.
+	// Modified はセッションファイル更新を表す。
 	Modified
-	// Removed indicates a session file was removed.
+	// Removed はセッションファイル削除を表す。
 	Removed
 )
 
-// String returns the string representation of a watch event type.
+// String は WatchEventType の文字列表現を返す。
 func (t WatchEventType) String() string {
 	switch t {
 	case Created:
@@ -98,7 +98,7 @@ func (t WatchEventType) String() string {
 	}
 }
 
-// WatchEvent represents a session file watch event.
+// WatchEvent は正規化済みのファイル監視イベントを表す。
 type WatchEvent struct {
 	Type        WatchEventType
 	Path        string
@@ -106,18 +106,18 @@ type WatchEvent struct {
 	SessionID   string
 }
 
-// StateReader provides read-only access to aggregated state.
+// StateReader は集約済み状態への読み取り専用アクセスを定義する。
 type StateReader interface {
 	GetProjects() []Project
 	GetStatus() StatusOutput
 }
 
-// StateWriter provides write access to aggregated state.
+// StateWriter は集約済み状態への更新操作を定義する。
 type StateWriter interface {
 	HandleEvent(event WatchEvent) error
 }
 
-// EventSource provides a read-only channel of watch events.
+// EventSource は監視イベントの読み取り専用チャネルを提供する。
 type EventSource interface {
 	Events() <-chan WatchEvent
 }
