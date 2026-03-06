@@ -50,3 +50,5 @@ baton
 # Environment variables
 .env
 .env.local
+.cocoindex_code/cocoindex.db/mdb/data.mdb
+.cocoindex_code/cocoindex.db/mdb/lock.mdb

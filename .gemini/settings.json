@@ -3,7 +3,10 @@
     "name": "gemini-3.1-pro-preview"
   },
   "context": {
-    "fileName": ["GEMINI.md", "AGENTS.md"],
+    "fileName": [
+      "GEMINI.md",
+      "AGENTS.md"
+    ],
     "discoveryMaxDirs": 200,
     "fileFiltering": {
       "respectGitIgnore": true,
@@ -20,5 +23,16 @@
   },
   "skills": {
     "disabled": []
+  },
+  "mcpServers": {
+    "cocoindex-code": {
+      "command": "uvx",
+      "args": [
+        "--prerelease=explicit",
+        "--with",
+        "cocoindex>=1.0.0a16",
+        "cocoindex-code@latest"
+      ]
+    }
   }
 }
