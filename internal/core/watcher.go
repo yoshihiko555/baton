@@ -61,34 +61,6 @@ func (w *Watcher) Start(ctx context.Context) error {
 		return err
 	}
 
-	if err := filepath.Walk(w.basePath, func(filePath string, info os.FileInfo, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-
-		watchEvent, ok := w.pathToWatchEvent(filePath, fsnotify.Create)
-		if !ok {
-			return nil
-		}
-
-		select {
-		case <-w.done:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		case w.events <- watchEvent:
-			return nil
-		}
-	}); err != nil {
-		return err
-	}
-
 	go func() {
 		for {
 			select {

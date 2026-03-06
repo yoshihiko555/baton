@@ -87,16 +87,16 @@ func run() error {
 		}
 	}()
 
-	if err := watcher.Start(ctx); err != nil {
-		return fmt.Errorf("start watcher: %w", err)
-	}
-
 	if err := stateManager.InitialScan(); err != nil {
 		log.Printf("initial scan warning: %v", err)
 	}
 
 	if *once {
 		return nil
+	}
+
+	if err := watcher.Start(ctx); err != nil {
+		return fmt.Errorf("start watcher: %w", err)
 	}
 
 	if *noTUI {
