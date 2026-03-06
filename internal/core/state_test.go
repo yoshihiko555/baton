@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -323,4 +324,305 @@ func mustRFC3339(t *testing.T, value string) time.Time {
 		t.Fatalf("parse time %q: %v", value, err)
 	}
 	return parsed
+}
+
+func TestStateManagerInitialScanNilWatcher(t *testing.T) {
+	manager := NewStateManager(nil)
+	err := manager.InitialScan()
+	if err == nil {
+		t.Fatal("expected error for nil watcher")
+	}
+}
+
+func TestStateManagerHandleEventDefaultType(t *testing.T) {
+	baseDir := t.TempDir()
+	watcher, err := NewWatcher(baseDir)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	t.Cleanup(watcher.Stop)
+
+	manager := NewStateManager(watcher)
+
+	// 未知イベントタイプは無視される。
+	err = manager.HandleEvent(WatchEvent{
+		Type:        WatchEventType(999),
+		Path:        "/tmp/dummy.jsonl",
+		ProjectPath: "/tmp/project",
+		SessionID:   "s1",
+	})
+	if err != nil {
+		t.Fatalf("expected no error for unknown event type, got %v", err)
+	}
+}
+
+func TestStateManagerHandleEventRemovedEmptyPath(t *testing.T) {
+	baseDir := t.TempDir()
+	projectPath := filepath.Join(baseDir, "project-a")
+	sessionPath := filepath.Join(projectPath, "session-1.jsonl")
+	writeJSONL(t, sessionPath, `{"type":"thinking","role":"assistant"}`)
+
+	watcher, err := NewWatcher(baseDir)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	t.Cleanup(watcher.Stop)
+
+	manager := NewStateManager(watcher)
+	if err := manager.InitialScan(); err != nil {
+		t.Fatalf("InitialScan: %v", err)
+	}
+
+	// 空パスでの Removed イベント。
+	err = manager.HandleEvent(WatchEvent{
+		Type:        Removed,
+		Path:        "",
+		ProjectPath: projectPath,
+		SessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+
+	projects := manager.GetProjects()
+	if len(projects) != 0 {
+		t.Errorf("expected 0 projects after remove, got %d", len(projects))
+	}
+}
+
+func TestStateManagerHandleEventCreatedEmptyPath(t *testing.T) {
+	baseDir := t.TempDir()
+	projectPath := filepath.Join(baseDir, "project-a")
+	sessionPath := filepath.Join(projectPath, "session-1.jsonl")
+	writeJSONL(t, sessionPath, `{"type":"thinking","role":"assistant"}`)
+
+	watcher, err := NewWatcher(baseDir)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	t.Cleanup(watcher.Stop)
+
+	manager := NewStateManager(watcher)
+
+	// Path 空で Created イベント → resolveSessionFilePath で解決される。
+	err = manager.HandleEvent(WatchEvent{
+		Type:        Created,
+		Path:        "",
+		ProjectPath: projectPath,
+		SessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("HandleEvent: %v", err)
+	}
+
+	projects := manager.GetProjects()
+	if len(projects) != 1 {
+		t.Fatalf("expected 1 project, got %d", len(projects))
+	}
+}
+
+func TestStateManagerHandleEventCreatedNonExistPath(t *testing.T) {
+	baseDir := t.TempDir()
+	projectPath := filepath.Join(baseDir, "project-a")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	watcher, err := NewWatcher(baseDir)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	t.Cleanup(watcher.Stop)
+
+	manager := NewStateManager(watcher)
+
+	// 存在しないセッションファイルへの Created イベント。
+	err = manager.HandleEvent(WatchEvent{
+		Type:        Created,
+		Path:        "",
+		ProjectPath: projectPath,
+		SessionID:   "nonexistent",
+	})
+	if err != nil {
+		t.Fatalf("expected nil error for non-existent session, got %v", err)
+	}
+}
+
+func TestLatestEntryCreatedAt(t *testing.T) {
+	t1 := mustRFC3339(t, "2026-03-01T10:00:00Z")
+	t2 := mustRFC3339(t, "2026-03-01T11:00:00Z")
+
+	tests := []struct {
+		name    string
+		entries []*Entry
+		want    time.Time
+	}{
+		{"empty", []*Entry{}, time.Time{}},
+		{"all nil", []*Entry{nil, nil}, time.Time{}},
+		{"all zero time", []*Entry{{Type: "thinking"}}, time.Time{}},
+		{"last has time", []*Entry{{CreatedAt: t1}, {CreatedAt: t2}}, t2},
+		{"only first has time", []*Entry{{CreatedAt: t1}, {Type: "thinking"}}, t1},
+		{"nil entries mixed", []*Entry{nil, {CreatedAt: t1}, nil}, t1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := latestEntryCreatedAt(tc.entries)
+			if !got.Equal(tc.want) {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRefreshActiveCountNilSession(t *testing.T) {
+	project := &Project{
+		Sessions: []*Session{
+			{ID: "s1", State: Thinking},
+			nil,
+			{ID: "s2", State: Idle},
+			{ID: "s3", State: ToolUse},
+		},
+	}
+
+	refreshActiveCount(project)
+	if project.ActiveCount != 2 {
+		t.Errorf("ActiveCount = %d, want 2", project.ActiveCount)
+	}
+}
+
+func TestResolveSessionFilePath(t *testing.T) {
+	dir := t.TempDir()
+	projectPath := filepath.Join(dir, "project")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// jsonl ファイルがある場合。
+	jsonlPath := filepath.Join(projectPath, "session-1.jsonl")
+	if err := os.WriteFile(jsonlPath, []byte("{}"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	resolved, err := resolveSessionFilePath(projectPath, "session-1")
+	if err != nil {
+		t.Fatalf("resolveSessionFilePath: %v", err)
+	}
+	if resolved != jsonlPath {
+		t.Errorf("got %q, want %q", resolved, jsonlPath)
+	}
+
+	// json ファイルのみの場合。
+	jsonPath := filepath.Join(projectPath, "session-2.json")
+	if err := os.WriteFile(jsonPath, []byte("{}"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	resolved, err = resolveSessionFilePath(projectPath, "session-2")
+	if err != nil {
+		t.Fatalf("resolveSessionFilePath: %v", err)
+	}
+	if resolved != jsonPath {
+		t.Errorf("got %q, want %q", resolved, jsonPath)
+	}
+
+	// 存在しない場合。
+	_, err = resolveSessionFilePath(projectPath, "nonexistent")
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected ErrNotExist, got %v", err)
+	}
+
+	// ディレクトリと同名の場合はスキップされる。
+	dirAsSession := filepath.Join(projectPath, "session-dir.jsonl")
+	if err := os.MkdirAll(dirAsSession, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	_, err = resolveSessionFilePath(projectPath, "session-dir")
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected ErrNotExist for directory, got %v", err)
+	}
+}
+
+func TestRemoveSessionByPath(t *testing.T) {
+	baseDir := t.TempDir()
+	projectPath := filepath.Join(baseDir, "project-a")
+	session1Path := filepath.Join(projectPath, "session-1.jsonl")
+	session2Path := filepath.Join(projectPath, "session-2.jsonl")
+
+	writeJSONL(t, session1Path, `{"type":"thinking"}`)
+	writeJSONL(t, session2Path, `{"type":"idle"}`)
+
+	watcher, err := NewWatcher(baseDir)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	t.Cleanup(watcher.Stop)
+
+	manager := NewStateManager(watcher)
+	if err := manager.InitialScan(); err != nil {
+		t.Fatalf("InitialScan: %v", err)
+	}
+
+	// sessionID 空 + sessionPath でマッチして削除。
+	manager.removeSession(projectPath, "", session1Path)
+
+	projects := manager.GetProjects()
+	project := mustProject(t, projects, projectPath)
+	if len(project.Sessions) != 1 {
+		t.Fatalf("expected 1 session after remove, got %d", len(project.Sessions))
+	}
+	if project.Sessions[0].ID != "session-2" {
+		t.Errorf("remaining session = %q, want session-2", project.Sessions[0].ID)
+	}
+}
+
+func TestRemoveSessionLastSessionDeletesProject(t *testing.T) {
+	baseDir := t.TempDir()
+	projectPath := filepath.Join(baseDir, "project-a")
+	sessionPath := filepath.Join(projectPath, "session-1.jsonl")
+
+	writeJSONL(t, sessionPath, `{"type":"thinking"}`)
+
+	watcher, err := NewWatcher(baseDir)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	t.Cleanup(watcher.Stop)
+
+	manager := NewStateManager(watcher)
+	if err := manager.InitialScan(); err != nil {
+		t.Fatalf("InitialScan: %v", err)
+	}
+
+	_ = manager.HandleEvent(WatchEvent{
+		Type:        Removed,
+		Path:        sessionPath,
+		ProjectPath: projectPath,
+		SessionID:   "session-1",
+	})
+
+	projects := manager.GetProjects()
+	if len(projects) != 0 {
+		t.Errorf("expected 0 projects after removing last session, got %d", len(projects))
+	}
+}
+
+func TestRemoveSessionNonExistentProject(t *testing.T) {
+	baseDir := t.TempDir()
+	watcher, err := NewWatcher(baseDir)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	t.Cleanup(watcher.Stop)
+
+	manager := NewStateManager(watcher)
+
+	// 存在しないプロジェクトの削除はパニックしない。
+	manager.removeSession("/nonexistent", "s1", "/nonexistent/s1.jsonl")
+}
+
+func TestIncrementalReaderResetNilOffsets(t *testing.T) {
+	r := &IncrementalReader{offsets: nil}
+	// nil offsets で Reset してもパニックしない。
+	r.Reset("/some/path")
 }

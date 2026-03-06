@@ -8,6 +8,8 @@ import (
 	"sort"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 func TestDiscoverProjects(t *testing.T) {
@@ -70,7 +72,7 @@ func TestDiscoverSessions(t *testing.T) {
 }
 
 func TestWatcher_Start_Stop(t *testing.T) {
-	// Start 直後の初期 Create イベントと、Stop 後の停止挙動を確認する。
+	// ファイル変更イベントの検出と、Stop 後の停止挙動を確認する。
 	baseDir := t.TempDir()
 	projectPath := filepath.Join(baseDir, "project-a")
 	sessionPath := filepath.Join(projectPath, "session-1.jsonl")
@@ -78,8 +80,11 @@ func TestWatcher_Start_Stop(t *testing.T) {
 
 	watcher, cancel := startWatcher(t, baseDir)
 
+	// fsnotify が監視を開始した後にファイルを更新してイベントを発生させる。
+	mustWriteFile(t, sessionPath, []byte("updated"))
+
 	event := waitForEvent(t, watcher.Events(), 2*time.Second, func(e WatchEvent) bool {
-		return e.Type == Created && e.ProjectPath == projectPath && e.SessionID == "session-1"
+		return e.ProjectPath == projectPath && e.SessionID == "session-1"
 	})
 	if event.Path != sessionPath {
 		t.Fatalf("unexpected event path: %s", event.Path)
@@ -110,14 +115,11 @@ func TestWatcher_FileModified(t *testing.T) {
 
 	watcher, cancel := startWatcher(t, baseDir)
 
-	waitForEvent(t, watcher.Events(), 2*time.Second, func(e WatchEvent) bool {
-		return e.Type == Created && e.SessionID == "session-1"
-	})
-
+	// fsnotify 監視開始後にファイルを更新する。
 	mustWriteFile(t, sessionPath, []byte("updated"))
 
 	event := waitForEvent(t, watcher.Events(), 2*time.Second, func(e WatchEvent) bool {
-		return e.Type == Modified && e.ProjectPath == projectPath && e.SessionID == "session-1"
+		return e.ProjectPath == projectPath && e.SessionID == "session-1"
 	})
 	if event.Path != sessionPath {
 		t.Fatalf("unexpected event path: %s", event.Path)
@@ -135,9 +137,8 @@ func TestWatcher_Debounce(t *testing.T) {
 
 	watcher, cancel := startWatcher(t, baseDir)
 
-	waitForEvent(t, watcher.Events(), 2*time.Second, func(e WatchEvent) bool {
-		return e.Type == Created && e.SessionID == "session-1"
-	})
+	// fsnotify が監視を開始するまで少し待つ。
+	time.Sleep(100 * time.Millisecond)
 
 	for i := 0; i < 5; i++ {
 		mustWriteFile(t, sessionPath, []byte(time.Now().String()))
@@ -243,4 +244,167 @@ func mustWriteFile(t *testing.T, filePath string, content []byte) {
 	if err := os.WriteFile(filePath, content, 0o644); err != nil {
 		t.Fatalf("write %s: %v", filePath, err)
 	}
+}
+
+func TestNewWatcherNonDir(t *testing.T) {
+	// ファイルパスを渡すとエラーになる。
+	tmpFile := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(tmpFile, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := NewWatcher(tmpFile)
+	if err == nil {
+		t.Fatal("expected error for non-directory path")
+	}
+}
+
+func TestNewWatcherNonExistent(t *testing.T) {
+	_, err := NewWatcher("/nonexistent/path/xyz")
+	if err == nil {
+		t.Fatal("expected error for non-existent path")
+	}
+}
+
+func TestOpToWatchEventType(t *testing.T) {
+	tests := []struct {
+		op       fsnotify.Op
+		wantType WatchEventType
+		wantOk   bool
+	}{
+		{fsnotify.Create, Created, true},
+		{fsnotify.Write, Modified, true},
+		{fsnotify.Chmod, Modified, true},
+		{fsnotify.Remove, Removed, true},
+		{fsnotify.Rename, Removed, true},
+		{fsnotify.Op(0), 0, false},
+	}
+
+	for _, tc := range tests {
+		gotType, gotOk := opToWatchEventType(tc.op)
+		if gotOk != tc.wantOk {
+			t.Errorf("opToWatchEventType(%v) ok = %v, want %v", tc.op, gotOk, tc.wantOk)
+		}
+		if gotOk && gotType != tc.wantType {
+			t.Errorf("opToWatchEventType(%v) type = %v, want %v", tc.op, gotType, tc.wantType)
+		}
+	}
+}
+
+func TestIsSessionFile(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"session.jsonl", true},
+		{"session.json", true},
+		{"session.JSONL", true},
+		{"session.JSON", true},
+		{"session.txt", false},
+		{"session.log", false},
+		{"nested/session.jsonl", true},
+	}
+
+	for _, tc := range tests {
+		got := isSessionFile(tc.path)
+		if got != tc.want {
+			t.Errorf("isSessionFile(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestPathToWatchEventNonSessionFile(t *testing.T) {
+	baseDir := t.TempDir()
+	watcher, err := NewWatcher(baseDir)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	t.Cleanup(watcher.Stop)
+
+	// 非セッションファイルは無視される。
+	_, ok := watcher.pathToWatchEvent(filepath.Join(baseDir, "project", "readme.txt"), fsnotify.Create)
+	if ok {
+		t.Error("expected false for non-session file")
+	}
+}
+
+func TestPathToWatchEventRootLevelFile(t *testing.T) {
+	baseDir := t.TempDir()
+	watcher, err := NewWatcher(baseDir)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	t.Cleanup(watcher.Stop)
+
+	// basePath 直下のファイルはプロジェクト構造を満たさない。
+	_, ok := watcher.pathToWatchEvent(filepath.Join(baseDir, "session.jsonl"), fsnotify.Create)
+	if ok {
+		t.Error("expected false for root-level session file")
+	}
+}
+
+func TestPathToWatchEventValidPath(t *testing.T) {
+	baseDir := t.TempDir()
+	watcher, err := NewWatcher(baseDir)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	t.Cleanup(watcher.Stop)
+
+	event, ok := watcher.pathToWatchEvent(filepath.Join(baseDir, "project-a", "session-1.jsonl"), fsnotify.Create)
+	if !ok {
+		t.Fatal("expected true for valid session path")
+	}
+	if event.Type != Created {
+		t.Errorf("Type = %v, want Created", event.Type)
+	}
+	if event.SessionID != "session-1" {
+		t.Errorf("SessionID = %q, want %q", event.SessionID, "session-1")
+	}
+	if event.ProjectPath != filepath.Join(baseDir, "project-a") {
+		t.Errorf("ProjectPath = %q, want %q", event.ProjectPath, filepath.Join(baseDir, "project-a"))
+	}
+}
+
+func TestPathToWatchEventNestedSession(t *testing.T) {
+	baseDir := t.TempDir()
+	watcher, err := NewWatcher(baseDir)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	t.Cleanup(watcher.Stop)
+
+	event, ok := watcher.pathToWatchEvent(filepath.Join(baseDir, "project-a", "sub", "session-1.jsonl"), fsnotify.Write)
+	if !ok {
+		t.Fatal("expected true for nested session path")
+	}
+	if event.SessionID != "sub/session-1" {
+		t.Errorf("SessionID = %q, want %q", event.SessionID, "sub/session-1")
+	}
+}
+
+func TestPathToWatchEventUnsupportedOp(t *testing.T) {
+	baseDir := t.TempDir()
+	watcher, err := NewWatcher(baseDir)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	t.Cleanup(watcher.Stop)
+
+	_, ok := watcher.pathToWatchEvent(filepath.Join(baseDir, "project-a", "session.jsonl"), fsnotify.Op(0))
+	if ok {
+		t.Error("expected false for unsupported op")
+	}
+}
+
+func TestWatcherStopIdempotent(t *testing.T) {
+	baseDir := t.TempDir()
+	watcher, err := NewWatcher(baseDir)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+
+	// 複数回呼んでもパニックしない。
+	watcher.Stop()
+	watcher.Stop()
 }

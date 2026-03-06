@@ -1,6 +1,8 @@
 package terminal
 
 import (
+	"errors"
+	"os/exec"
 	"reflect"
 	"testing"
 )
@@ -73,5 +75,150 @@ func TestName(t *testing.T) {
 	wez := NewWezTerminal()
 	if got, want := wez.Name(), "wezterm"; got != want {
 		t.Fatalf("unexpected terminal name: got=%q want=%q", got, want)
+	}
+}
+
+func TestNewWezTerminalExecFn(t *testing.T) {
+	wez := NewWezTerminal()
+	if wez == nil {
+		t.Fatal("NewWezTerminal returned nil")
+	}
+	if wez.execFn == nil {
+		t.Fatal("execFn should be set")
+	}
+}
+
+func TestListPanesNilExecFn(t *testing.T) {
+	wez := &WezTerminal{execFn: nil}
+	_, err := wez.ListPanes()
+	if err == nil {
+		t.Fatal("expected error for nil execFn")
+	}
+}
+
+func TestListPanesNilReceiver(t *testing.T) {
+	var wez *WezTerminal
+	_, err := wez.ListPanes()
+	if err == nil {
+		t.Fatal("expected error for nil receiver")
+	}
+}
+
+func TestListPanesExecError(t *testing.T) {
+	wez := &WezTerminal{
+		execFn: func(args ...string) ([]byte, error) {
+			return nil, errors.New("command failed")
+		},
+	}
+	_, err := wez.ListPanes()
+	if err == nil {
+		t.Fatal("expected error from exec failure")
+	}
+}
+
+func TestListPanesInvalidJSON(t *testing.T) {
+	wez := &WezTerminal{
+		execFn: func(args ...string) ([]byte, error) {
+			return []byte("not json"), nil
+		},
+	}
+	_, err := wez.ListPanes()
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestListPanesInvalidPaneID(t *testing.T) {
+	// pane_id が配列などの非対応型の場合。
+	wez := &WezTerminal{
+		execFn: func(args ...string) ([]byte, error) {
+			return []byte(`[{"pane_id": [1,2], "title": "t", "tab_id": "1", "cwd": "/tmp"}]`), nil
+		},
+	}
+	_, err := wez.ListPanes()
+	if err == nil {
+		t.Fatal("expected error for unsupported pane_id type")
+	}
+}
+
+func TestListPanesInvalidTabID(t *testing.T) {
+	wez := &WezTerminal{
+		execFn: func(args ...string) ([]byte, error) {
+			return []byte(`[{"pane_id": "1", "title": "t", "tab_id": {"nested": true}, "cwd": "/tmp"}]`), nil
+		},
+	}
+	_, err := wez.ListPanes()
+	if err == nil {
+		t.Fatal("expected error for unsupported tab_id type")
+	}
+}
+
+func TestFocusPaneNilExecFn(t *testing.T) {
+	wez := &WezTerminal{execFn: nil}
+	err := wez.FocusPane("1")
+	if err == nil {
+		t.Fatal("expected error for nil execFn")
+	}
+}
+
+func TestFocusPaneNilReceiver(t *testing.T) {
+	var wez *WezTerminal
+	err := wez.FocusPane("1")
+	if err == nil {
+		t.Fatal("expected error for nil receiver")
+	}
+}
+
+func TestFocusPaneExecError(t *testing.T) {
+	wez := &WezTerminal{
+		execFn: func(args ...string) ([]byte, error) {
+			return nil, errors.New("activate failed")
+		},
+	}
+	err := wez.FocusPane("42")
+	if err == nil {
+		t.Fatal("expected error from exec failure")
+	}
+}
+
+func TestIsAvailable(t *testing.T) {
+	wez := NewWezTerminal()
+	// wezterm の有無は環境依存なので bool が返ることだけ確認する。
+	_ = wez.IsAvailable()
+}
+
+func TestMapWeztermExecErrorNotFound(t *testing.T) {
+	err := mapWeztermExecError(exec.ErrNotFound)
+	if !errors.Is(err, ErrTerminalNotFound) {
+		t.Errorf("expected ErrTerminalNotFound, got %v", err)
+	}
+}
+
+func TestMapWeztermExecErrorOther(t *testing.T) {
+	original := errors.New("some other error")
+	err := mapWeztermExecError(original)
+	if err != original {
+		t.Errorf("expected original error passthrough, got %v", err)
+	}
+}
+
+func TestJsonValueToStringEmpty(t *testing.T) {
+	_, err := jsonValueToString(nil)
+	if err == nil {
+		t.Fatal("expected error for empty value")
+	}
+}
+
+func TestJsonValueToStringUnsupported(t *testing.T) {
+	_, err := jsonValueToString([]byte(`[1,2,3]`))
+	if err == nil {
+		t.Fatal("expected error for unsupported value type")
+	}
+}
+
+func TestJsonValueToStringBoolean(t *testing.T) {
+	_, err := jsonValueToString([]byte(`true`))
+	if err == nil {
+		t.Fatal("expected error for boolean value")
 	}
 }
