@@ -295,3 +295,385 @@ func TestUpdateWindowSizeMsg(t *testing.T) {
 		t.Errorf("height = %d, want 40", m.height)
 	}
 }
+
+func TestUpdateWindowSizeMsgSmallValues(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	msg := tea.WindowSizeMsg{Width: 1, Height: 1}
+	updated, cmd := m.Update(msg)
+	m = updated.(Model)
+
+	if m.width != 1 {
+		t.Errorf("width = %d, want 1", m.width)
+	}
+	if cmd != nil {
+		t.Error("expected no command from WindowSizeMsg")
+	}
+}
+
+func TestProjectItemTitleFallbackToPath(t *testing.T) {
+	item := ProjectItem{Project: core.Project{
+		Path:        "/home/user/project",
+		DisplayName: "",
+	}}
+
+	if item.Title() != "/home/user/project" {
+		t.Errorf("Title() = %q, want %q", item.Title(), "/home/user/project")
+	}
+}
+
+func TestSessionItemDescriptionZeroTime(t *testing.T) {
+	item := SessionItem{Session: core.Session{
+		ID:    "abc-123",
+		State: core.Idle,
+	}}
+
+	desc := item.Description()
+	if desc != "idle" {
+		t.Errorf("Description() = %q, want %q", desc, "idle")
+	}
+}
+
+func TestUpdateEnterKeyOnProjectPane(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	// プロジェクトを投入する。
+	projects := []core.Project{
+		{
+			Path:        "/project-a",
+			DisplayName: "project-a",
+			Sessions:    []*core.Session{{ID: "s1", State: core.Thinking}},
+			ActiveCount: 1,
+		},
+		{
+			Path:        "/project-b",
+			DisplayName: "project-b",
+			Sessions:    []*core.Session{{ID: "s2", State: core.Idle}},
+		},
+	}
+	updated, _ := m.Update(StateUpdateMsg(projects))
+	m = updated.(Model)
+
+	// pane 0 (project) で Enter を押す。
+	m.activePane = 0
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	updated, _ = m.Update(msg)
+	m = updated.(Model)
+
+	// 選択プロジェクトが固定され、pane 1 に移動する。
+	if m.activePane != 1 {
+		t.Errorf("activePane = %d, want 1", m.activePane)
+	}
+	if m.selectedProject != "/project-a" {
+		t.Errorf("selectedProject = %q, want %q", m.selectedProject, "/project-a")
+	}
+}
+
+func TestUpdateEnterKeyOnSessionPaneFocusSuccess(t *testing.T) {
+	m, _, _, _, term := newTestModel()
+
+	// セッションを投入する。
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", State: core.Thinking, PaneID: "pane-1"},
+			},
+			ActiveCount: 1,
+		},
+	}
+	updated, _ := m.Update(StateUpdateMsg(projects))
+	m = updated.(Model)
+
+	// pane 1 (session) で Enter を押す。
+	m.activePane = 1
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	updated, _ = m.Update(msg)
+	m = updated.(Model)
+
+	if term.focused != "pane-1" {
+		t.Errorf("focused = %q, want %q", term.focused, "pane-1")
+	}
+	if m.err != nil {
+		t.Errorf("err = %v, want nil", m.err)
+	}
+}
+
+func TestUpdateEnterKeyOnSessionPaneTerminalNil(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	m.terminal = nil
+
+	projects := []core.Project{
+		{
+			Path:     "/project-a",
+			Sessions: []*core.Session{{ID: "s1", State: core.Thinking, PaneID: "pane-1"}},
+		},
+	}
+	updated, _ := m.Update(StateUpdateMsg(projects))
+	m = updated.(Model)
+
+	m.activePane = 1
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	updated, _ = m.Update(msg)
+	m = updated.(Model)
+
+	if m.err == nil {
+		t.Error("expected error for nil terminal")
+	}
+}
+
+func TestUpdateEnterKeyOnSessionPaneTerminalUnavailable(t *testing.T) {
+	m, _, _, _, term := newTestModel()
+	term.available = false
+
+	projects := []core.Project{
+		{
+			Path:     "/project-a",
+			Sessions: []*core.Session{{ID: "s1", State: core.Thinking, PaneID: "pane-1"}},
+		},
+	}
+	updated, _ := m.Update(StateUpdateMsg(projects))
+	m = updated.(Model)
+
+	m.activePane = 1
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	updated, _ = m.Update(msg)
+	m = updated.(Model)
+
+	if m.err == nil {
+		t.Error("expected error for unavailable terminal")
+	}
+}
+
+func TestUpdateEnterKeyOnSessionPaneNoPaneID(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	projects := []core.Project{
+		{
+			Path:     "/project-a",
+			Sessions: []*core.Session{{ID: "s1", State: core.Thinking, PaneID: ""}},
+		},
+	}
+	updated, _ := m.Update(StateUpdateMsg(projects))
+	m = updated.(Model)
+
+	m.activePane = 1
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	updated, _ = m.Update(msg)
+	m = updated.(Model)
+
+	if m.err == nil {
+		t.Error("expected error for empty pane ID")
+	}
+}
+
+func TestUpdateTickMsg(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	updated, cmd := m.Update(TickMsg{})
+	_ = updated.(Model)
+
+	if cmd == nil {
+		t.Error("expected batch command from TickMsg")
+	}
+}
+
+func TestUpdateActiveListDelegation(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	// pane 0 でキー入力。
+	m.activePane = 0
+	msg := tea.KeyMsg{Type: tea.KeyDown}
+	updated, _ := m.Update(msg)
+	_ = updated.(Model)
+
+	// pane 1 でキー入力。
+	m.activePane = 1
+	updated, _ = m.Update(msg)
+	_ = updated.(Model)
+	// パニックしなければ OK。
+}
+
+func TestProjectsFromProjectList(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	projects := []core.Project{
+		{Path: "/project-a", DisplayName: "a"},
+		{Path: "/project-b", DisplayName: "b"},
+	}
+	updated, _ := m.Update(StateUpdateMsg(projects))
+	m = updated.(Model)
+
+	result := m.projectsFromProjectList()
+	if len(result) != 2 {
+		t.Fatalf("projectsFromProjectList() len = %d, want 2", len(result))
+	}
+	if result[0].Path != "/project-a" {
+		t.Errorf("result[0].Path = %q, want %q", result[0].Path, "/project-a")
+	}
+	if result[1].Path != "/project-b" {
+		t.Errorf("result[1].Path = %q, want %q", result[1].Path, "/project-b")
+	}
+}
+
+func TestUpdateProjectListEmptyProjects(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	// まずプロジェクトを投入する。
+	projects := []core.Project{
+		{Path: "/project-a", DisplayName: "a"},
+	}
+	updated, _ := m.Update(StateUpdateMsg(projects))
+	m = updated.(Model)
+	m.selectedProject = "/project-a"
+
+	// 空リストで更新する。
+	updated, _ = m.Update(StateUpdateMsg([]core.Project{}))
+	m = updated.(Model)
+
+	if len(m.projectList.Items()) != 0 {
+		t.Errorf("projectList items = %d, want 0", len(m.projectList.Items()))
+	}
+	if m.selectedProject != "" {
+		t.Errorf("selectedProject = %q, want empty", m.selectedProject)
+	}
+}
+
+func TestUpdateProjectListSelectedNotFound(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	// プロジェクトAを選択状態にする。
+	m.selectedProject = "/project-a"
+
+	// プロジェクトBのみのリストで更新する（Aは消えた）。
+	projects := []core.Project{
+		{Path: "/project-b", DisplayName: "b"},
+	}
+	updated, _ := m.Update(StateUpdateMsg(projects))
+	m = updated.(Model)
+
+	// 選択が解除される。
+	if m.selectedProject != "" {
+		t.Errorf("selectedProject = %q, want empty (should be cleared)", m.selectedProject)
+	}
+}
+
+func TestUpdateSessionListWithNilSession(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", State: core.Thinking},
+				nil,
+				{ID: "s2", State: core.Idle},
+			},
+		},
+	}
+	updated, _ := m.Update(StateUpdateMsg(projects))
+	m = updated.(Model)
+
+	items := m.sessionList.Items()
+	if len(items) != 2 {
+		t.Errorf("sessionList items = %d, want 2 (nil session skipped)", len(items))
+	}
+}
+
+func TestListenWatcherCmdNilWatcher(t *testing.T) {
+	cmd := listenWatcherCmd(nil)
+	if cmd == nil {
+		t.Fatal("expected command")
+	}
+
+	result := cmd()
+	if _, ok := result.(ErrMsg); !ok {
+		t.Errorf("expected ErrMsg, got %T", result)
+	}
+}
+
+func TestListenWatcherCmdChannelClosed(t *testing.T) {
+	es := newMockEventSource()
+	close(es.ch)
+
+	cmd := listenWatcherCmd(es)
+	result := cmd()
+	if _, ok := result.(ErrMsg); !ok {
+		t.Errorf("expected ErrMsg for closed channel, got %T", result)
+	}
+}
+
+func TestListenWatcherCmdSuccess(t *testing.T) {
+	es := newMockEventSource()
+	es.ch <- core.WatchEvent{
+		Type:      core.Modified,
+		SessionID: "s1",
+	}
+
+	cmd := listenWatcherCmd(es)
+	result := cmd()
+	msg, ok := result.(WatchEventMsg)
+	if !ok {
+		t.Fatalf("expected WatchEventMsg, got %T", result)
+	}
+	if msg.SessionID != "s1" {
+		t.Errorf("SessionID = %q, want %q", msg.SessionID, "s1")
+	}
+}
+
+func TestRefreshStateCmdNilReader(t *testing.T) {
+	cmd := refreshStateCmd(nil)
+	if cmd == nil {
+		t.Fatal("expected command")
+	}
+
+	result := cmd()
+	if _, ok := result.(ErrMsg); !ok {
+		t.Errorf("expected ErrMsg, got %T", result)
+	}
+}
+
+func TestRefreshStateCmdSuccess(t *testing.T) {
+	reader := &mockStateReader{
+		projects: []core.Project{{Path: "/p1"}},
+	}
+
+	cmd := refreshStateCmd(reader)
+	result := cmd()
+	msg, ok := result.(StateUpdateMsg)
+	if !ok {
+		t.Fatalf("expected StateUpdateMsg, got %T", result)
+	}
+	if len(msg) != 1 {
+		t.Errorf("len(msg) = %d, want 1", len(msg))
+	}
+}
+
+func TestTickCmdReturnsTickMsg(t *testing.T) {
+	cmd := tickCmd(time.Millisecond)
+	if cmd == nil {
+		t.Fatal("expected command")
+	}
+
+	result := cmd()
+	if _, ok := result.(TickMsg); !ok {
+		t.Errorf("expected TickMsg, got %T", result)
+	}
+}
+
+func TestTickCmdZeroIntervalFallback(t *testing.T) {
+	cmd := tickCmd(0)
+	if cmd == nil {
+		t.Fatal("expected command for zero interval")
+	}
+	// フォールバックで 1s になるが、テスト不要（コマンドが返ることを確認）。
+}
+
+func TestInitReturnsCmd(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	cmd := m.Init()
+	if cmd == nil {
+		t.Error("Init() should return a batch command")
+	}
+}
