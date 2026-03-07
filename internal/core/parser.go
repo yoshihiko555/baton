@@ -26,25 +26,58 @@ func ParseRecord(line []byte) (*Entry, error) {
 	return entry, nil
 }
 
-// DetermineSessionState は末尾エントリの type からセッション状態を判定する。
+// DetermineSessionState は末尾エントリから セッション状態を判定する。
+// Claude Code の JSONL ではトップレベル type は "assistant"/"user" 等であり、
+// セッション状態は message.content[].type（"thinking", "tool_use", "text" 等）から判定する。
 func DetermineSessionState(entries []*Entry) SessionState {
-	if len(entries) == 0 || entries[len(entries)-1] == nil {
+	if len(entries) == 0 {
 		return Idle
 	}
 
-	lastType := strings.ToLower(strings.TrimSpace(entries[len(entries)-1].Type))
-	lastType = strings.ReplaceAll(lastType, "-", "_")
+	// 末尾から assistant エントリを探し、content の型で判定する。
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := entries[i]
+		if entry == nil {
+			continue
+		}
 
-	switch lastType {
-	case "thinking":
-		return Thinking
-	case "tool_use":
-		return ToolUse
-	case "error":
-		return Error
-	default:
-		return Idle
+		entryType := strings.ToLower(strings.TrimSpace(entry.Type))
+
+		// user エントリが先に見つかった場合、AI の応答待ち（thinking 相当）。
+		if entryType == "user" {
+			return Thinking
+		}
+
+		if entryType != "assistant" {
+			continue
+		}
+
+		// assistant エントリの message.content を解析する。
+		if entry.Message == nil || len(entry.Message.Content) == 0 {
+			return Idle
+		}
+
+		// content の末尾ブロックの type で状態を判定する。
+		lastContent := entry.Message.Content[len(entry.Message.Content)-1]
+		contentType := strings.ToLower(strings.TrimSpace(lastContent.Type))
+		contentType = strings.ReplaceAll(contentType, "-", "_")
+
+		switch contentType {
+		case "thinking":
+			return Thinking
+		case "tool_use":
+			return ToolUse
+		case "tool_result":
+			return ToolUse
+		case "error":
+			return Error
+		default:
+			// "text" など → 応答完了
+			return Idle
+		}
 	}
+
+	return Idle
 }
 
 // IncrementalReader はファイル追記分だけを増分読み取りする。

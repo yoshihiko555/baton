@@ -71,41 +71,48 @@ func TestDetermineSessionState(t *testing.T) {
 			want:    Idle,
 		},
 		{
-			name: "last entry thinking",
+			name: "assistant with thinking content",
 			entries: []*Entry{
-				{Type: "tool_use"},
-				{Type: "thinking"},
+				{Type: "assistant", Message: &Message{Content: []ContentBlock{{Type: "tool_use"}}}},
+				{Type: "assistant", Message: &Message{Content: []ContentBlock{{Type: "thinking"}}}},
 			},
 			want: Thinking,
 		},
 		{
 			name: "tool use normalizes hyphen and case",
 			entries: []*Entry{
-				{Type: "Tool-Use"},
+				{Type: "assistant", Message: &Message{Content: []ContentBlock{{Type: "Tool-Use"}}}},
 			},
 			want: ToolUse,
 		},
 		{
-			name: "error with spaces",
+			name: "error content",
 			entries: []*Entry{
-				{Type: "  ERROR  "},
+				{Type: "assistant", Message: &Message{Content: []ContentBlock{{Type: "  error  "}}}},
 			},
 			want: Error,
 		},
 		{
-			name: "unknown type falls back to idle",
+			name: "assistant with text content falls back to idle",
 			entries: []*Entry{
-				{Type: "assistant_message"},
+				{Type: "assistant", Message: &Message{Content: []ContentBlock{{Type: "text"}}}},
 			},
 			want: Idle,
 		},
 		{
-			name: "last entry nil falls back to idle",
+			name: "user entry means thinking",
 			entries: []*Entry{
-				{Type: "thinking"},
+				{Type: "user"},
+			},
+			want: Thinking,
+		},
+		{
+			name: "last entry nil skips to previous entry",
+			entries: []*Entry{
+				{Type: "assistant", Message: &Message{Content: []ContentBlock{{Type: "thinking"}}}},
 				nil,
 			},
-			want: Idle,
+			want: Thinking,
 		},
 	}
 

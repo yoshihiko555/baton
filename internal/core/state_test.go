@@ -17,14 +17,14 @@ func TestStateManagerInitialScan(t *testing.T) {
 	projectBPath := filepath.Join(baseDir, "project-b")
 
 	writeJSONL(t, filepath.Join(projectAPath, "session-1.jsonl"),
-		`{"type":"thinking","role":"assistant","created_at":"2026-03-01T09:00:00Z"}`,
-		`{"type":"tool_use","role":"assistant","created_at":"2026-03-01T09:01:00Z"}`,
+		`{"type":"assistant","message":{"content":[{"type":"thinking"}]},"created_at":"2026-03-01T09:00:00Z"}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use"}]},"created_at":"2026-03-01T09:01:00Z"}`,
 	)
 	writeJSONL(t, filepath.Join(projectAPath, "session-2.jsonl"),
-		`{"type":"error","role":"assistant","created_at":"2026-03-01T09:02:00Z"}`,
+		`{"type":"assistant","message":{"content":[{"type":"error"}]},"created_at":"2026-03-01T09:02:00Z"}`,
 	)
 	writeJSONL(t, filepath.Join(projectBPath, "nested", "session-3.jsonl"),
-		`{"type":"assistant_message","role":"assistant","created_at":"2026-03-01T09:03:00Z"}`,
+		`{"type":"assistant","message":{"content":[{"type":"text"}]},"created_at":"2026-03-01T09:03:00Z"}`,
 	)
 
 	watcher, err := NewWatcher(baseDir)
@@ -90,7 +90,7 @@ func TestStateManagerHandleEvent(t *testing.T) {
 	session2Path := filepath.Join(projectPath, "session-2.jsonl")
 
 	writeJSONL(t, session1Path,
-		`{"type":"thinking","role":"assistant","created_at":"2026-03-01T10:00:00Z"}`,
+		`{"type":"assistant","message":{"content":[{"type":"thinking"}]},"created_at":"2026-03-01T10:00:00Z"}`,
 	)
 
 	watcher, err := NewWatcher(baseDir)
@@ -105,7 +105,7 @@ func TestStateManagerHandleEvent(t *testing.T) {
 	}
 
 	appendJSONL(t, session1Path,
-		`{"type":"tool_use","role":"assistant","created_at":"2026-03-01T10:01:00Z"}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use"}]},"created_at":"2026-03-01T10:01:00Z"}`,
 	)
 	_ = manager.HandleEvent(WatchEvent{
 		Type:        Modified,
@@ -124,7 +124,7 @@ func TestStateManagerHandleEvent(t *testing.T) {
 	}
 
 	writeJSONL(t, session2Path,
-		`{"type":"error","role":"assistant","created_at":"2026-03-01T10:02:00Z"}`,
+		`{"type":"assistant","message":{"content":[{"type":"error"}]},"created_at":"2026-03-01T10:02:00Z"}`,
 	)
 	_ = manager.HandleEvent(WatchEvent{
 		Type:        Created,
@@ -174,13 +174,13 @@ func TestStateManagerGetProjects(t *testing.T) {
 	projectBPath := filepath.Join(baseDir, "project-b")
 
 	writeJSONL(t, filepath.Join(projectAPath, "session-2.jsonl"),
-		`{"type":"thinking","role":"assistant","created_at":"2026-03-01T11:01:00Z"}`,
+		`{"type":"assistant","message":{"content":[{"type":"thinking"}]},"created_at":"2026-03-01T11:01:00Z"}`,
 	)
 	writeJSONL(t, filepath.Join(projectAPath, "session-1.jsonl"),
-		`{"type":"tool_use","role":"assistant","created_at":"2026-03-01T11:02:00Z"}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use"}]},"created_at":"2026-03-01T11:02:00Z"}`,
 	)
 	writeJSONL(t, filepath.Join(projectBPath, "session-1.jsonl"),
-		`{"type":"error","role":"assistant","created_at":"2026-03-01T11:03:00Z"}`,
+		`{"type":"assistant","message":{"content":[{"type":"error"}]},"created_at":"2026-03-01T11:03:00Z"}`,
 	)
 
 	watcher, err := NewWatcher(baseDir)
@@ -229,7 +229,7 @@ func TestStateManagerGetStatus(t *testing.T) {
 	projectPath := filepath.Join(baseDir, "project-a")
 
 	writeJSONL(t, filepath.Join(projectPath, "session-1.jsonl"),
-		`{"type":"thinking","role":"assistant","created_at":"2026-03-01T12:00:00Z"}`,
+		`{"type":"assistant","message":{"content":[{"type":"thinking"}]},"created_at":"2026-03-01T12:00:00Z"}`,
 	)
 
 	watcher, err := NewWatcher(baseDir)

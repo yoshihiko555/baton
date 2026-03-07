@@ -40,10 +40,22 @@ func (s SessionState) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.String())
 }
 
+// ContentBlock は message.content[] の1要素を表す。
+type ContentBlock struct {
+	Type string `json:"type"`
+}
+
+// Message は JSONL レコード内の message フィールドを表す。
+type Message struct {
+	Content []ContentBlock `json:"content"`
+}
+
 // Entry は JSONL ストリームの1レコードを表す。
 type Entry struct {
 	Type      string          `json:"type"`
 	Role      string          `json:"role,omitempty"`
+	Message   *Message        `json:"message,omitempty"`
+	Timestamp string          `json:"timestamp,omitempty"`
 	CreatedAt time.Time       `json:"created_at,omitempty"`
 	Raw       json.RawMessage `json:"-"`
 }

@@ -97,13 +97,10 @@ local function count_session_state(session)
   return active, thinking, tool_use, errored
 end
 
-function M.format_status(data)
-  -- JSON が読めない場合はグレー表示で明示
+function M.status_chunks(data)
+  -- wezterm.format に渡せる chunks テーブルを返す（外部から統合しやすい形式）
   if type(data) ~= 'table' then
-    return wezterm.format({
-      { Foreground = { Color = '#808080' } },
-      { Text = 'baton: no data' },
-    })
+    return nil
   end
 
   local project_count = 0
@@ -198,6 +195,17 @@ function M.format_status(data)
     table.insert(chunks, { Text = ' error' })
   end
 
+  return chunks
+end
+
+function M.format_status(data)
+  local chunks = M.status_chunks(data)
+  if not chunks then
+    return wezterm.format({
+      { Foreground = { Color = '#808080' } },
+      { Text = 'baton: no data' },
+    })
+  end
   return wezterm.format(chunks)
 end
 
