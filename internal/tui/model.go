@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"errors"
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -22,14 +22,21 @@ const (
 // TickMsg は定期リフレッシュタイマー発火時に送られる。
 type TickMsg struct{}
 
-// StateUpdateMsg は最新のプロジェクト一覧スナップショットを運ぶ。
-type StateUpdateMsg []core.Project
+// ScanResultMsg はスキャン完了時のスナップショットを運ぶ。
+type ScanResultMsg struct {
+	Projects []core.Project
+	Summary  core.Summary
+	Panes    []terminal.Pane
+}
 
 // ErrMsg は非同期コマンドで発生したエラーを運ぶ。
 type ErrMsg error
 
-// WatchEventMsg はファイル監視イベントを運ぶ。
-type WatchEventMsg core.WatchEvent
+// SubMenuItem はサブメニューの1行（ペイン候補）を表す。
+type SubMenuItem struct {
+	PaneID  int
+	TTYName string
+}
 
 // ProjectItem はプロジェクト一覧の1行を表す。
 type ProjectItem struct {
@@ -38,20 +45,21 @@ type ProjectItem struct {
 
 // Title はプロジェクト行のタイトル文字列を返す。
 func (i ProjectItem) Title() string {
-	if i.Project.DisplayName != "" {
-		return i.Project.DisplayName
+	name := i.Project.Name
+	if name == "" {
+		name = i.Project.Path
 	}
-	return i.Project.Path
+	return fmt.Sprintf("%s  %d sessions", name, len(i.Project.Sessions))
 }
 
 // Description はプロジェクト行の補足説明文字列を返す。
 func (i ProjectItem) Description() string {
-	return fmt.Sprintf("sessions: %d / active: %d", len(i.Project.Sessions), i.Project.ActiveCount)
+	return fmt.Sprintf("sessions: %d", len(i.Project.Sessions))
 }
 
 // FilterValue はプロジェクト行の検索対象文字列を返す。
 func (i ProjectItem) FilterValue() string {
-	return strings.Join([]string{i.Project.DisplayName, i.Project.Path}, " ")
+	return strings.Join([]string{i.Project.Name, i.Project.Path}, " ")
 }
 
 // SessionItem はセッション一覧の1行を表す。
@@ -61,16 +69,25 @@ type SessionItem struct {
 
 // Title はセッション行のタイトル文字列を返す。
 func (i SessionItem) Title() string {
-	return i.Session.ID
+	icon := "●"
+	prefix := "  "
+	if i.Session.Ambiguous {
+		prefix = "~ "
+	}
+	parts := []string{prefix + stateStyle(i.Session.State).Render(icon), i.Session.Tool.String()}
+	parts = append(parts, i.Session.State.String())
+	if i.Session.Branch != "" {
+		parts = append(parts, i.Session.Branch)
+	}
+	return strings.Join(parts, "  ")
 }
 
 // Description はセッション行の補足説明文字列を返す。
 func (i SessionItem) Description() string {
-	if i.Session.LastActivity.IsZero() {
-		return i.Session.State.String()
+	if i.Session.CurrentTool == "" && i.Session.InputTokens == 0 {
+		return ""
 	}
-
-	return fmt.Sprintf("%s / %s", i.Session.State.String(), i.Session.LastActivity.Format(time.RFC3339))
+	return fmt.Sprintf("    %s  |  %d tokens", i.Session.CurrentTool, i.Session.InputTokens)
 }
 
 // FilterValue はセッション行の検索対象文字列を返す。
@@ -83,25 +100,33 @@ type Model struct {
 	projectList list.Model
 	sessionList list.Model
 
-	stateReader core.StateReader
-	stateWriter core.StateWriter
-	watcher     core.EventSource
-	terminal    terminal.Terminal
-	config      config.Config
+	scanner      core.Scanner
+	stateUpdater core.StateUpdater
+	stateReader  core.StateReader
+	terminal     terminal.Terminal
+	config       config.Config
+
+	latestProjects []core.Project
+	latestSummary  core.Summary
+	latestPanes    []terminal.Pane
 
 	activePane      int
 	width           int
 	height          int
 	err             error
 	selectedProject string
+
+	showSubMenu   bool
+	subMenuItems  []SubMenuItem
+	subMenuCursor int
 }
 
 // NewModel はデフォルト delegate を使って TUI モデルを初期化する。
 func NewModel(
+	scanner core.Scanner,
+	stateUpdater core.StateUpdater,
 	stateReader core.StateReader,
-	stateWriter core.StateWriter,
-	watcher core.EventSource,
-	terminal terminal.Terminal,
+	term terminal.Terminal,
 	cfg config.Config,
 ) Model {
 	projectList := list.New([]list.Item{}, list.NewDefaultDelegate(), defaultListWidth, defaultListHeight)
@@ -111,22 +136,19 @@ func NewModel(
 	sessionList.Title = "Sessions"
 
 	return Model{
-		projectList: projectList,
-		sessionList: sessionList,
-		stateReader: stateReader,
-		stateWriter: stateWriter,
-		watcher:     watcher,
-		terminal:    terminal,
-		config:      cfg,
+		projectList:  projectList,
+		sessionList:  sessionList,
+		scanner:      scanner,
+		stateUpdater: stateUpdater,
+		stateReader:  stateReader,
+		terminal:     term,
+		config:       cfg,
 	}
 }
 
 // Init は tea.Model の初期コマンドを返す。
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		tickCmd(m.config.RefreshInterval),
-		listenWatcherCmd(m.watcher),
-	)
+	return tickCmd(m.config.ScanInterval)
 }
 
 func tickCmd(interval time.Duration) tea.Cmd {
@@ -134,33 +156,29 @@ func tickCmd(interval time.Duration) tea.Cmd {
 		// 無効値が来た場合のフォールバック
 		interval = time.Second
 	}
-
 	return func() tea.Msg {
 		<-time.After(interval)
 		return TickMsg{}
 	}
 }
 
-func listenWatcherCmd(watcher core.EventSource) tea.Cmd {
+// doScanCmd は Scanner.Scan → StateUpdater.UpdateFromScan を実行し、
+// 結果を ScanResultMsg として返す tea.Cmd。
+func doScanCmd(
+	ctx context.Context,
+	scanner core.Scanner,
+	sm core.StateUpdater,
+	sr core.StateReader,
+) tea.Cmd {
 	return func() tea.Msg {
-		if watcher == nil {
-			return ErrMsg(errors.New("watcher is nil"))
+		result := scanner.Scan(ctx)
+		if err := sm.UpdateFromScan(result); err != nil {
+			return ErrMsg(err)
 		}
-
-		event, ok := <-watcher.Events()
-		if !ok {
-			return ErrMsg(errors.New("watcher event channel closed"))
+		return ScanResultMsg{
+			Projects: sr.Projects(),
+			Summary:  sr.Summary(),
+			Panes:    sr.Panes(),
 		}
-
-		return WatchEventMsg(event)
-	}
-}
-
-func refreshStateCmd(stateReader core.StateReader) tea.Cmd {
-	return func() tea.Msg {
-		if stateReader == nil {
-			return ErrMsg(errors.New("state reader is nil"))
-		}
-		return StateUpdateMsg(stateReader.GetProjects())
 	}
 }

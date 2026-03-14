@@ -2,7 +2,7 @@ package tui
 
 import (
 	"fmt"
-	"time"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -24,7 +24,8 @@ var (
 var stateColors = map[core.SessionState]lipgloss.Color{
 	core.Idle:     lipgloss.Color("240"),
 	core.Thinking: lipgloss.Color("220"),
-	core.ToolUse:  lipgloss.Color("82"),
+	core.ToolUse:  lipgloss.Color("43"),  // v1: 82 → v2: シアンに変更
+	core.Waiting:  lipgloss.Color("208"), // 新規: オレンジ（承認待ち）
 	core.Error:    lipgloss.Color("196"),
 }
 
@@ -64,6 +65,11 @@ func (m Model) View() string {
 
 	panes := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
 	statusBar := m.renderStatusBar(totalWidth)
+
+	if m.showSubMenu {
+		return lipgloss.JoinVertical(lipgloss.Left, panes, m.renderSubMenu(), statusBar)
+	}
+
 	view := lipgloss.JoinVertical(lipgloss.Left, panes, statusBar)
 
 	if m.err != nil {
@@ -76,42 +82,30 @@ func (m Model) View() string {
 }
 
 func (m Model) renderStatusBar(totalWidth int) string {
-	projectCount := len(m.projectList.Items())
-	activeCount := 0
-	lastUpdate := time.Time{}
-
-	for _, item := range m.projectList.Items() {
-		projectItem, ok := item.(ProjectItem)
-		if !ok {
-			continue
-		}
-
-		activeCount += projectItem.Project.ActiveCount
-		for _, session := range projectItem.Project.Sessions {
-			if session == nil {
-				continue
-			}
-
-			if session.LastActivity.After(lastUpdate) {
-				lastUpdate = session.LastActivity
-			}
-		}
-	}
-
-	lastUpdateLabel := "-"
-	if !lastUpdate.IsZero() {
-		// 表示はローカル時刻に寄せる。
-		lastUpdateLabel = lastUpdate.Local().Format("15:04:05")
-	}
-
+	s := m.latestSummary
 	status := fmt.Sprintf(
-		"Projects: %d | Active: %d | Last update: %s",
-		projectCount,
-		activeCount,
-		lastUpdateLabel,
+		"%d sessions | %d active | %d waiting    q:quit enter:jump",
+		s.TotalSessions, s.Active, s.Waiting,
 	)
-
 	return statusBarStyle.Width(max(1, totalWidth)).Render(status)
+}
+
+// renderSubMenu はサブメニューを描画する。
+func (m Model) renderSubMenu() string {
+	lines := []string{"Select pane:"}
+	for i, item := range m.subMenuItems {
+		cursor := "  "
+		if i == m.subMenuCursor {
+			cursor = "> "
+		}
+		lines = append(lines, fmt.Sprintf("%s[%d] %s", cursor, item.PaneID, item.TTYName))
+	}
+	lines = append(lines, "  esc: cancel")
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("208")).
+		Padding(0, 1)
+	return style.Render(strings.Join(lines, "\n"))
 }
 
 func stateStyle(state core.SessionState) lipgloss.Style {

@@ -18,7 +18,7 @@ import (
 	"github.com/yoshihiko555/baton/internal/tui"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 func main() {
 	if err := run(); err != nil {
@@ -28,6 +28,7 @@ func main() {
 }
 
 func run() error {
+	// フラグ解析
 	configPath := flag.String("config", "", "path to config file")
 	noTUI := flag.Bool("no-tui", false, "run without TUI")
 	once := flag.Bool("once", false, "write status JSON once and exit")
@@ -52,13 +53,18 @@ func run() error {
 		log.Printf("terminal %q is not available", term.Name())
 	}
 
-	watcher, err := core.NewWatcher(cfg.WatchPath)
-	if err != nil {
-		return fmt.Errorf("init watcher: %w", err)
-	}
+	// v2 コンポーネント初期化
+	processScanner := core.NewProcessScanner()
+	scanner := core.NewDefaultScanner(term, processScanner)
+	reader := core.NewIncrementalReader()
+	resolver := core.NewStateResolver(reader, cfg.ClaudeProjectsDir, cfg.SessionMetaDir, cfg.ScanInterval)
+	stateManager := core.NewStateManager(resolver)
+	exporter := core.NewExporter(cfg.StatusOutputPath, core.ExporterConfig{
+		Format:    cfg.Statusbar.Format,
+		ToolIcons: cfg.Statusbar.ToolIcons,
+	})
 
-	stateManager := core.NewStateManager(watcher)
-
+	// シグナルハンドリング
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -76,34 +82,31 @@ func run() error {
 		}
 	}()
 
+	// doScan は TUI / ヘッドレス / ワンショット の全モードで共有するスキャン関数。
+	doScan := func() error {
+		result := scanner.Scan(ctx)
+		return stateManager.UpdateFromScan(result)
+	}
+
 	writeStatus := func() error {
-		return core.WriteStatusJSON(stateManager.GetStatus(), cfg.StatusOutputPath)
+		return exporter.Write(stateManager)
 	}
 
-	defer func() {
-		watcher.Stop()
-		if err := writeStatus(); err != nil {
-			log.Printf("final status write failed: %v", err)
-		}
-	}()
-
-	if err := stateManager.InitialScan(); err != nil {
-		log.Printf("initial scan warning: %v", err)
-	}
-
+	// ワンショットモード: 1 回だけスキャンして JSON を書き出して終了。
 	if *once {
-		return nil
+		if err := doScan(); err != nil {
+			return err
+		}
+		return writeStatus()
 	}
 
-	if err := watcher.Start(ctx); err != nil {
-		return fmt.Errorf("start watcher: %w", err)
-	}
-
+	// ヘッドレスモード: TUI なしで定期スキャン。
 	if *noTUI {
-		return runNoTUI(ctx, watcher, stateManager, cfg.RefreshInterval, writeStatus)
+		return runNoTUI(ctx, scanner, stateManager, cfg.ScanInterval, writeStatus)
 	}
 
-	model := tui.NewModel(stateManager, stateManager, watcher, term, cfg)
+	// TUI モード: stateManager は StateUpdater と StateReader を両方実装する。
+	model := tui.NewModel(scanner, stateManager, stateManager, term, cfg)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 
 	go func() {
@@ -118,21 +121,16 @@ func run() error {
 	return nil
 }
 
+// runNoTUI はヘッドレスモードのイベントループ。
+// ticker ごとにスキャンと JSON エクスポートを実行する。
+// スキャンエラー・エクスポートエラーはログ出力して継続する。
 func runNoTUI(
 	ctx context.Context,
-	watcher *core.Watcher,
-	stateManager *core.StateManager,
+	scanner core.Scanner,
+	sm core.StateUpdater,
 	interval time.Duration,
 	writeStatus func() error,
 ) error {
-	if interval <= 0 {
-		interval = time.Second
-	}
-
-	if err := writeStatus(); err != nil {
-		return fmt.Errorf("write status: %w", err)
-	}
-
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -140,16 +138,14 @@ func runNoTUI(
 		select {
 		case <-ctx.Done():
 			return nil
-		case event, ok := <-watcher.Events():
-			if !ok {
-				return nil
-			}
-			if err := stateManager.HandleEvent(event); err != nil {
-				log.Printf("handle event: %v", err)
-			}
 		case <-ticker.C:
+			result := scanner.Scan(ctx)
+			if err := sm.UpdateFromScan(result); err != nil {
+				log.Printf("scan error: %v", err)
+				continue
+			}
 			if err := writeStatus(); err != nil {
-				return fmt.Errorf("write status: %w", err)
+				log.Printf("export error: %v", err)
 			}
 		}
 	}

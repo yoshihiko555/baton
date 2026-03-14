@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -10,12 +12,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/yoshihiko555/baton/internal/core"
+	"github.com/yoshihiko555/baton/internal/terminal"
 )
 
 var (
 	quitKeys = key.NewBinding(key.WithKeys("q", "ctrl+c"))
 	tabKey   = key.NewBinding(key.WithKeys("tab"))
 	enterKey = key.NewBinding(key.WithKeys("enter"))
+	escKey   = key.NewBinding(key.WithKeys("esc"))
 
 	leftKeys  = key.NewBinding(key.WithKeys("h", "left"))
 	rightKeys = key.NewBinding(key.WithKeys("l", "right"))
@@ -27,6 +31,10 @@ var (
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// サブメニュー表示中は専用のキーハンドリングを行う。
+		if m.showSubMenu {
+			return m.updateSubMenu(msg)
+		}
 		switch {
 		case key.Matches(msg, quitKeys):
 			return m, tea.Quit
@@ -46,7 +54,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if selected, ok := m.projectList.SelectedItem().(ProjectItem); ok {
 					m.selectedProject = selected.Project.Path
 					m.activePane = 1
-					m.updateSessionList(m.projectsFromProjectList())
+					m.updateSessionList(m.latestProjects)
 				}
 				return m, nil
 			}
@@ -56,14 +64,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			if m.terminal == nil {
-				m.err = errors.New("terminal is nil")
+			if selected.Session.Ambiguous {
+				// Ambiguous セッションはサブメニューでペインを選択する。
+				m.showSubMenu = true
+				m.subMenuItems = buildSubMenuItems(selected.Session.CandidatePaneIDs, m.latestPanes)
+				m.subMenuCursor = 0
 				return m, nil
 			}
-			if !m.terminal.IsAvailable() {
-				m.err = errors.New("terminal is not available")
-				return m, nil
-			}
+
 			if selected.Session.PaneID == "" {
 				m.err = errors.New("selected session has no pane id")
 				return m, nil
@@ -71,6 +79,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			paneID, atoiErr := strconv.Atoi(selected.Session.PaneID)
 			if atoiErr != nil {
 				m.err = fmt.Errorf("invalid pane id %q: %w", selected.Session.PaneID, atoiErr)
+				return m, nil
+			}
+			if m.terminal == nil {
+				m.err = errors.New("terminal is nil")
 				return m, nil
 			}
 			if err := m.terminal.FocusPane(paneID); err != nil {
@@ -100,31 +112,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionList.SetSize(rightWidth, msg.Height)
 		return m, nil
 	case TickMsg:
-		// 定期更新: 最新状態取得と次 tick の予約を同時に行う。
-		return m, tea.Batch(
-			refreshStateCmd(m.stateReader),
-			tickCmd(m.config.RefreshInterval),
-		)
-	case StateUpdateMsg:
-		// 受信した状態スナップショットで両リストを同期する。
-		projects := []core.Project(msg)
-		m.updateProjectList(projects)
-		m.updateSessionList(projects)
-		return m, listenWatcherCmd(m.watcher)
-	case WatchEventMsg:
-		// watcher イベントを state へ反映し、再読込をトリガーする。
-		if m.stateWriter != nil {
-			if err := m.stateWriter.HandleEvent(core.WatchEvent(msg)); err != nil {
-				m.err = err
-			}
-		}
-		return m, refreshStateCmd(m.stateReader)
+		// 定期ポーリング: スキャンを実行する。
+		return m, doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader)
+	case ScanResultMsg:
+		// スキャン結果で状態を更新し、次 tick を予約する。
+		m.latestProjects = msg.Projects
+		m.latestSummary = msg.Summary
+		m.latestPanes = msg.Panes
+		m.updateProjectList(msg.Projects)
+		m.updateSessionList(msg.Projects)
+		return m, tickCmd(m.config.ScanInterval)
 	case ErrMsg:
 		m.err = msg
-		return m, listenWatcherCmd(m.watcher)
+		return m, tickCmd(m.config.ScanInterval)
 	default:
 		return m.updateActiveList(msg)
 	}
+}
+
+// updateSubMenu はサブメニュー表示中のキー入力を処理する。
+func (m Model) updateSubMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, escKey):
+		m.showSubMenu = false
+		return m, nil
+	case key.Matches(msg, upKeys):
+		if m.subMenuCursor > 0 {
+			m.subMenuCursor--
+		}
+		return m, nil
+	case key.Matches(msg, downKeys):
+		if m.subMenuCursor < len(m.subMenuItems)-1 {
+			m.subMenuCursor++
+		}
+		return m, nil
+	case key.Matches(msg, enterKey):
+		if len(m.subMenuItems) == 0 {
+			return m, nil
+		}
+		item := m.subMenuItems[m.subMenuCursor]
+		m.showSubMenu = false
+		if m.terminal == nil {
+			m.err = errors.New("terminal is nil")
+			return m, nil
+		}
+		if err := m.terminal.FocusPane(item.PaneID); err != nil {
+			m.err = err
+		}
+		return m, nil
+	}
+	return m, nil
 }
 
 func (m Model) updateActiveList(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -207,19 +244,38 @@ func (m *Model) updateSessionList(projects []core.Project) {
 		currentSessionID = selected.Session.ID
 	}
 
-	items := make([]list.Item, 0, len(targetProject.Sessions))
-	selectedIndex := 0
-	index := 0
-	for _, session := range targetProject.Sessions {
-		if session == nil {
-			continue
+	// nil を除外してコピーし、優先度順にソートする。
+	sessions := make([]*core.Session, 0, len(targetProject.Sessions))
+	for _, s := range targetProject.Sessions {
+		if s != nil {
+			sessions = append(sessions, s)
 		}
+	}
 
-		items = append(items, SessionItem{Session: *session})
-		if session.ID == currentSessionID {
-			selectedIndex = index
+	priority := map[core.SessionState]int{
+		core.Waiting:  0,
+		core.Error:    1,
+		core.Thinking: 2,
+		core.ToolUse:  3,
+		core.Idle:     4,
+	}
+	sort.SliceStable(sessions, func(i, j int) bool {
+		pi := priority[sessions[i].State]
+		pj := priority[sessions[j].State]
+		if pi != pj {
+			return pi < pj
 		}
-		index++
+		// 同一優先度内は LastActivity 降順（最新が上位）。
+		return sessions[i].LastActivity.After(sessions[j].LastActivity)
+	})
+
+	items := make([]list.Item, 0, len(sessions))
+	selectedIndex := 0
+	for idx, s := range sessions {
+		items = append(items, SessionItem{Session: *s})
+		if s.ID == currentSessionID {
+			selectedIndex = idx
+		}
 	}
 
 	m.sessionList.SetItems(items)
@@ -234,12 +290,27 @@ func (m Model) projectsFromProjectList() []core.Project {
 	projects := make([]core.Project, 0, len(items))
 
 	for _, item := range items {
-		projectItem, ok := item.(ProjectItem)
-		if !ok {
-			continue
+		if pi, ok := item.(ProjectItem); ok {
+			projects = append(projects, pi.Project)
 		}
-		projects = append(projects, projectItem.Project)
 	}
 
 	return projects
+}
+
+// buildSubMenuItems は候補ペイン ID リストからサブメニュー項目を生成する。
+func buildSubMenuItems(candidateIDs []int, panes []terminal.Pane) []SubMenuItem {
+	paneMap := make(map[int]terminal.Pane, len(panes))
+	for _, p := range panes {
+		paneMap[p.ID] = p
+	}
+	items := make([]SubMenuItem, 0, len(candidateIDs))
+	for _, id := range candidateIDs {
+		item := SubMenuItem{PaneID: id, TTYName: fmt.Sprintf("pane %d", id)}
+		if p, ok := paneMap[id]; ok && p.TTYName != "" {
+			item.TTYName = p.TTYName
+		}
+		items = append(items, item)
+	}
+	return items
 }

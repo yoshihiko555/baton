@@ -11,29 +11,43 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// StatusbarConfig はステータスバーの表示設定を表す。
+type StatusbarConfig struct {
+	Format    string            `yaml:"format"`
+	ToolIcons map[string]string `yaml:"tool_icons"`
+}
+
 // Config は YAML から読み込む baton の実行時設定を表す。
 type Config struct {
-	WatchPath        string        `yaml:"watch_path"`
-	StatusOutputPath string        `yaml:"status_output_path"`
-	RefreshInterval  time.Duration `yaml:"refresh_interval"`
-	Terminal         string        `yaml:"terminal"`
-	LogLevel         string        `yaml:"log_level"`
+	ScanInterval      time.Duration   `yaml:"scan_interval"`
+	ClaudeProjectsDir string          `yaml:"claude_projects_dir"`
+	SessionMetaDir    string          `yaml:"session_meta_dir"`
+	StatusOutputPath  string          `yaml:"status_output_path"`
+	Terminal          string          `yaml:"terminal"`
+	LogLevel          string          `yaml:"log_level"`
+	Statusbar         StatusbarConfig `yaml:"statusbar"`
 }
 
 // Default はデフォルト設定値を返す。
 func Default() Config {
 	return Config{
-		WatchPath:        "~/.claude/projects",
-		StatusOutputPath: "/tmp/baton-status.json",
-		RefreshInterval:  2 * time.Second,
-		Terminal:         "wezterm",
-		LogLevel:         "info",
+		ScanInterval:      2 * time.Second,
+		ClaudeProjectsDir: "~/.claude/projects",
+		SessionMetaDir:    "~/.claude/projects",
+		StatusOutputPath:  "/tmp/baton-status.json",
+		Terminal:          "wezterm",
+		LogLevel:          "info",
+		Statusbar: StatusbarConfig{
+			Format: "{{.Active}}/{{.TotalSessions}}",
+			ToolIcons: map[string]string{
+				"default": "●",
+			},
+		},
 	}
 }
 
 // Load は YAML 設定ファイルを読み込み、デフォルト設定に上書きして返す。
 func Load(path string) (Config, error) {
-	// まずデフォルト値を起点にし、指定された値だけを上書きする。
 	cfg := Default()
 
 	if path != "" {
@@ -42,7 +56,6 @@ func Load(path string) (Config, error) {
 			if !errors.Is(err, os.ErrNotExist) {
 				return Config{}, fmt.Errorf("read config %q: %w", path, err)
 			}
-			// 設定ファイルが存在しない場合はデフォルト値を使って続行する。
 		} else if len(strings.TrimSpace(string(data))) > 0 {
 			var loaded Config
 			if err := yaml.Unmarshal(data, &loaded); err != nil {
@@ -52,11 +65,14 @@ func Load(path string) (Config, error) {
 		}
 	}
 
-	// "~" や "~/" を実際のホームディレクトリへ展開する。
 	var err error
-	cfg.WatchPath, err = expandHome(cfg.WatchPath)
+	cfg.ClaudeProjectsDir, err = expandHome(cfg.ClaudeProjectsDir)
 	if err != nil {
-		return Config{}, fmt.Errorf("expand watch_path: %w", err)
+		return Config{}, fmt.Errorf("expand claude_projects_dir: %w", err)
+	}
+	cfg.SessionMetaDir, err = expandHome(cfg.SessionMetaDir)
+	if err != nil {
+		return Config{}, fmt.Errorf("expand session_meta_dir: %w", err)
 	}
 	cfg.StatusOutputPath, err = expandHome(cfg.StatusOutputPath)
 	if err != nil {
@@ -68,20 +84,29 @@ func Load(path string) (Config, error) {
 
 // mergeConfig は非ゼロ値のみで base を上書きする。
 func mergeConfig(base *Config, override Config) {
-	if override.WatchPath != "" {
-		base.WatchPath = override.WatchPath
+	if override.ScanInterval != 0 {
+		base.ScanInterval = override.ScanInterval
+	}
+	if override.ClaudeProjectsDir != "" {
+		base.ClaudeProjectsDir = override.ClaudeProjectsDir
+	}
+	if override.SessionMetaDir != "" {
+		base.SessionMetaDir = override.SessionMetaDir
 	}
 	if override.StatusOutputPath != "" {
 		base.StatusOutputPath = override.StatusOutputPath
-	}
-	if override.RefreshInterval != 0 {
-		base.RefreshInterval = override.RefreshInterval
 	}
 	if override.Terminal != "" {
 		base.Terminal = override.Terminal
 	}
 	if override.LogLevel != "" {
 		base.LogLevel = override.LogLevel
+	}
+	if override.Statusbar.Format != "" {
+		base.Statusbar.Format = override.Statusbar.Format
+	}
+	if len(override.Statusbar.ToolIcons) > 0 {
+		base.Statusbar.ToolIcons = override.Statusbar.ToolIcons
 	}
 }
 
