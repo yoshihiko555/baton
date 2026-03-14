@@ -15,6 +15,7 @@
 | `Pane.TabID` 型 | `string` | `int` |
 | `Pane.TTYName` | なし | `string` を追加 |
 | `Pane.IsActive` | なし | `bool` を追加 |
+| `Pane.Workspace` | なし | `string` を追加 |
 | CWD 正規化 | なし | `ListPanes()` 内で実施 |
 | `FocusPane` 引数 | `string` | `int` |
 | JSON パース方式 | `json.RawMessage` + 型分岐 | 直接 `int` アンマーシャル |
@@ -50,6 +51,7 @@ type Pane struct {
     WorkingDir string // 正規化済み CWD (file:// プレフィックスなし)
     TTYName    string // TTY デバイス名 (例: /dev/ttys003)
     IsActive   bool   // そのペインがフォーカス中か
+    Workspace  string // WezTerm ワークスペース名 (例: "baton", "default")
 }
 ```
 
@@ -59,6 +61,7 @@ type Pane struct {
 |-----------|---------|
 | `TTYName` | Ambiguous セッションのサブメニューで TTY を表示し、ユーザーがペインを識別できるようにする |
 | `IsActive` | 将来的なアクティブペインの自動選択、デバッグ表示に使用 |
+| `Workspace` | ワークスペース駆動運用において、プロジェクトのグルーピングキーおよび表示名として使用する |
 
 ---
 
@@ -127,6 +130,7 @@ var rawPanes []struct {
     WorkingDir string `json:"cwd"`
     TTYName    string `json:"tty_name"`
     IsActive   bool   `json:"is_active"`
+    Workspace  string `json:"workspace"`
 }
 if err := json.Unmarshal(out, &rawPanes); err != nil {
     return nil, err
@@ -143,6 +147,7 @@ panes = append(panes, Pane{
     WorkingDir: normalizeCWD(rawPane.WorkingDir),
     TTYName:    rawPane.TTYName,
     IsActive:   rawPane.IsActive,
+    Workspace:  rawPane.Workspace,
 })
 ```
 

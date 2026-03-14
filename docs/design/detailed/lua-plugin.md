@@ -111,6 +111,7 @@ baton が `/tmp/baton-status.json` に書き出す JSON の構造。
     {
       "name": "baton",
       "path": "/Users/yoshihiko/ghq/github.com/yoshihiko555/baton",
+      "workspace": "baton",
       "sessions": [
         {
           "pane_id": "5",
@@ -148,6 +149,7 @@ baton が `/tmp/baton-status.json` に書き出す JSON の構造。
 | `summary.waiting` | number | waiting 状態のセッション数 |
 | `summary.by_tool` | object | ツール別セッション数 `{"claude": N, "codex": M}` |
 | `projects` | array | プロジェクト別の詳細情報 |
+| `projects[].workspace` | string | WezTerm ワークスペース名（`omitempty`: 未設定時はキー省略） |
 
 ---
 

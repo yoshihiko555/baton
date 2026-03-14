@@ -42,9 +42,10 @@ type StatusOutput struct {
 
 ```go
 type ProjectOutput struct {
-    Name     string          `json:"name"`
-    Path     string          `json:"path"`
-    Sessions []SessionOutput `json:"sessions"`
+    Name      string          `json:"name"`
+    Path      string          `json:"path"`
+    Workspace string          `json:"workspace,omitempty"` // WezTerm ワークスペース名（未設定時は省略）
+    Sessions  []SessionOutput `json:"sessions"`
 }
 ```
 
@@ -222,6 +223,7 @@ func (e *Exporter) Write(sr core.StateReader) error
     {
       "name": "baton",
       "path": "/Users/foo/baton",
+      "workspace": "baton",
       "sessions": [
         {
           "pane_id": "3",

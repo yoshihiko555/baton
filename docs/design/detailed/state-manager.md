@@ -154,9 +154,31 @@ if result.Err != nil {
 
 過渡的なエラー（権限エラー、FS 一時障害）でも表示が崩れないよう、前回の状態を維持する。
 
-**Step 2: CWD によるグループ化**
+**Step 2: ワークスペース優先グループ化**
 
-`result.Processes` の各 `DetectedProcess` を `CWD`（カレントワーキングディレクトリ）でグループ化し、プロジェクト単位に分類する。
+`result.Processes` の各 `DetectedProcess` を以下のルールでグループ化し、プロジェクト単位に分類する。
+
+1. `ScanResult.Panes` から PaneID → Workspace のマッピングを構築する
+2. 各 `DetectedProcess` の PaneID を使って Workspace を解決する
+3. Workspace が空でなく `"default"` でもない場合 → Workspace でグルーピング
+4. それ以外 → CWD でグルーピング（既存の動作）
+
+```go
+type projectKey struct {
+    Workspace string // 空の場合は CWD ベース
+    CWD       string // Workspace が空の場合のフォールバック
+}
+
+func resolveProjectKey(proc DetectedProcess, paneWorkspaceMap map[int]string) projectKey {
+    ws := paneWorkspaceMap[proc.PaneID]
+    if ws != "" && ws != "default" {
+        return projectKey{Workspace: ws}
+    }
+    return projectKey{CWD: proc.CWD}
+}
+```
+
+Workspace でグルーピングされたプロジェクトの `Name` にはワークスペース名を設定する。CWD フォールバック時は CWD のベース名を使用する（v2 既存の動作）。
 
 **Step 3: セッション構築**
 
