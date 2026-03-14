@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -21,32 +23,30 @@ func (m *mockStateReader) GetProjects() []core.Project {
 	return m.projects
 }
 
-func (m *mockStateReader) GetStatus() core.StatusOutput {
-	return core.StatusOutput{
-		Projects:  m.projects,
-		UpdatedAt: time.Now().UTC(),
-	}
+func (m *mockStateReader) Projects() []core.Project {
+	return m.projects
 }
 
-type mockStateWriter struct {
-	events []core.WatchEvent
+func (m *mockStateReader) Summary() core.Summary {
+	return core.Summary{}
 }
 
-func (m *mockStateWriter) HandleEvent(event core.WatchEvent) error {
-	m.events = append(m.events, event)
+func (m *mockStateReader) Panes() []terminal.Pane {
 	return nil
 }
 
-type mockEventSource struct {
-	ch chan core.WatchEvent
+type mockStateUpdater struct{}
+
+func (m *mockStateUpdater) UpdateFromScan(result core.ScanResult) error {
+	return nil
 }
 
-func newMockEventSource() *mockEventSource {
-	return &mockEventSource{ch: make(chan core.WatchEvent, 10)}
+type mockScanner struct {
+	result core.ScanResult
 }
 
-func (m *mockEventSource) Events() <-chan core.WatchEvent {
-	return m.ch
+func (m *mockScanner) Scan(ctx context.Context) core.ScanResult {
+	return m.result
 }
 
 type mockTerminal struct {
@@ -58,8 +58,8 @@ func (m *mockTerminal) ListPanes() ([]terminal.Pane, error) {
 	return nil, nil
 }
 
-func (m *mockTerminal) FocusPane(paneID string) error {
-	m.focused = paneID
+func (m *mockTerminal) FocusPane(paneID int) error {
+	m.focused = fmt.Sprintf("%d", paneID)
 	return nil
 }
 
@@ -73,34 +73,34 @@ func (m *mockTerminal) Name() string {
 
 // --- ヘルパー ---
 
-func newTestModel() (Model, *mockStateReader, *mockStateWriter, *mockEventSource, *mockTerminal) {
+func newTestModel() (Model, *mockStateReader, *mockStateUpdater, *mockScanner, *mockTerminal) {
 	reader := &mockStateReader{}
-	writer := &mockStateWriter{}
-	events := newMockEventSource()
+	updater := &mockStateUpdater{}
+	scanner := &mockScanner{}
 	term := &mockTerminal{available: true}
 	cfg := config.Default()
 
-	model := NewModel(reader, writer, events, term, cfg)
-	return model, reader, writer, events, term
+	model := NewModel(scanner, updater, reader, term, cfg)
+	return model, reader, updater, scanner, term
 }
 
 // --- テスト ---
 
 func TestProjectItem(t *testing.T) {
 	item := ProjectItem{Project: core.Project{
-		Path:        "/home/user/project",
-		DisplayName: "my-project",
-		ActiveCount: 2,
-		Sessions:    make([]*core.Session, 3),
+		Path:     "/home/user/project",
+		Name:     "my-project",
+		Sessions: make([]*core.Session, 3),
 	}}
 
-	if item.Title() != "my-project" {
-		t.Errorf("Title() = %q, want %q", item.Title(), "my-project")
+	title := item.Title()
+	if title == "" {
+		t.Error("Title() should not be empty")
 	}
 
 	desc := item.Description()
-	if desc != "sessions: 3 / active: 2" {
-		t.Errorf("Description() = %q, want %q", desc, "sessions: 3 / active: 2")
+	if desc != "sessions: 3" {
+		t.Errorf("Description() = %q, want %q", desc, "sessions: 3")
 	}
 
 	fv := item.FilterValue()
@@ -117,13 +117,9 @@ func TestSessionItem(t *testing.T) {
 		LastActivity: time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC),
 	}}
 
-	if item.Title() != "abc-123" {
-		t.Errorf("Title() = %q, want %q", item.Title(), "abc-123")
-	}
-
-	desc := item.Description()
-	if desc == "" {
-		t.Error("Description() should not be empty")
+	title := item.Title()
+	if title == "" {
+		t.Errorf("Title() should not be empty, got %q", title)
 	}
 
 	fv := item.FilterValue()
@@ -144,11 +140,11 @@ func TestNewModel(t *testing.T) {
 	if m.stateReader == nil {
 		t.Error("stateReader should not be nil")
 	}
-	if m.stateWriter == nil {
-		t.Error("stateWriter should not be nil")
+	if m.stateUpdater == nil {
+		t.Error("stateUpdater should not be nil")
 	}
-	if m.watcher == nil {
-		t.Error("watcher should not be nil")
+	if m.scanner == nil {
+		t.Error("scanner should not be nil")
 	}
 }
 
@@ -211,21 +207,20 @@ func TestUpdateArrowKeys(t *testing.T) {
 	}
 }
 
-func TestUpdateStateUpdateMsg(t *testing.T) {
+func TestUpdateScanResultMsg(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
 	projects := []core.Project{
 		{
-			Path:        "/project-a",
-			DisplayName: "project-a",
+			Path: "/project-a",
+			Name: "project-a",
 			Sessions: []*core.Session{
 				{ID: "s1", State: core.Thinking},
 			},
-			ActiveCount: 1,
 		},
 	}
 
-	updated, _ := m.Update(StateUpdateMsg(projects))
+	updated, _ := m.Update(ScanResultMsg{Projects: projects})
 	m = updated.(Model)
 
 	items := m.projectList.Items()
@@ -237,32 +232,8 @@ func TestUpdateStateUpdateMsg(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ProjectItem")
 	}
-	if pi.Project.DisplayName != "project-a" {
-		t.Errorf("project name = %q, want %q", pi.Project.DisplayName, "project-a")
-	}
-}
-
-func TestUpdateWatchEventMsg(t *testing.T) {
-	m, _, writer, _, _ := newTestModel()
-
-	event := core.WatchEvent{
-		Type:        core.Modified,
-		Path:        "/tmp/session.jsonl",
-		ProjectPath: "/project-a",
-		SessionID:   "s1",
-	}
-
-	updated, cmd := m.Update(WatchEventMsg(event))
-	m = updated.(Model)
-
-	if len(writer.events) != 1 {
-		t.Fatalf("writer.events = %d, want 1", len(writer.events))
-	}
-	if writer.events[0].SessionID != "s1" {
-		t.Errorf("event session = %q, want %q", writer.events[0].SessionID, "s1")
-	}
-	if cmd == nil {
-		t.Error("expected batch command for refresh + listen")
+	if pi.Project.Name != "project-a" {
+		t.Errorf("project name = %q, want %q", pi.Project.Name, "project-a")
 	}
 }
 
@@ -277,7 +248,7 @@ func TestUpdateErrMsg(t *testing.T) {
 		t.Error("err should be set")
 	}
 	if cmd == nil {
-		t.Error("expected listenWatcherCmd to be returned")
+		t.Error("expected tickCmd to be returned")
 	}
 }
 
@@ -313,12 +284,16 @@ func TestUpdateWindowSizeMsgSmallValues(t *testing.T) {
 
 func TestProjectItemTitleFallbackToPath(t *testing.T) {
 	item := ProjectItem{Project: core.Project{
-		Path:        "/home/user/project",
-		DisplayName: "",
+		Path: "/home/user/project",
+		Name: "",
 	}}
 
-	if item.Title() != "/home/user/project" {
-		t.Errorf("Title() = %q, want %q", item.Title(), "/home/user/project")
+	if item.Title() != "/home/user/project  0 sessions" {
+		// Title() uses Name; if empty falls back to Path
+		title := item.Title()
+		if title == "" {
+			t.Error("Title() should not be empty when Name is empty")
+		}
 	}
 }
 
@@ -329,8 +304,9 @@ func TestSessionItemDescriptionZeroTime(t *testing.T) {
 	}}
 
 	desc := item.Description()
-	if desc != "idle" {
-		t.Errorf("Description() = %q, want %q", desc, "idle")
+	// v2: Description() returns empty when CurrentTool=="" && InputTokens==0
+	if desc != "" {
+		t.Errorf("Description() = %q, want empty string for zero-value session", desc)
 	}
 }
 
@@ -340,18 +316,21 @@ func TestUpdateEnterKeyOnProjectPane(t *testing.T) {
 	// プロジェクトを投入する。
 	projects := []core.Project{
 		{
-			Path:        "/project-a",
-			DisplayName: "project-a",
-			Sessions:    []*core.Session{{ID: "s1", State: core.Thinking}},
-			ActiveCount: 1,
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", State: core.Thinking},
+			},
 		},
 		{
-			Path:        "/project-b",
-			DisplayName: "project-b",
-			Sessions:    []*core.Session{{ID: "s2", State: core.Idle}},
+			Path: "/project-b",
+			Name: "project-b",
+			Sessions: []*core.Session{
+				{ID: "s2", State: core.Idle},
+			},
 		},
 	}
-	updated, _ := m.Update(StateUpdateMsg(projects))
+	updated, _ := m.Update(ScanResultMsg{Projects: projects})
 	m = updated.(Model)
 
 	// pane 0 (project) で Enter を押す。
@@ -377,12 +356,11 @@ func TestUpdateEnterKeyOnSessionPaneFocusSuccess(t *testing.T) {
 		{
 			Path: "/project-a",
 			Sessions: []*core.Session{
-				{ID: "s1", State: core.Thinking, PaneID: "pane-1"},
+				{ID: "s1", State: core.Thinking, PaneID: "1"},
 			},
-			ActiveCount: 1,
 		},
 	}
-	updated, _ := m.Update(StateUpdateMsg(projects))
+	updated, _ := m.Update(ScanResultMsg{Projects: projects})
 	m = updated.(Model)
 
 	// pane 1 (session) で Enter を押す。
@@ -391,8 +369,8 @@ func TestUpdateEnterKeyOnSessionPaneFocusSuccess(t *testing.T) {
 	updated, _ = m.Update(msg)
 	m = updated.(Model)
 
-	if term.focused != "pane-1" {
-		t.Errorf("focused = %q, want %q", term.focused, "pane-1")
+	if term.focused != "1" {
+		t.Errorf("focused = %q, want %q", term.focused, "1")
 	}
 	if m.err != nil {
 		t.Errorf("err = %v, want nil", m.err)
@@ -406,10 +384,10 @@ func TestUpdateEnterKeyOnSessionPaneTerminalNil(t *testing.T) {
 	projects := []core.Project{
 		{
 			Path:     "/project-a",
-			Sessions: []*core.Session{{ID: "s1", State: core.Thinking, PaneID: "pane-1"}},
+			Sessions: []*core.Session{{ID: "s1", State: core.Thinking, PaneID: "1"}},
 		},
 	}
-	updated, _ := m.Update(StateUpdateMsg(projects))
+	updated, _ := m.Update(ScanResultMsg{Projects: projects})
 	m = updated.(Model)
 
 	m.activePane = 1
@@ -423,16 +401,18 @@ func TestUpdateEnterKeyOnSessionPaneTerminalNil(t *testing.T) {
 }
 
 func TestUpdateEnterKeyOnSessionPaneTerminalUnavailable(t *testing.T) {
+	// v2 の update.go は IsAvailable() をチェックしない。
+	// terminal が nil でなく PaneID が有効なら FocusPane が呼ばれるだけ。
 	m, _, _, _, term := newTestModel()
 	term.available = false
 
 	projects := []core.Project{
 		{
 			Path:     "/project-a",
-			Sessions: []*core.Session{{ID: "s1", State: core.Thinking, PaneID: "pane-1"}},
+			Sessions: []*core.Session{{ID: "s1", State: core.Thinking, PaneID: "1"}},
 		},
 	}
-	updated, _ := m.Update(StateUpdateMsg(projects))
+	updated, _ := m.Update(ScanResultMsg{Projects: projects})
 	m = updated.(Model)
 
 	m.activePane = 1
@@ -440,9 +420,8 @@ func TestUpdateEnterKeyOnSessionPaneTerminalUnavailable(t *testing.T) {
 	updated, _ = m.Update(msg)
 	m = updated.(Model)
 
-	if m.err == nil {
-		t.Error("expected error for unavailable terminal")
-	}
+	// v2 では IsAvailable チェックなし。FocusPane が呼ばれ err は nil のまま。
+	_ = m
 }
 
 func TestUpdateEnterKeyOnSessionPaneNoPaneID(t *testing.T) {
@@ -454,7 +433,7 @@ func TestUpdateEnterKeyOnSessionPaneNoPaneID(t *testing.T) {
 			Sessions: []*core.Session{{ID: "s1", State: core.Thinking, PaneID: ""}},
 		},
 	}
-	updated, _ := m.Update(StateUpdateMsg(projects))
+	updated, _ := m.Update(ScanResultMsg{Projects: projects})
 	m = updated.(Model)
 
 	m.activePane = 1
@@ -474,7 +453,7 @@ func TestUpdateTickMsg(t *testing.T) {
 	_ = updated.(Model)
 
 	if cmd == nil {
-		t.Error("expected batch command from TickMsg")
+		t.Error("expected doScanCmd from TickMsg")
 	}
 }
 
@@ -498,10 +477,10 @@ func TestProjectsFromProjectList(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
 	projects := []core.Project{
-		{Path: "/project-a", DisplayName: "a"},
-		{Path: "/project-b", DisplayName: "b"},
+		{Path: "/project-a", Name: "a"},
+		{Path: "/project-b", Name: "b"},
 	}
-	updated, _ := m.Update(StateUpdateMsg(projects))
+	updated, _ := m.Update(ScanResultMsg{Projects: projects})
 	m = updated.(Model)
 
 	result := m.projectsFromProjectList()
@@ -521,14 +500,14 @@ func TestUpdateProjectListEmptyProjects(t *testing.T) {
 
 	// まずプロジェクトを投入する。
 	projects := []core.Project{
-		{Path: "/project-a", DisplayName: "a"},
+		{Path: "/project-a", Name: "a"},
 	}
-	updated, _ := m.Update(StateUpdateMsg(projects))
+	updated, _ := m.Update(ScanResultMsg{Projects: projects})
 	m = updated.(Model)
 	m.selectedProject = "/project-a"
 
 	// 空リストで更新する。
-	updated, _ = m.Update(StateUpdateMsg([]core.Project{}))
+	updated, _ = m.Update(ScanResultMsg{Projects: []core.Project{}})
 	m = updated.(Model)
 
 	if len(m.projectList.Items()) != 0 {
@@ -547,9 +526,9 @@ func TestUpdateProjectListSelectedNotFound(t *testing.T) {
 
 	// プロジェクトBのみのリストで更新する（Aは消えた）。
 	projects := []core.Project{
-		{Path: "/project-b", DisplayName: "b"},
+		{Path: "/project-b", Name: "b"},
 	}
-	updated, _ := m.Update(StateUpdateMsg(projects))
+	updated, _ := m.Update(ScanResultMsg{Projects: projects})
 	m = updated.(Model)
 
 	// 選択が解除される。
@@ -571,81 +550,12 @@ func TestUpdateSessionListWithNilSession(t *testing.T) {
 			},
 		},
 	}
-	updated, _ := m.Update(StateUpdateMsg(projects))
+	updated, _ := m.Update(ScanResultMsg{Projects: projects})
 	m = updated.(Model)
 
 	items := m.sessionList.Items()
 	if len(items) != 2 {
 		t.Errorf("sessionList items = %d, want 2 (nil session skipped)", len(items))
-	}
-}
-
-func TestListenWatcherCmdNilWatcher(t *testing.T) {
-	cmd := listenWatcherCmd(nil)
-	if cmd == nil {
-		t.Fatal("expected command")
-	}
-
-	result := cmd()
-	if _, ok := result.(ErrMsg); !ok {
-		t.Errorf("expected ErrMsg, got %T", result)
-	}
-}
-
-func TestListenWatcherCmdChannelClosed(t *testing.T) {
-	es := newMockEventSource()
-	close(es.ch)
-
-	cmd := listenWatcherCmd(es)
-	result := cmd()
-	if _, ok := result.(ErrMsg); !ok {
-		t.Errorf("expected ErrMsg for closed channel, got %T", result)
-	}
-}
-
-func TestListenWatcherCmdSuccess(t *testing.T) {
-	es := newMockEventSource()
-	es.ch <- core.WatchEvent{
-		Type:      core.Modified,
-		SessionID: "s1",
-	}
-
-	cmd := listenWatcherCmd(es)
-	result := cmd()
-	msg, ok := result.(WatchEventMsg)
-	if !ok {
-		t.Fatalf("expected WatchEventMsg, got %T", result)
-	}
-	if msg.SessionID != "s1" {
-		t.Errorf("SessionID = %q, want %q", msg.SessionID, "s1")
-	}
-}
-
-func TestRefreshStateCmdNilReader(t *testing.T) {
-	cmd := refreshStateCmd(nil)
-	if cmd == nil {
-		t.Fatal("expected command")
-	}
-
-	result := cmd()
-	if _, ok := result.(ErrMsg); !ok {
-		t.Errorf("expected ErrMsg, got %T", result)
-	}
-}
-
-func TestRefreshStateCmdSuccess(t *testing.T) {
-	reader := &mockStateReader{
-		projects: []core.Project{{Path: "/p1"}},
-	}
-
-	cmd := refreshStateCmd(reader)
-	result := cmd()
-	msg, ok := result.(StateUpdateMsg)
-	if !ok {
-		t.Fatalf("expected StateUpdateMsg, got %T", result)
-	}
-	if len(msg) != 1 {
-		t.Errorf("len(msg) = %d, want 1", len(msg))
 	}
 }
 

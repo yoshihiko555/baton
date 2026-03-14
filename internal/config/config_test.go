@@ -11,14 +11,14 @@ func TestDefault(t *testing.T) {
 	// デフォルト値が意図した固定値になっていることを確認する。
 	got := Default()
 
-	if got.WatchPath != "~/.claude/projects" {
-		t.Fatalf("unexpected WatchPath: got %q", got.WatchPath)
+	if got.ClaudeProjectsDir != "~/.claude/projects" {
+		t.Fatalf("unexpected ClaudeProjectsDir: got %q", got.ClaudeProjectsDir)
 	}
 	if got.StatusOutputPath != "/tmp/baton-status.json" {
 		t.Fatalf("unexpected StatusOutputPath: got %q", got.StatusOutputPath)
 	}
-	if got.RefreshInterval != 2*time.Second {
-		t.Fatalf("unexpected RefreshInterval: got %v", got.RefreshInterval)
+	if got.ScanInterval != 2*time.Second {
+		t.Fatalf("unexpected ScanInterval: got %v", got.ScanInterval)
 	}
 	if got.Terminal != "wezterm" {
 		t.Fatalf("unexpected Terminal: got %q", got.Terminal)
@@ -26,17 +26,28 @@ func TestDefault(t *testing.T) {
 	if got.LogLevel != "info" {
 		t.Fatalf("unexpected LogLevel: got %q", got.LogLevel)
 	}
+	if got.Statusbar.Format != "{{.Active}}/{{.TotalSessions}}" {
+		t.Fatalf("unexpected Statusbar.Format: got %q", got.Statusbar.Format)
+	}
+	if got.Statusbar.ToolIcons["default"] != "●" {
+		t.Fatalf("unexpected Statusbar.ToolIcons[default]: got %q", got.Statusbar.ToolIcons["default"])
+	}
 }
 
 func TestLoadValidYAML(t *testing.T) {
 	// 全項目を指定した YAML から正しく読み込めることを確認する。
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	content := `watch_path: ~/custom/projects
+	content := `claude_projects_dir: ~/custom/projects
+session_meta_dir: ~/custom/meta
 status_output_path: /tmp/custom-status.json
-refresh_interval: 5s
+scan_interval: 5s
 terminal: tmux
 log_level: debug
+statusbar:
+  format: "{{.Active}} sessions"
+  tool_icons:
+    default: "◆"
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
@@ -52,20 +63,29 @@ log_level: debug
 		t.Fatalf("UserHomeDir failed: %v", err)
 	}
 
-	if got.WatchPath != filepath.Join(home, "custom/projects") {
-		t.Fatalf("unexpected WatchPath: got %q", got.WatchPath)
+	if got.ClaudeProjectsDir != filepath.Join(home, "custom/projects") {
+		t.Fatalf("unexpected ClaudeProjectsDir: got %q", got.ClaudeProjectsDir)
+	}
+	if got.SessionMetaDir != filepath.Join(home, "custom/meta") {
+		t.Fatalf("unexpected SessionMetaDir: got %q", got.SessionMetaDir)
 	}
 	if got.StatusOutputPath != "/tmp/custom-status.json" {
 		t.Fatalf("unexpected StatusOutputPath: got %q", got.StatusOutputPath)
 	}
-	if got.RefreshInterval != 5*time.Second {
-		t.Fatalf("unexpected RefreshInterval: got %v", got.RefreshInterval)
+	if got.ScanInterval != 5*time.Second {
+		t.Fatalf("unexpected ScanInterval: got %v", got.ScanInterval)
 	}
 	if got.Terminal != "tmux" {
 		t.Fatalf("unexpected Terminal: got %q", got.Terminal)
 	}
 	if got.LogLevel != "debug" {
 		t.Fatalf("unexpected LogLevel: got %q", got.LogLevel)
+	}
+	if got.Statusbar.Format != "{{.Active}} sessions" {
+		t.Fatalf("unexpected Statusbar.Format: got %q", got.Statusbar.Format)
+	}
+	if got.Statusbar.ToolIcons["default"] != "◆" {
+		t.Fatalf("unexpected Statusbar.ToolIcons[default]: got %q", got.Statusbar.ToolIcons["default"])
 	}
 }
 
@@ -90,14 +110,14 @@ status_output_path: ~/tmp/baton-status.json
 		t.Fatalf("UserHomeDir failed: %v", err)
 	}
 
-	if got.WatchPath != filepath.Join(home, ".claude/projects") {
-		t.Fatalf("unexpected WatchPath: got %q", got.WatchPath)
+	if got.ClaudeProjectsDir != filepath.Join(home, ".claude/projects") {
+		t.Fatalf("unexpected ClaudeProjectsDir: got %q", got.ClaudeProjectsDir)
 	}
 	if got.StatusOutputPath != filepath.Join(home, "tmp/baton-status.json") {
 		t.Fatalf("unexpected StatusOutputPath: got %q", got.StatusOutputPath)
 	}
-	if got.RefreshInterval != 2*time.Second {
-		t.Fatalf("unexpected RefreshInterval: got %v", got.RefreshInterval)
+	if got.ScanInterval != 2*time.Second {
+		t.Fatalf("unexpected ScanInterval: got %v", got.ScanInterval)
 	}
 	if got.Terminal != "alacritty" {
 		t.Fatalf("unexpected Terminal: got %q", got.Terminal)
@@ -121,14 +141,14 @@ func TestLoadMissingYAML(t *testing.T) {
 		t.Fatalf("UserHomeDir failed: %v", err)
 	}
 
-	if got.WatchPath != filepath.Join(home, ".claude/projects") {
-		t.Fatalf("unexpected WatchPath: got %q", got.WatchPath)
+	if got.ClaudeProjectsDir != filepath.Join(home, ".claude/projects") {
+		t.Fatalf("unexpected ClaudeProjectsDir: got %q", got.ClaudeProjectsDir)
 	}
 	if got.StatusOutputPath != "/tmp/baton-status.json" {
 		t.Fatalf("unexpected StatusOutputPath: got %q", got.StatusOutputPath)
 	}
-	if got.RefreshInterval != 2*time.Second {
-		t.Fatalf("unexpected RefreshInterval: got %v", got.RefreshInterval)
+	if got.ScanInterval != 2*time.Second {
+		t.Fatalf("unexpected ScanInterval: got %v", got.ScanInterval)
 	}
 	if got.Terminal != "wezterm" {
 		t.Fatalf("unexpected Terminal: got %q", got.Terminal)

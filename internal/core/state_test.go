@@ -1,628 +1,444 @@
 package core
 
 import (
-	"errors"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/yoshihiko555/baton/internal/terminal"
 )
 
-func TestStateManagerInitialScan(t *testing.T) {
-	// 初期スキャンで複数プロジェクト/ネストセッションを正しく集約できることを確認する。
-	baseDir := t.TempDir()
-	projectAPath := filepath.Join(baseDir, "project-a")
-	projectBPath := filepath.Join(baseDir, "project-b")
-
-	writeJSONL(t, filepath.Join(projectAPath, "session-1.jsonl"),
-		`{"type":"assistant","message":{"content":[{"type":"thinking"}]},"created_at":"2026-03-01T09:00:00Z"}`,
-		`{"type":"assistant","message":{"content":[{"type":"tool_use"}]},"created_at":"2026-03-01T09:01:00Z"}`,
-	)
-	writeJSONL(t, filepath.Join(projectAPath, "session-2.jsonl"),
-		`{"type":"assistant","message":{"content":[{"type":"error"}]},"created_at":"2026-03-01T09:02:00Z"}`,
-	)
-	writeJSONL(t, filepath.Join(projectBPath, "nested", "session-3.jsonl"),
-		`{"type":"assistant","message":{"content":[{"type":"text"}]},"created_at":"2026-03-01T09:03:00Z"}`,
-	)
-
-	watcher, err := NewWatcher(baseDir)
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
+// newScanResult は指定プロセス一覧と空ペインで ScanResult を生成するヘルパー。
+func newScanResult(procs ...DetectedProcess) ScanResult {
+	return ScanResult{
+		Processes: procs,
+		Panes:     []terminal.Pane{},
+		Timestamp: time.Now(),
 	}
-	t.Cleanup(watcher.Stop)
+}
 
-	manager := NewStateManager(watcher)
-	if err := manager.InitialScan(); err != nil {
-		t.Fatalf("InitialScan: %v", err)
+// newProc は DetectedProcess を生成するヘルパー。
+func newProc(pid int, tool ToolType, cwd string) DetectedProcess {
+	return DetectedProcess{
+		PID:      pid,
+		ToolType: tool,
+		CWD:      cwd,
+	}
+}
+
+func TestStateManagerUpdateFromScanBasic(t *testing.T) {
+	// 正常系: Codex/Gemini プロセスが Thinking 状態でセッション化されることを確認する。
+	manager := NewStateManager(nil)
+
+	result := newScanResult(
+		newProc(100, ToolCodex, "/home/user/project-a"),
+		newProc(200, ToolGemini, "/home/user/project-b"),
+	)
+
+	if err := manager.UpdateFromScan(result); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
 	}
 
-	projects := manager.GetProjects()
+	projects := manager.Projects()
 	if len(projects) != 2 {
 		t.Fatalf("unexpected project count: got %d, want 2", len(projects))
 	}
 
-	projectA := mustProject(t, projects, projectAPath)
-	if projectA.DisplayName != "project-a" {
-		t.Fatalf("unexpected display name: got %q", projectA.DisplayName)
-	}
-	if projectA.ActiveCount != 1 {
-		t.Fatalf("unexpected active count for project-a: got %d, want 1", projectA.ActiveCount)
-	}
-	if len(projectA.Sessions) != 2 {
-		t.Fatalf("unexpected session count for project-a: got %d, want 2", len(projectA.Sessions))
-	}
-
-	session1 := mustSession(t, projectA, "session-1")
-	if session1.State != ToolUse {
-		t.Fatalf("unexpected state for session-1: got %v, want %v", session1.State, ToolUse)
-	}
-	wantLastActivity := mustRFC3339(t, "2026-03-01T09:01:00Z")
-	if !session1.LastActivity.Equal(wantLastActivity) {
-		t.Fatalf("unexpected last activity: got %s, want %s", session1.LastActivity, wantLastActivity)
-	}
-
-	session2 := mustSession(t, projectA, "session-2")
-	if session2.State != Error {
-		t.Fatalf("unexpected state for session-2: got %v, want %v", session2.State, Error)
-	}
-
-	projectB := mustProject(t, projects, projectBPath)
-	if projectB.ActiveCount != 0 {
-		t.Fatalf("unexpected active count for project-b: got %d, want 0", projectB.ActiveCount)
-	}
-	if len(projectB.Sessions) != 1 {
-		t.Fatalf("unexpected session count for project-b: got %d, want 1", len(projectB.Sessions))
-	}
-
-	session3 := mustSession(t, projectB, "nested/session-3")
-	if session3.State != Idle {
-		t.Fatalf("unexpected state for nested/session-3: got %v, want %v", session3.State, Idle)
+	// 各プロジェクトにセッションが1つあり、状態が Thinking であることを確認する。
+	for _, p := range projects {
+		if len(p.Sessions) != 1 {
+			t.Errorf("project %q: unexpected session count: got %d, want 1", p.Name, len(p.Sessions))
+			continue
+		}
+		if p.Sessions[0].State != Thinking {
+			t.Errorf("project %q: unexpected state: got %v, want Thinking", p.Name, p.Sessions[0].State)
+		}
 	}
 }
 
-func TestStateManagerHandleEvent(t *testing.T) {
-	// Modified/Created/Removed の各イベントが状態へ反映されることを確認する。
-	baseDir := t.TempDir()
-	projectPath := filepath.Join(baseDir, "project-a")
-	session1Path := filepath.Join(projectPath, "session-1.jsonl")
-	session2Path := filepath.Join(projectPath, "session-2.jsonl")
+func TestStateManagerUpdateFromScanError(t *testing.T) {
+	// エラーあり ScanResult は前回スナップショットを保持することを確認する。
+	manager := NewStateManager(nil)
 
-	writeJSONL(t, session1Path,
-		`{"type":"assistant","message":{"content":[{"type":"thinking"}]},"created_at":"2026-03-01T10:00:00Z"}`,
-	)
-
-	watcher, err := NewWatcher(baseDir)
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
-	}
-	t.Cleanup(watcher.Stop)
-
-	manager := NewStateManager(watcher)
-	if err := manager.InitialScan(); err != nil {
-		t.Fatalf("InitialScan: %v", err)
+	// 初回: 正常スキャンでプロジェクトを登録する。
+	if err := manager.UpdateFromScan(newScanResult(newProc(100, ToolCodex, "/home/user/proj"))); err != nil {
+		t.Fatalf("UpdateFromScan (initial): %v", err)
 	}
 
-	appendJSONL(t, session1Path,
-		`{"type":"assistant","message":{"content":[{"type":"tool_use"}]},"created_at":"2026-03-01T10:01:00Z"}`,
-	)
-	_ = manager.HandleEvent(WatchEvent{
-		Type:        Modified,
-		Path:        session1Path,
-		ProjectPath: projectPath,
-		SessionID:   "session-1",
-	})
-
-	project := mustProject(t, manager.GetProjects(), projectPath)
-	session1 := mustSession(t, project, "session-1")
-	if session1.State != ToolUse {
-		t.Fatalf("unexpected state for session-1 after modify: got %v, want %v", session1.State, ToolUse)
-	}
-	if !session1.LastActivity.Equal(mustRFC3339(t, "2026-03-01T10:01:00Z")) {
-		t.Fatalf("unexpected last activity after modify: %s", session1.LastActivity)
+	before := manager.Projects()
+	if len(before) != 1 {
+		t.Fatalf("unexpected project count before error scan: %d", len(before))
 	}
 
-	writeJSONL(t, session2Path,
-		`{"type":"assistant","message":{"content":[{"type":"error"}]},"created_at":"2026-03-01T10:02:00Z"}`,
-	)
-	_ = manager.HandleEvent(WatchEvent{
-		Type:        Created,
-		Path:        session2Path,
-		ProjectPath: projectPath,
-		SessionID:   "session-2",
-	})
-
-	project = mustProject(t, manager.GetProjects(), projectPath)
-	if len(project.Sessions) != 2 {
-		t.Fatalf("unexpected session count after create: got %d, want 2", len(project.Sessions))
-	}
-	if project.ActiveCount != 1 {
-		t.Fatalf("unexpected active count after create: got %d, want 1", project.ActiveCount)
-	}
-	session2 := mustSession(t, project, "session-2")
-	if session2.State != Error {
-		t.Fatalf("unexpected state for session-2: got %v, want %v", session2.State, Error)
+	// 2回目: エラーあり — スナップショットは変わらない。
+	errResult := ScanResult{Err: errDummy}
+	if err := manager.UpdateFromScan(errResult); err != nil {
+		t.Fatalf("UpdateFromScan (error): %v", err)
 	}
 
-	if err := os.Remove(session1Path); err != nil {
-		t.Fatalf("Remove session-1 file: %v", err)
+	after := manager.Projects()
+	if len(after) != 1 {
+		t.Errorf("snapshot should be preserved on error: got %d projects, want 1", len(after))
 	}
-	_ = manager.HandleEvent(WatchEvent{
-		Type:        Removed,
-		Path:        session1Path,
-		ProjectPath: projectPath,
-		SessionID:   "session-1",
-	})
+}
 
-	project = mustProject(t, manager.GetProjects(), projectPath)
-	if len(project.Sessions) != 1 {
-		t.Fatalf("unexpected session count after remove: got %d, want 1", len(project.Sessions))
+// errDummy はテスト用のダミーエラー。
+var errDummy = &dummyError{}
+
+type dummyError struct{}
+
+func (e *dummyError) Error() string { return "dummy error" }
+
+func TestStateManagerUpdateFromScanRemoval(t *testing.T) {
+	// プロセスが消えた場合にセッションが削除されることを確認する。
+	manager := NewStateManager(nil)
+
+	// 2プロセスを登録する。
+	if err := manager.UpdateFromScan(newScanResult(
+		newProc(100, ToolCodex, "/proj-a"),
+		newProc(200, ToolGemini, "/proj-b"),
+	)); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
 	}
-	if mustSession(t, project, "session-2").ID != "session-2" {
-		t.Fatalf("session-2 should remain after remove")
+
+	if len(manager.Projects()) != 2 {
+		t.Fatalf("want 2 projects after initial scan")
 	}
-	if project.ActiveCount != 0 {
-		t.Fatalf("unexpected active count after remove: got %d, want 0", project.ActiveCount)
+
+	// PID=100 のみ残して再スキャンする。
+	if err := manager.UpdateFromScan(newScanResult(newProc(100, ToolCodex, "/proj-a"))); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	projects := manager.Projects()
+	if len(projects) != 1 {
+		t.Fatalf("want 1 project after removal, got %d", len(projects))
+	}
+	if projects[0].Path != "/proj-a" {
+		t.Errorf("remaining project should be /proj-a, got %q", projects[0].Path)
+	}
+}
+
+func TestStateManagerUpdateFromScanGroupingByCWD(t *testing.T) {
+	// 同一 CWD の複数プロセスが同一プロジェクトにグルーピングされることを確認する。
+	manager := NewStateManager(nil)
+
+	if err := manager.UpdateFromScan(newScanResult(
+		newProc(100, ToolCodex, "/shared"),
+		newProc(200, ToolGemini, "/shared"),
+	)); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	projects := manager.Projects()
+	if len(projects) != 1 {
+		t.Fatalf("same CWD should be grouped into 1 project, got %d", len(projects))
+	}
+	if len(projects[0].Sessions) != 2 {
+		t.Errorf("want 2 sessions in grouped project, got %d", len(projects[0].Sessions))
+	}
+}
+
+func TestStateManagerUpdateFromScanWorkspaceGrouping(t *testing.T) {
+	// Workspace が設定されたペインに紐づくプロセスはワークスペース優先でグルーピングされる。
+	manager := NewStateManager(nil)
+
+	panes := []terminal.Pane{
+		{ID: 1, Workspace: "my-workspace"},
+		{ID: 2, Workspace: "my-workspace"},
+	}
+	procs := []DetectedProcess{
+		{PID: 100, ToolType: ToolCodex, PaneID: 1, CWD: "/proj-a"},
+		{PID: 200, ToolType: ToolGemini, PaneID: 2, CWD: "/proj-b"},
+	}
+	result := ScanResult{
+		Processes: procs,
+		Panes:     panes,
+		Timestamp: time.Now(),
+	}
+
+	if err := manager.UpdateFromScan(result); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	projects := manager.Projects()
+	if len(projects) != 1 {
+		t.Fatalf("workspace grouping should yield 1 project, got %d", len(projects))
+	}
+	if projects[0].Workspace != "my-workspace" {
+		t.Errorf("project workspace = %q, want my-workspace", projects[0].Workspace)
+	}
+	if len(projects[0].Sessions) != 2 {
+		t.Errorf("want 2 sessions, got %d", len(projects[0].Sessions))
+	}
+}
+
+func TestStateManagerUpdateFromScanDefaultWorkspace(t *testing.T) {
+	// Workspace が "default" の場合は CWD でグルーピングされることを確認する。
+	manager := NewStateManager(nil)
+
+	panes := []terminal.Pane{
+		{ID: 1, Workspace: "default"},
+		{ID: 2, Workspace: "default"},
+	}
+	procs := []DetectedProcess{
+		{PID: 100, ToolType: ToolCodex, PaneID: 1, CWD: "/proj-a"},
+		{PID: 200, ToolType: ToolGemini, PaneID: 2, CWD: "/proj-b"},
+	}
+	result := ScanResult{
+		Processes: procs,
+		Panes:     panes,
+		Timestamp: time.Now(),
+	}
+
+	if err := manager.UpdateFromScan(result); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	projects := manager.Projects()
+	if len(projects) != 2 {
+		t.Fatalf("default workspace should fall back to CWD grouping, got %d projects", len(projects))
+	}
+}
+
+func TestStateManagerProjectsSortOrder(t *testing.T) {
+	// ソート規則: 状態優先度 Waiting > Error > Thinking > ToolUse > Idle を確認する。
+	// resolver なし（nil）では全セッションが Thinking になるため、
+	// ここでは手動でセッションポインタを構築して sortSessionPtrs を直接テストする。
+	sessions := []*Session{
+		{PID: 1, State: Idle},
+		{PID: 2, State: Waiting},
+		{PID: 3, State: ToolUse},
+		{PID: 4, State: Error},
+		{PID: 5, State: Thinking},
+	}
+
+	sortSessionPtrs(sessions)
+
+	want := []SessionState{Waiting, Error, Thinking, ToolUse, Idle}
+	for i, sess := range sessions {
+		if sess.State != want[i] {
+			t.Errorf("sessions[%d].State = %v, want %v", i, sess.State, want[i])
+		}
+	}
+}
+
+func TestStateManagerProjectsSortLastActivity(t *testing.T) {
+	// 同一状態内は LastActivity 降順（新しいほど先頭）であることを確認する。
+	t1 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 1, 1, 11, 0, 0, 0, time.UTC)
+
+	sessions := []*Session{
+		{PID: 1, State: Thinking, LastActivity: t1},
+		{PID: 2, State: Thinking, LastActivity: t2},
+	}
+
+	sortSessionPtrs(sessions)
+
+	if sessions[0].PID != 2 {
+		t.Errorf("newer LastActivity should come first, got PID %d", sessions[0].PID)
+	}
+}
+
+func TestStateManagerSummary(t *testing.T) {
+	// Summary が正しく集計されることを確認する。
+	manager := NewStateManager(nil)
+
+	if err := manager.UpdateFromScan(newScanResult(
+		newProc(100, ToolCodex, "/proj-a"),
+		newProc(200, ToolGemini, "/proj-b"),
+		newProc(300, ToolCodex, "/proj-c"),
+	)); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	summary := manager.Summary()
+	if summary.TotalSessions != 3 {
+		t.Errorf("TotalSessions = %d, want 3", summary.TotalSessions)
+	}
+	// Codex/Gemini は Thinking → Active に含まれる。
+	if summary.Active != 3 {
+		t.Errorf("Active = %d, want 3", summary.Active)
+	}
+	if summary.Waiting != 0 {
+		t.Errorf("Waiting = %d, want 0", summary.Waiting)
+	}
+	if summary.ByTool["codex"] != 2 {
+		t.Errorf("ByTool[codex] = %d, want 2", summary.ByTool["codex"])
+	}
+	if summary.ByTool["gemini"] != 1 {
+		t.Errorf("ByTool[gemini] = %d, want 1", summary.ByTool["gemini"])
+	}
+}
+
+func TestStateManagerPanes(t *testing.T) {
+	// Panes がスキャン結果から保存されることを確認する。
+	manager := NewStateManager(nil)
+
+	panes := []terminal.Pane{
+		{ID: 1, TTYName: "/dev/ttys001"},
+		{ID: 2, TTYName: "/dev/ttys002"},
+	}
+	result := ScanResult{
+		Processes: []DetectedProcess{},
+		Panes:     panes,
+		Timestamp: time.Now(),
+	}
+
+	if err := manager.UpdateFromScan(result); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	got := manager.Panes()
+	if len(got) != 2 {
+		t.Errorf("Panes() = %d, want 2", len(got))
+	}
+}
+
+func TestStateManagerProjectsDefensiveCopy(t *testing.T) {
+	// Projects() が防御的コピーを返すことを確認する（返り値を変更しても内部状態が変わらない）。
+	manager := NewStateManager(nil)
+
+	if err := manager.UpdateFromScan(newScanResult(newProc(100, ToolCodex, "/proj"))); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	projects := manager.Projects()
+	if len(projects) == 0 || len(projects[0].Sessions) == 0 {
+		t.Fatal("expected at least one project with one session")
+	}
+
+	// 返り値を改ざんする。
+	projects[0].Name = "mutated"
+	projects[0].Sessions[0].State = Error
+
+	// 再取得して内部状態が変わっていないことを確認する。
+	fresh := manager.Projects()
+	if fresh[0].Name == "mutated" {
+		t.Error("Projects() should return a defensive copy (Name was mutated)")
+	}
+	if fresh[0].Sessions[0].State == Error {
+		t.Error("Projects() should return a defensive copy (State was mutated)")
+	}
+}
+
+func TestStateManagerEmptyProjects(t *testing.T) {
+	// プロセスが0件のとき Projects() が空スライスを返すことを確認する。
+	manager := NewStateManager(nil)
+
+	if err := manager.UpdateFromScan(newScanResult()); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	projects := manager.Projects()
+	if projects == nil {
+		t.Error("Projects() should return non-nil empty slice")
+	}
+	if len(projects) != 0 {
+		t.Errorf("Projects() = %d, want 0", len(projects))
 	}
 }
 
 func TestStateManagerGetProjects(t *testing.T) {
-	// GetProjects がソート済みかつ防御的コピーを返すことを確認する。
-	baseDir := t.TempDir()
-	projectAPath := filepath.Join(baseDir, "project-a")
-	projectBPath := filepath.Join(baseDir, "project-b")
-
-	writeJSONL(t, filepath.Join(projectAPath, "session-2.jsonl"),
-		`{"type":"assistant","message":{"content":[{"type":"thinking"}]},"created_at":"2026-03-01T11:01:00Z"}`,
-	)
-	writeJSONL(t, filepath.Join(projectAPath, "session-1.jsonl"),
-		`{"type":"assistant","message":{"content":[{"type":"tool_use"}]},"created_at":"2026-03-01T11:02:00Z"}`,
-	)
-	writeJSONL(t, filepath.Join(projectBPath, "session-1.jsonl"),
-		`{"type":"assistant","message":{"content":[{"type":"error"}]},"created_at":"2026-03-01T11:03:00Z"}`,
-	)
-
-	watcher, err := NewWatcher(baseDir)
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
-	}
-	t.Cleanup(watcher.Stop)
-
-	manager := NewStateManager(watcher)
-	if err := manager.InitialScan(); err != nil {
-		t.Fatalf("InitialScan: %v", err)
-	}
-
-	projects := manager.GetProjects()
-	if len(projects) != 2 {
-		t.Fatalf("unexpected project count: got %d, want 2", len(projects))
-	}
-	if projects[0].Path != projectAPath || projects[1].Path != projectBPath {
-		t.Fatalf("projects should be sorted by path")
-	}
-
-	projectA := mustProject(t, projects, projectAPath)
-	if len(projectA.Sessions) != 2 {
-		t.Fatalf("unexpected session count: got %d, want 2", len(projectA.Sessions))
-	}
-	if projectA.Sessions[0].ID != "session-1" || projectA.Sessions[1].ID != "session-2" {
-		t.Fatalf("sessions should be sorted by id")
-	}
-
-	projects[0].DisplayName = "mutated"
-	projects[0].Sessions[0].State = Idle
-
-	fresh := manager.GetProjects()
-	projectAFresh := mustProject(t, fresh, projectAPath)
-	if projectAFresh.DisplayName == "mutated" {
-		t.Fatalf("GetProjects should return copied project data")
-	}
-	if mustSession(t, projectAFresh, "session-1").State != ToolUse {
-		t.Fatalf("GetProjects should return copied session data")
-	}
-}
-
-func TestStateManagerGetStatus(t *testing.T) {
-	// GetStatus が現在時刻と最新プロジェクト一覧を返すことを確認する。
-	baseDir := t.TempDir()
-	projectPath := filepath.Join(baseDir, "project-a")
-
-	writeJSONL(t, filepath.Join(projectPath, "session-1.jsonl"),
-		`{"type":"assistant","message":{"content":[{"type":"thinking"}]},"created_at":"2026-03-01T12:00:00Z"}`,
-	)
-
-	watcher, err := NewWatcher(baseDir)
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
-	}
-	t.Cleanup(watcher.Stop)
-
-	manager := NewStateManager(watcher)
-	if err := manager.InitialScan(); err != nil {
-		t.Fatalf("InitialScan: %v", err)
-	}
-
-	before := time.Now().UTC()
-	status := manager.GetStatus()
-
-	if status.UpdatedAt.IsZero() {
-		t.Fatalf("UpdatedAt should not be zero")
-	}
-	if status.UpdatedAt.Before(before) {
-		t.Fatalf("UpdatedAt should be greater than scan timestamp")
-	}
-
-	wantProjects := manager.GetProjects()
-	if !reflect.DeepEqual(status.Projects, wantProjects) {
-		t.Fatalf("status projects mismatch")
-	}
-}
-
-func writeJSONL(t *testing.T, filePath string, records ...string) {
-	t.Helper()
-
-	lines := make([]string, 0, len(records))
-	for _, record := range records {
-		lines = append(lines, strings.TrimSpace(record))
-	}
-	payload := strings.Join(lines, "\n") + "\n"
-
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", filepath.Dir(filePath), err)
-	}
-	if err := os.WriteFile(filePath, []byte(payload), 0o644); err != nil {
-		t.Fatalf("write %s: %v", filePath, err)
-	}
-}
-
-func appendJSONL(t *testing.T, filePath string, records ...string) {
-	t.Helper()
-
-	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		t.Fatalf("open %s: %v", filePath, err)
-	}
-	defer file.Close()
-
-	for _, record := range records {
-		if _, err := file.WriteString(strings.TrimSpace(record) + "\n"); err != nil {
-			t.Fatalf("append %s: %v", filePath, err)
-		}
-	}
-}
-
-func mustProject(t *testing.T, projects []Project, path string) Project {
-	t.Helper()
-
-	for _, project := range projects {
-		if project.Path == path {
-			return project
-		}
-	}
-	t.Fatalf("project not found: %s", path)
-	return Project{}
-}
-
-func mustSession(t *testing.T, project Project, sessionID string) *Session {
-	t.Helper()
-
-	for _, session := range project.Sessions {
-		if session != nil && session.ID == sessionID {
-			return session
-		}
-	}
-	t.Fatalf("session not found: %s", sessionID)
-	return nil
-}
-
-func mustRFC3339(t *testing.T, value string) time.Time {
-	t.Helper()
-
-	parsed, err := time.Parse(time.RFC3339, value)
-	if err != nil {
-		t.Fatalf("parse time %q: %v", value, err)
-	}
-	return parsed
-}
-
-func TestStateManagerInitialScanNilWatcher(t *testing.T) {
+	// GetProjects が Projects と同じ結果を返すことを確認する（v1 互換）。
 	manager := NewStateManager(nil)
-	err := manager.InitialScan()
-	if err == nil {
-		t.Fatal("expected error for nil watcher")
+
+	if err := manager.UpdateFromScan(newScanResult(newProc(100, ToolCodex, "/proj"))); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	p1 := manager.Projects()
+	p2 := manager.GetProjects()
+
+	if len(p1) != len(p2) {
+		t.Errorf("GetProjects() length %d != Projects() length %d", len(p2), len(p1))
 	}
 }
 
-func TestStateManagerHandleEventDefaultType(t *testing.T) {
-	baseDir := t.TempDir()
-	watcher, err := NewWatcher(baseDir)
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
-	}
-	t.Cleanup(watcher.Stop)
-
-	manager := NewStateManager(watcher)
-
-	// 未知イベントタイプは無視される。
-	err = manager.HandleEvent(WatchEvent{
-		Type:        WatchEventType(999),
-		Path:        "/tmp/dummy.jsonl",
-		ProjectPath: "/tmp/project",
-		SessionID:   "s1",
-	})
-	if err != nil {
-		t.Fatalf("expected no error for unknown event type, got %v", err)
-	}
-}
-
-func TestStateManagerHandleEventRemovedEmptyPath(t *testing.T) {
-	baseDir := t.TempDir()
-	projectPath := filepath.Join(baseDir, "project-a")
-	sessionPath := filepath.Join(projectPath, "session-1.jsonl")
-	writeJSONL(t, sessionPath, `{"type":"thinking","role":"assistant"}`)
-
-	watcher, err := NewWatcher(baseDir)
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
-	}
-	t.Cleanup(watcher.Stop)
-
-	manager := NewStateManager(watcher)
-	if err := manager.InitialScan(); err != nil {
-		t.Fatalf("InitialScan: %v", err)
+func TestCalcSummaryWaiting(t *testing.T) {
+	// Waiting 状態は Active と Waiting の両方にカウントされることを確認する。
+	projects := []Project{
+		{
+			Sessions: []*Session{
+				{State: Waiting, Tool: ToolClaude},
+				{State: Idle, Tool: ToolClaude},
+			},
+		},
 	}
 
-	// 空パスでの Removed イベント。
-	err = manager.HandleEvent(WatchEvent{
-		Type:        Removed,
-		Path:        "",
-		ProjectPath: projectPath,
-		SessionID:   "session-1",
-	})
-	if err != nil {
-		t.Fatalf("HandleEvent: %v", err)
+	s := calcSummary(projects)
+	if s.TotalSessions != 2 {
+		t.Errorf("TotalSessions = %d, want 2", s.TotalSessions)
 	}
-
-	projects := manager.GetProjects()
-	if len(projects) != 0 {
-		t.Errorf("expected 0 projects after remove, got %d", len(projects))
+	if s.Active != 1 {
+		t.Errorf("Active = %d, want 1", s.Active)
+	}
+	if s.Waiting != 1 {
+		t.Errorf("Waiting = %d, want 1", s.Waiting)
 	}
 }
 
-func TestStateManagerHandleEventCreatedEmptyPath(t *testing.T) {
-	baseDir := t.TempDir()
-	projectPath := filepath.Join(baseDir, "project-a")
-	sessionPath := filepath.Join(projectPath, "session-1.jsonl")
-	writeJSONL(t, sessionPath, `{"type":"thinking","role":"assistant"}`)
-
-	watcher, err := NewWatcher(baseDir)
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
-	}
-	t.Cleanup(watcher.Stop)
-
-	manager := NewStateManager(watcher)
-
-	// Path 空で Created イベント → resolveSessionFilePath で解決される。
-	err = manager.HandleEvent(WatchEvent{
-		Type:        Created,
-		Path:        "",
-		ProjectPath: projectPath,
-		SessionID:   "session-1",
-	})
-	if err != nil {
-		t.Fatalf("HandleEvent: %v", err)
+func TestCalcSummaryNilSession(t *testing.T) {
+	// nil セッションがあってもパニックしないことを確認する。
+	projects := []Project{
+		{
+			Sessions: []*Session{
+				{State: Thinking, Tool: ToolCodex},
+				nil,
+			},
+		},
 	}
 
-	projects := manager.GetProjects()
-	if len(projects) != 1 {
-		t.Fatalf("expected 1 project, got %d", len(projects))
+	s := calcSummary(projects)
+	if s.TotalSessions != 1 {
+		t.Errorf("TotalSessions = %d, want 1 (nil session should be skipped)", s.TotalSessions)
 	}
 }
 
-func TestStateManagerHandleEventCreatedNonExistPath(t *testing.T) {
-	baseDir := t.TempDir()
-	projectPath := filepath.Join(baseDir, "project-a")
-	if err := os.MkdirAll(projectPath, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+func TestSortSessionPtrsNilSafe(t *testing.T) {
+	// nil ポインタが混在してもパニックしないことを確認する。
+	sessions := []*Session{
+		nil,
+		{PID: 1, State: Thinking},
+		nil,
 	}
 
-	watcher, err := NewWatcher(baseDir)
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
-	}
-	t.Cleanup(watcher.Stop)
+	sortSessionPtrs(sessions) // パニックしなければ OK
+}
 
-	manager := NewStateManager(watcher)
-
-	// 存在しないセッションファイルへの Created イベント。
-	err = manager.HandleEvent(WatchEvent{
-		Type:        Created,
-		Path:        "",
-		ProjectPath: projectPath,
-		SessionID:   "nonexistent",
-	})
-	if err != nil {
-		t.Fatalf("expected nil error for non-existent session, got %v", err)
+func TestProjectPriorityNoSessions(t *testing.T) {
+	// セッションなしのプロジェクトは最低優先度を返すことを確認する。
+	p := Project{}
+	got := projectPriority(p)
+	want := len(statePriority)
+	if got != want {
+		t.Errorf("projectPriority(empty) = %d, want %d", got, want)
 	}
 }
 
-func TestLatestEntryCreatedAt(t *testing.T) {
-	t1 := mustRFC3339(t, "2026-03-01T10:00:00Z")
-	t2 := mustRFC3339(t, "2026-03-01T11:00:00Z")
+func TestResolveProjectKey(t *testing.T) {
+	proc := DetectedProcess{PID: 1, PaneID: 10, CWD: "/my/project"}
 
 	tests := []struct {
-		name    string
-		entries []*Entry
-		want    time.Time
+		name      string
+		workspace string
+		wantWS    string
+		wantCWD   string
 	}{
-		{"empty", []*Entry{}, time.Time{}},
-		{"all nil", []*Entry{nil, nil}, time.Time{}},
-		{"all zero time", []*Entry{{Type: "thinking"}}, time.Time{}},
-		{"last has time", []*Entry{{CreatedAt: t1}, {CreatedAt: t2}}, t2},
-		{"only first has time", []*Entry{{CreatedAt: t1}, {Type: "thinking"}}, t1},
-		{"nil entries mixed", []*Entry{nil, {CreatedAt: t1}, nil}, t1},
+		{"workspace set", "my-ws", "my-ws", ""},
+		{"workspace default", "default", "", "/my/project"},
+		{"workspace empty", "", "", "/my/project"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := latestEntryCreatedAt(tc.entries)
-			if !got.Equal(tc.want) {
-				t.Errorf("got %v, want %v", got, tc.want)
+			paneMap := map[int]string{10: tc.workspace}
+			key := resolveProjectKey(proc, paneMap)
+			if key.Workspace != tc.wantWS {
+				t.Errorf("Workspace = %q, want %q", key.Workspace, tc.wantWS)
+			}
+			if key.CWD != tc.wantCWD {
+				t.Errorf("CWD = %q, want %q", key.CWD, tc.wantCWD)
 			}
 		})
 	}
-}
-
-func TestRefreshActiveCountNilSession(t *testing.T) {
-	project := &Project{
-		Sessions: []*Session{
-			{ID: "s1", State: Thinking},
-			nil,
-			{ID: "s2", State: Idle},
-			{ID: "s3", State: ToolUse},
-		},
-	}
-
-	refreshActiveCount(project)
-	if project.ActiveCount != 2 {
-		t.Errorf("ActiveCount = %d, want 2", project.ActiveCount)
-	}
-}
-
-func TestResolveSessionFilePath(t *testing.T) {
-	dir := t.TempDir()
-	projectPath := filepath.Join(dir, "project")
-	if err := os.MkdirAll(projectPath, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	// jsonl ファイルがある場合。
-	jsonlPath := filepath.Join(projectPath, "session-1.jsonl")
-	if err := os.WriteFile(jsonlPath, []byte("{}"), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	resolved, err := resolveSessionFilePath(projectPath, "session-1")
-	if err != nil {
-		t.Fatalf("resolveSessionFilePath: %v", err)
-	}
-	if resolved != jsonlPath {
-		t.Errorf("got %q, want %q", resolved, jsonlPath)
-	}
-
-	// json ファイルのみの場合。
-	jsonPath := filepath.Join(projectPath, "session-2.json")
-	if err := os.WriteFile(jsonPath, []byte("{}"), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	resolved, err = resolveSessionFilePath(projectPath, "session-2")
-	if err != nil {
-		t.Fatalf("resolveSessionFilePath: %v", err)
-	}
-	if resolved != jsonPath {
-		t.Errorf("got %q, want %q", resolved, jsonPath)
-	}
-
-	// 存在しない場合。
-	_, err = resolveSessionFilePath(projectPath, "nonexistent")
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("expected ErrNotExist, got %v", err)
-	}
-
-	// ディレクトリと同名の場合はスキップされる。
-	dirAsSession := filepath.Join(projectPath, "session-dir.jsonl")
-	if err := os.MkdirAll(dirAsSession, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	_, err = resolveSessionFilePath(projectPath, "session-dir")
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("expected ErrNotExist for directory, got %v", err)
-	}
-}
-
-func TestRemoveSessionByPath(t *testing.T) {
-	baseDir := t.TempDir()
-	projectPath := filepath.Join(baseDir, "project-a")
-	session1Path := filepath.Join(projectPath, "session-1.jsonl")
-	session2Path := filepath.Join(projectPath, "session-2.jsonl")
-
-	writeJSONL(t, session1Path, `{"type":"thinking"}`)
-	writeJSONL(t, session2Path, `{"type":"idle"}`)
-
-	watcher, err := NewWatcher(baseDir)
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
-	}
-	t.Cleanup(watcher.Stop)
-
-	manager := NewStateManager(watcher)
-	if err := manager.InitialScan(); err != nil {
-		t.Fatalf("InitialScan: %v", err)
-	}
-
-	// sessionID 空 + sessionPath でマッチして削除。
-	manager.removeSession(projectPath, "", session1Path)
-
-	projects := manager.GetProjects()
-	project := mustProject(t, projects, projectPath)
-	if len(project.Sessions) != 1 {
-		t.Fatalf("expected 1 session after remove, got %d", len(project.Sessions))
-	}
-	if project.Sessions[0].ID != "session-2" {
-		t.Errorf("remaining session = %q, want session-2", project.Sessions[0].ID)
-	}
-}
-
-func TestRemoveSessionLastSessionDeletesProject(t *testing.T) {
-	baseDir := t.TempDir()
-	projectPath := filepath.Join(baseDir, "project-a")
-	sessionPath := filepath.Join(projectPath, "session-1.jsonl")
-
-	writeJSONL(t, sessionPath, `{"type":"thinking"}`)
-
-	watcher, err := NewWatcher(baseDir)
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
-	}
-	t.Cleanup(watcher.Stop)
-
-	manager := NewStateManager(watcher)
-	if err := manager.InitialScan(); err != nil {
-		t.Fatalf("InitialScan: %v", err)
-	}
-
-	_ = manager.HandleEvent(WatchEvent{
-		Type:        Removed,
-		Path:        sessionPath,
-		ProjectPath: projectPath,
-		SessionID:   "session-1",
-	})
-
-	projects := manager.GetProjects()
-	if len(projects) != 0 {
-		t.Errorf("expected 0 projects after removing last session, got %d", len(projects))
-	}
-}
-
-func TestRemoveSessionNonExistentProject(t *testing.T) {
-	baseDir := t.TempDir()
-	watcher, err := NewWatcher(baseDir)
-	if err != nil {
-		t.Fatalf("NewWatcher: %v", err)
-	}
-	t.Cleanup(watcher.Stop)
-
-	manager := NewStateManager(watcher)
-
-	// 存在しないプロジェクトの削除はパニックしない。
-	manager.removeSession("/nonexistent", "s1", "/nonexistent/s1.jsonl")
-}
-
-func TestIncrementalReaderResetNilOffsets(t *testing.T) {
-	r := &IncrementalReader{offsets: nil}
-	// nil offsets で Reset してもパニックしない。
-	r.Reset("/some/path")
 }

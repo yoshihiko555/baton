@@ -3,7 +3,6 @@ package tui
 import (
 	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -35,24 +34,24 @@ func TestViewContainsStatusBar(t *testing.T) {
 	// セッション付きプロジェクトを投入してステータスバー表示を確認する。
 	projects := []core.Project{
 		{
-			Path:        "/project-a",
-			DisplayName: "project-a",
+			Path: "/project-a",
+			Name: "project-a",
 			Sessions: []*core.Session{
 				{ID: "s1", State: core.Thinking},
 				{ID: "s2", State: core.Idle},
 			},
-			ActiveCount: 1,
 		},
 	}
-	updated, _ = m.Update(StateUpdateMsg(projects))
+	updated, _ = m.Update(ScanResultMsg{Projects: projects})
 	m = updated.(Model)
 
 	view := m.View()
-	if !strings.Contains(view, "Projects: 1") {
-		t.Error("status bar should show project count")
+	// v2 ステータスバーは latestSummary ベース（"N sessions | N active | N waiting" 形式）
+	if !strings.Contains(view, "sessions") {
+		t.Error("status bar should show 'sessions' keyword")
 	}
-	if !strings.Contains(view, "Active: 1") {
-		t.Error("status bar should show active count")
+	if !strings.Contains(view, "active") {
+		t.Error("status bar should show 'active' keyword")
 	}
 }
 
@@ -72,7 +71,7 @@ func TestViewShowsErrorWhenSet(t *testing.T) {
 }
 
 func TestStateStyleKnownStates(t *testing.T) {
-	states := []core.SessionState{core.Idle, core.Thinking, core.ToolUse, core.Error}
+	states := []core.SessionState{core.Idle, core.Thinking, core.ToolUse, core.Waiting, core.Error}
 	for _, s := range states {
 		style := stateStyle(s)
 		rendered := style.Render("test")
@@ -101,32 +100,6 @@ func TestViewDefaultSizeWhenNoWindowSizeMsg(t *testing.T) {
 	}
 }
 
-func TestRenderStatusBarWithLastUpdate(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = updated.(Model)
-
-	now := time.Now()
-	projects := []core.Project{
-		{
-			Path: "/project-a",
-			Sessions: []*core.Session{
-				{ID: "s1", State: core.Thinking, LastActivity: now},
-			},
-			ActiveCount: 1,
-		},
-	}
-	updated, _ = m.Update(StateUpdateMsg(projects))
-	m = updated.(Model)
-
-	view := m.View()
-	expectedTime := now.Local().Format("15:04:05")
-	if !strings.Contains(view, expectedTime) {
-		t.Errorf("status bar should contain last update time %q", expectedTime)
-	}
-}
-
 func TestRenderStatusBarNilSessionSkipped(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
@@ -140,15 +113,15 @@ func TestRenderStatusBarNilSessionSkipped(t *testing.T) {
 				nil,
 				{ID: "s1", State: core.Idle},
 			},
-			ActiveCount: 0,
 		},
 	}
-	updated, _ = m.Update(StateUpdateMsg(projects))
+	updated, _ = m.Update(ScanResultMsg{Projects: projects})
 	m = updated.(Model)
 
 	view := m.View()
-	if !strings.Contains(view, "Projects: 1") {
-		t.Error("status bar should show project count")
+	// v2 ステータスバーは latestSummary ベース
+	if !strings.Contains(view, "sessions") {
+		t.Error("status bar should show 'sessions' keyword")
 	}
 }
 

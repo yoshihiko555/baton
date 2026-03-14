@@ -47,6 +47,11 @@ const (
 	Error
 )
 
+// MarshalJSON は状態値を JSON 文字列として出力する。
+func (s SessionState) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + s.String() + `"`), nil
+}
+
 // String は SessionState の文字列表現を返す。
 func (s SessionState) String() string {
 	switch s {

@@ -10,33 +10,29 @@ import (
 	"time"
 )
 
-func TestExporterWriteStatusJSONValidJSON(t *testing.T) {
+func TestExporterwriteAtomicJSONValidJSON(t *testing.T) {
 	// 正常系: 整形 JSON が出力され、構文としても妥当であることを確認する。
 	destPath := filepath.Join(t.TempDir(), "status.json")
-	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 
 	status := StatusOutput{
-		Projects: []Project{
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Projects: []ProjectOutput{
 			{
-				Path:        "/tmp/project-a",
-				DisplayName: "project-a",
-				ActiveCount: 1,
-				Sessions: []*Session{
+				Name: "project-a",
+				Path: "/tmp/project-a",
+				Sessions: []SessionOutput{
 					{
-						ID:           "session-1",
-						ProjectPath:  "/tmp/project-a",
-						State:        Thinking,
-						LastActivity: now,
-						PaneID:       "pane-1",
+						PID:   1234,
+						Tool:  "claude",
+						State: "thinking",
 					},
 				},
 			},
 		},
-		UpdatedAt: now,
 	}
 
-	if err := WriteStatusJSON(status, destPath); err != nil {
-		t.Fatalf("WriteStatusJSON returned error: %v", err)
+	if err := writeAtomicJSON(status, destPath); err != nil {
+		t.Fatalf("writeAtomicJSON returned error: %v", err)
 	}
 
 	content, err := os.ReadFile(destPath)
@@ -58,7 +54,7 @@ func TestExporterWriteStatusJSONValidJSON(t *testing.T) {
 	}
 }
 
-func TestExporterWriteStatusJSONAtomicReplace(t *testing.T) {
+func TestExporterwriteAtomicJSONAtomicReplace(t *testing.T) {
 	// 置換時に新旧ファイル記述子が分離される（原子的置換）ことを確認する。
 	destPath := filepath.Join(t.TempDir(), "status.json")
 	oldContent := []byte("old-content\n")
@@ -74,17 +70,17 @@ func TestExporterWriteStatusJSONAtomicReplace(t *testing.T) {
 	defer oldFile.Close()
 
 	status := StatusOutput{
-		Projects: []Project{
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Projects: []ProjectOutput{
 			{
-				Path:        "/tmp/project-b",
-				DisplayName: "project-b",
+				Name: "project-b",
+				Path: "/tmp/project-b",
 			},
 		},
-		UpdatedAt: time.Date(2026, 3, 1, 13, 0, 0, 0, time.UTC),
 	}
 
-	if err := WriteStatusJSON(status, destPath); err != nil {
-		t.Fatalf("WriteStatusJSON returned error: %v", err)
+	if err := writeAtomicJSON(status, destPath); err != nil {
+		t.Fatalf("writeAtomicJSON returned error: %v", err)
 	}
 
 	newContent, err := os.ReadFile(destPath)
@@ -112,11 +108,11 @@ func TestExporterWriteStatusJSONAtomicReplace(t *testing.T) {
 	}
 }
 
-func TestExporterWriteStatusJSONInvalidPath(t *testing.T) {
+func TestExporterwriteAtomicJSONInvalidPath(t *testing.T) {
 	// 異常系: 親ディレクトリが無いパスではエラーになることを確認する。
 	destPath := filepath.Join(t.TempDir(), "missing", "status.json")
 
-	err := WriteStatusJSON(StatusOutput{}, destPath)
+	err := writeAtomicJSON(StatusOutput{}, destPath)
 	if err == nil {
 		t.Fatalf("expected error for invalid destination path, got nil")
 	}
