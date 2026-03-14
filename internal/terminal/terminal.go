@@ -7,19 +7,22 @@ type Terminal interface {
 	// ListPanes はターミナル上の全ペイン情報を返す。
 	ListPanes() ([]Pane, error)
 	// FocusPane は指定 paneID のペインをアクティブにする。
-	FocusPane(paneID string) error
+	FocusPane(paneID int) error
 	// IsAvailable はターミナルが利用可能かを返す。
 	IsAvailable() bool
 	// Name はターミナル識別子（例: "wezterm"）を返す。
 	Name() string
 }
 
-// Pane はターミナルのペイン（タブ情報含む）を表す。
+// Pane はターミナルのペイン（タブ情報含む）を表す内部型。
 type Pane struct {
-	ID         string `json:"pane_id"`
-	Title      string `json:"title"`
-	TabID      string `json:"tab_id"`
-	WorkingDir string `json:"cwd"`
+	ID         int    // WezTerm CLI が返す数値 pane_id
+	Title      string // ペインタイトル
+	TabID      int    // WezTerm CLI が返す数値 tab_id
+	WorkingDir string // 正規化済み CWD (file:// プレフィックスなし)
+	TTYName    string // TTY デバイス名 (例: /dev/ttys003)
+	IsActive   bool   // そのペインがフォーカス中か
+	Workspace  string // WezTerm ワークスペース名
 }
 
 // Terminal 実装が返す代表的なエラー。

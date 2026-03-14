@@ -1,9 +1,35 @@
 package core
 
 import (
-	"encoding/json"
+	"context"
 	"time"
+
+	"github.com/yoshihiko555/baton/internal/terminal"
 )
+
+// ToolType は監視対象ツールの種別を表す。
+type ToolType int
+
+const (
+	ToolClaude ToolType = iota
+	ToolCodex
+	ToolGemini
+	ToolUnknown
+)
+
+// String は ToolType の文字列表現を返す。
+func (t ToolType) String() string {
+	switch t {
+	case ToolClaude:
+		return "claude"
+	case ToolCodex:
+		return "codex"
+	case ToolGemini:
+		return "gemini"
+	default:
+		return "unknown"
+	}
+}
 
 // SessionState はセッションの現在状態を表す。
 type SessionState int
@@ -15,6 +41,8 @@ const (
 	Thinking
 	// ToolUse はツール実行中の状態。
 	ToolUse
+	// Waiting はツール承認待ちの状態。
+	Waiting
 	// Error はエラー状態。
 	Error
 )
@@ -28,6 +56,8 @@ func (s SessionState) String() string {
 		return "thinking"
 	case ToolUse:
 		return "tool_use"
+	case Waiting:
+		return "waiting"
 	case Error:
 		return "error"
 	default:
@@ -35,64 +65,143 @@ func (s SessionState) String() string {
 	}
 }
 
-// MarshalJSON は状態値を JSON 文字列として出力する。
-func (s SessionState) MarshalJSON() ([]byte, error) {
-	return json.Marshal(s.String())
-}
-
-// ContentBlock は message.content[] の1要素を表す。
-type ContentBlock struct {
-	Type string `json:"type"`
-}
-
-// Message は JSONL レコード内の message フィールドを表す。
-type Message struct {
-	Content []ContentBlock `json:"content"`
-}
-
-// Entry は JSONL ストリームの1レコードを表す。
-type Entry struct {
-	Type      string          `json:"type"`
-	Role      string          `json:"role,omitempty"`
-	Message   *Message        `json:"message,omitempty"`
-	Timestamp string          `json:"timestamp,omitempty"`
-	CreatedAt time.Time       `json:"created_at,omitempty"`
-	Raw       json.RawMessage `json:"-"`
-}
-
 // Session は監視対象となる1セッションの集約情報。
 type Session struct {
-	ID           string       `json:"id"`
-	ProjectPath  string       `json:"project_path"`
-	State        SessionState `json:"state"`
-	LastActivity time.Time    `json:"last_activity"`
-	PaneID       string       `json:"pane_id,omitempty"`
-	FilePath     string       `json:"-"`
+	// v2 フィールド（プロセスベース監視）
+	PID              int
+	Tool             ToolType
+	WorkingDir       string
+	Branch           string
+	CurrentTool      string
+	FirstPrompt      string
+	InputTokens      int
+	OutputTokens     int
+	Ambiguous        bool
+	CandidatePaneIDs []int
+
+	// 共通フィールド
+	State        SessionState
+	LastActivity time.Time
+
+	// v1 互換フィールド（watcher / tui が参照。v2 完全移行後に削除予定）
+	ID          string `json:"id,omitempty"`
+	ProjectPath string `json:"project_path,omitempty"`
+	FilePath    string `json:"-"`
+	PaneID      string `json:"pane_id,omitempty"`
 }
 
 // Project はプロジェクト単位にまとめたセッション情報。
 type Project struct {
-	Path        string     `json:"path"`
-	DisplayName string     `json:"display_name"`
-	Sessions    []*Session `json:"sessions"`
-	ActiveCount int        `json:"active_count"`
+	// v2 フィールド
+	Path      string
+	Name      string
+	Workspace string
+
+	// v1 互換フィールド（tui が参照。v2 完全移行後に削除予定）
+	DisplayName string     `json:"display_name,omitempty"`
+	ActiveCount int        `json:"active_count,omitempty"`
+	Sessions    []*Session `json:"sessions,omitempty"`
 }
+
+// DetectedProcess はプロセススキャンで検出された1プロセスを表す。
+type DetectedProcess struct {
+	PID      int
+	Name     string
+	ToolType ToolType
+	PaneID   int
+	TTY      string
+	CWD      string
+}
+
+// ScanResult はプロセススキャンの結果を表す。
+type ScanResult struct {
+	Processes []DetectedProcess
+	Panes     []terminal.Pane
+	Timestamp time.Time
+	Err       error
+}
+
+// Summary はセッション状態の集計情報を表す。
+type Summary struct {
+	TotalSessions int
+	Active        int
+	Waiting       int
+	ByTool        map[string]int
+}
+
+// StateUpdater はスキャン結果から状態を更新するインターフェース。
+type StateUpdater interface {
+	UpdateFromScan(result ScanResult) error
+}
+
+// StateReader は集約済み状態への読み取り専用アクセスを定義する。
+type StateReader interface {
+	Projects() []Project
+	Summary() Summary
+	Panes() []terminal.Pane
+	// GetProjects は v1 互換メソッド（tui が参照。v2 完全移行後に削除予定）
+	GetProjects() []Project
+}
+
+// StateWriter は集約済み状態への更新操作を定義する（v1 互換）。
+type StateWriter interface {
+	HandleEvent(event WatchEvent) error
+}
+
+// Scanner はプロセス・ペイン情報をスキャンするインターフェース。
+type Scanner interface {
+	Scan(ctx context.Context) ScanResult
+}
+
+// --- 出力 DTO 型 ---
 
 // StatusOutput は外部出力向けのステータスペイロード。
 type StatusOutput struct {
-	Projects  []Project `json:"projects"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Version         int             `json:"version"`
+	Timestamp       string          `json:"timestamp"`
+	Projects        []ProjectOutput `json:"projects"`
+	Summary         SummaryOutput   `json:"summary"`
+	FormattedStatus string          `json:"formatted_status"`
 }
+
+// ProjectOutput はプロジェクト情報の出力 DTO。
+type ProjectOutput struct {
+	Name      string          `json:"name"`
+	Path      string          `json:"path"`
+	Workspace string          `json:"workspace,omitempty"`
+	Sessions  []SessionOutput `json:"sessions"`
+}
+
+// SessionOutput はセッション情報の出力 DTO。
+type SessionOutput struct {
+	PID          int    `json:"pid"`
+	Tool         string `json:"tool"`
+	State        string `json:"state"`
+	PaneID       string `json:"pane_id,omitempty"`
+	WorkingDir   string `json:"working_dir"`
+	Branch       string `json:"branch,omitempty"`
+	CurrentTool  string `json:"current_tool,omitempty"`
+	FirstPrompt  string `json:"first_prompt,omitempty"`
+	InputTokens  int    `json:"input_tokens,omitempty"`
+	OutputTokens int    `json:"output_tokens,omitempty"`
+}
+
+// SummaryOutput は集計情報の出力 DTO。
+type SummaryOutput struct {
+	TotalSessions int            `json:"total_sessions"`
+	Active        int            `json:"active"`
+	Waiting       int            `json:"waiting"`
+	ByTool        map[string]int `json:"by_tool"`
+}
+
+// --- v1 互換型（watcher.go / state.go が参照。Phase 3 以降で削除予定） ---
 
 // WatchEventType はファイル監視イベント種別を表す。
 type WatchEventType int
 
 const (
-	// Created は新規セッションファイル作成を表す。
 	Created WatchEventType = iota
-	// Modified はセッションファイル更新を表す。
 	Modified
-	// Removed はセッションファイル削除を表す。
 	Removed
 )
 
@@ -116,17 +225,6 @@ type WatchEvent struct {
 	Path        string
 	ProjectPath string
 	SessionID   string
-}
-
-// StateReader は集約済み状態への読み取り専用アクセスを定義する。
-type StateReader interface {
-	GetProjects() []Project
-	GetStatus() StatusOutput
-}
-
-// StateWriter は集約済み状態への更新操作を定義する。
-type StateWriter interface {
-	HandleEvent(event WatchEvent) error
 }
 
 // EventSource は監視イベントの読み取り専用チャネルを提供する。

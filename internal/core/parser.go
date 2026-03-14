@@ -7,10 +7,38 @@ import (
 	"errors"
 	"io"
 	"os"
-	"strings"
 )
 
-// ParseRecord は JSONL の1行を Entry に変換し、元の JSON も保持する。
+// Message は JSONL レコード内の message フィールドを表す。
+type Message struct {
+	Role       string         `json:"role"`
+	Content    []ContentBlock `json:"content"`
+	StopReason string         `json:"stop_reason,omitempty"`
+}
+
+// ContentBlock は message.content[] の1要素を表す。
+type ContentBlock struct {
+	Type string `json:"type"`
+	Name string `json:"name,omitempty"`
+}
+
+// ProgressData は progress エントリの data フィールドを表す。
+type ProgressData struct {
+	Type string `json:"type"`
+}
+
+// Entry は JSONL ストリームの1レコードを表す。
+type Entry struct {
+	Type      string       `json:"type"`
+	SubType   string       `json:"subtype,omitempty"`
+	Message   Message      `json:"message,omitempty"`
+	SessionID string       `json:"sessionId,omitempty"`
+	GitBranch string       `json:"gitBranch,omitempty"`
+	Timestamp string       `json:"timestamp,omitempty"`
+	Data      ProgressData `json:"data,omitempty"`
+}
+
+// ParseRecord は JSONL の1行を Entry に変換する。
 func ParseRecord(line []byte) (*Entry, error) {
 	record := bytes.TrimSpace(line)
 	if len(record) == 0 {
@@ -22,62 +50,61 @@ func ParseRecord(line []byte) (*Entry, error) {
 		return nil, err
 	}
 
-	entry.Raw = append(json.RawMessage(nil), record...)
 	return entry, nil
 }
 
-// DetermineSessionState は末尾エントリから セッション状態を判定する。
-// Claude Code の JSONL ではトップレベル type は "assistant"/"user" 等であり、
-// セッション状態は message.content[].type（"thinking", "tool_use", "text" 等）から判定する。
+// DetermineSessionState は末尾エントリからセッション状態を判定する。
 func DetermineSessionState(entries []*Entry) SessionState {
 	if len(entries) == 0 {
 		return Idle
 	}
 
-	// 末尾から assistant エントリを探し、content の型で判定する。
-	for i := len(entries) - 1; i >= 0; i-- {
-		entry := entries[i]
-		if entry == nil {
-			continue
+	last := entries[len(entries)-1]
+	if last == nil {
+		return Idle
+	}
+
+	return classifyEntry(last)
+}
+
+func classifyEntry(e *Entry) SessionState {
+	switch e.Type {
+	case "system":
+		if e.SubType == "turn_duration" {
+			return Idle
+		}
+		return Idle
+	case "assistant":
+		switch e.Message.StopReason {
+		case "end_turn":
+			return Idle
+		case "tool_use":
+			return Waiting
 		}
 
-		entryType := strings.ToLower(strings.TrimSpace(entry.Type))
-
-		// user エントリが先に見つかった場合、AI の応答待ち（thinking 相当）。
-		if entryType == "user" {
-			return Thinking
-		}
-
-		if entryType != "assistant" {
-			continue
-		}
-
-		// assistant エントリの message.content を解析する。
-		if entry.Message == nil || len(entry.Message.Content) == 0 {
+		if len(e.Message.Content) == 0 {
 			return Idle
 		}
 
-		// content の末尾ブロックの type で状態を判定する。
-		lastContent := entry.Message.Content[len(entry.Message.Content)-1]
-		contentType := strings.ToLower(strings.TrimSpace(lastContent.Type))
-		contentType = strings.ReplaceAll(contentType, "-", "_")
-
-		switch contentType {
+		last := e.Message.Content[len(e.Message.Content)-1]
+		switch last.Type {
 		case "thinking":
 			return Thinking
-		case "tool_use":
-			return ToolUse
-		case "tool_result":
-			return ToolUse
 		case "error":
 			return Error
 		default:
-			// "text" など → 応答完了
 			return Idle
 		}
+	case "progress":
+		return ToolUse
+	case "user":
+		if len(e.Message.Content) > 0 && e.Message.Content[0].Type == "tool_result" {
+			return Thinking
+		}
+		return Thinking
+	default:
+		return Idle
 	}
-
-	return Idle
 }
 
 // IncrementalReader はファイル追記分だけを増分読み取りする。
@@ -156,6 +183,55 @@ func (r *IncrementalReader) ReadNew(filepath string) ([]*Entry, error) {
 
 	r.offsets[filepath] = nextOffset
 	return entries, nil
+}
+
+// ReadLastEntry は filepath の末尾から最終エントリ1件を返す。
+// このメソッドは読み取りオフセットを更新しない。
+func (r *IncrementalReader) ReadLastEntry(filepath string) (*Entry, error) {
+	file, err := os.Open(filepath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() == 0 {
+		return nil, nil
+	}
+
+	const tailSize int64 = 4096
+	start := info.Size() - tailSize
+	if start < 0 {
+		start = 0
+	}
+
+	if _, err := file.Seek(start, io.SeekStart); err != nil {
+		return nil, err
+	}
+
+	buf := make([]byte, info.Size()-start)
+	n, err := io.ReadFull(file, buf)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, err
+	}
+	buf = buf[:n]
+
+	lines := bytes.Split(buf, []byte{'\n'})
+	for i := len(lines) - 1; i >= 0; i-- {
+		if len(bytes.TrimSpace(lines[i])) == 0 {
+			continue
+		}
+
+		entry, parseErr := ParseRecord(lines[i])
+		if parseErr == nil {
+			return entry, nil
+		}
+	}
+
+	return nil, nil
 }
 
 // Reset は指定ファイルの読み取りオフセットを破棄する。

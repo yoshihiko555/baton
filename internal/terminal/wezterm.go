@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strconv"
+	"strings"
 )
 
 // WezTerminal は wezterm 向けの Terminal 実装。
@@ -34,11 +35,13 @@ func (w *WezTerminal) ListPanes() ([]Pane, error) {
 	}
 
 	var rawPanes []struct {
-		// pane_id / tab_id は環境により数値または文字列になるため RawMessage で受ける。
-		ID         json.RawMessage `json:"pane_id"`
-		Title      string          `json:"title"`
-		TabID      json.RawMessage `json:"tab_id"`
-		WorkingDir string          `json:"cwd"`
+		ID         int    `json:"pane_id"`
+		Title      string `json:"title"`
+		TabID      int    `json:"tab_id"`
+		WorkingDir string `json:"cwd"`
+		TTYName    string `json:"tty_name"`
+		IsActive   bool   `json:"is_active"`
+		Workspace  string `json:"workspace"`
 	}
 	if err := json.Unmarshal(out, &rawPanes); err != nil {
 		return nil, err
@@ -46,21 +49,14 @@ func (w *WezTerminal) ListPanes() ([]Pane, error) {
 
 	panes := make([]Pane, 0, len(rawPanes))
 	for _, rawPane := range rawPanes {
-		paneID, err := jsonValueToString(rawPane.ID)
-		if err != nil {
-			return nil, fmt.Errorf("invalid pane_id: %w", err)
-		}
-
-		tabID, err := jsonValueToString(rawPane.TabID)
-		if err != nil {
-			return nil, fmt.Errorf("invalid tab_id: %w", err)
-		}
-
 		panes = append(panes, Pane{
-			ID:         paneID,
+			ID:         rawPane.ID,
 			Title:      rawPane.Title,
-			TabID:      tabID,
-			WorkingDir: rawPane.WorkingDir,
+			TabID:      rawPane.TabID,
+			WorkingDir: normalizeCWD(rawPane.WorkingDir),
+			TTYName:    rawPane.TTYName,
+			IsActive:   rawPane.IsActive,
+			Workspace:  rawPane.Workspace,
 		})
 	}
 
@@ -68,12 +64,12 @@ func (w *WezTerminal) ListPanes() ([]Pane, error) {
 }
 
 // FocusPane は指定ペインをアクティブ化する。
-func (w *WezTerminal) FocusPane(paneID string) error {
+func (w *WezTerminal) FocusPane(paneID int) error {
 	if w == nil || w.execFn == nil {
 		return fmt.Errorf("wezterm exec function is not configured")
 	}
 
-	_, err := w.execFn("cli", "activate-pane", "--pane-id", paneID)
+	_, err := w.execFn("cli", "activate-pane", "--pane-id", strconv.Itoa(paneID))
 	if err != nil {
 		return mapWeztermExecError(err)
 	}
@@ -92,6 +88,20 @@ func (w *WezTerminal) Name() string {
 	return "wezterm"
 }
 
+// normalizeCWD は file:// URI を絶対パスに正規化し、末尾スラッシュを除去する。
+func normalizeCWD(cwd string) string {
+	switch {
+	case strings.HasPrefix(cwd, "file://localhost/"):
+		cwd = cwd[len("file://localhost"):]
+	case strings.HasPrefix(cwd, "file://"):
+		cwd = cwd[len("file://"):]
+	}
+	if len(cwd) > 1 {
+		cwd = strings.TrimRight(cwd, "/")
+	}
+	return cwd
+}
+
 func mapWeztermExecError(err error) error {
 	// 実行ファイル未検出は呼び出し側で扱いやすい共通エラーへ変換する。
 	if errors.Is(err, exec.ErrNotFound) {
@@ -99,23 +109,4 @@ func mapWeztermExecError(err error) error {
 	}
 
 	return err
-}
-
-func jsonValueToString(raw json.RawMessage) (string, error) {
-	if len(raw) == 0 {
-		return "", errors.New("empty value")
-	}
-
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return s, nil
-	}
-
-	var i int64
-	if err := json.Unmarshal(raw, &i); err == nil {
-		// 数値 ID は内部表現をそろえるため文字列へ正規化する。
-		return strconv.FormatInt(i, 10), nil
-	}
-
-	return "", fmt.Errorf("unsupported value: %s", string(raw))
 }

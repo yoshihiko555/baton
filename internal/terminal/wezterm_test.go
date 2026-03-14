@@ -10,8 +10,8 @@ import (
 func TestListPanes(t *testing.T) {
 	// list コマンド結果を Pane 構造体へ正規化できることを確認する。
 	sampleJSON := `[
-		{"pane_id": 1, "title": "editor", "tab_id": "2", "cwd": "file:///tmp/project"},
-		{"pane_id": "3", "title": "logs", "tab_id": 4, "cwd": "file:///tmp/logs"}
+		{"pane_id": 1, "title": "editor", "tab_id": 2, "cwd": "file://localhost/tmp/project", "tty_name": "/dev/ttys001", "is_active": true, "workspace": "default"},
+		{"pane_id": 3, "title": "logs", "tab_id": 4, "cwd": "file:///tmp/logs", "tty_name": "/dev/ttys002", "is_active": false, "workspace": "default"}
 	]`
 
 	wez := &WezTerminal{
@@ -31,16 +31,22 @@ func TestListPanes(t *testing.T) {
 
 	want := []Pane{
 		{
-			ID:         "1",
+			ID:         1,
 			Title:      "editor",
-			TabID:      "2",
-			WorkingDir: "file:///tmp/project",
+			TabID:      2,
+			WorkingDir: "/tmp/project",
+			TTYName:    "/dev/ttys001",
+			IsActive:   true,
+			Workspace:  "default",
 		},
 		{
-			ID:         "3",
+			ID:         3,
 			Title:      "logs",
-			TabID:      "4",
-			WorkingDir: "file:///tmp/logs",
+			TabID:      4,
+			WorkingDir: "/tmp/logs",
+			TTYName:    "/dev/ttys002",
+			IsActive:   false,
+			Workspace:  "default",
 		},
 	}
 
@@ -60,7 +66,7 @@ func TestFocusPane(t *testing.T) {
 		},
 	}
 
-	if err := wez.FocusPane("42"); err != nil {
+	if err := wez.FocusPane(42); err != nil {
 		t.Fatalf("FocusPane returned error: %v", err)
 	}
 
@@ -129,10 +135,10 @@ func TestListPanesInvalidJSON(t *testing.T) {
 }
 
 func TestListPanesInvalidPaneID(t *testing.T) {
-	// pane_id が配列などの非対応型の場合。
+	// pane_id が配列などの非対応型の場合は json.Unmarshal でエラーになることを確認する。
 	wez := &WezTerminal{
 		execFn: func(args ...string) ([]byte, error) {
-			return []byte(`[{"pane_id": [1,2], "title": "t", "tab_id": "1", "cwd": "/tmp"}]`), nil
+			return []byte(`[{"pane_id": [1,2], "title": "t", "tab_id": 1, "cwd": "/tmp"}]`), nil
 		},
 	}
 	_, err := wez.ListPanes()
@@ -142,9 +148,10 @@ func TestListPanesInvalidPaneID(t *testing.T) {
 }
 
 func TestListPanesInvalidTabID(t *testing.T) {
+	// tab_id がオブジェクトの場合は json.Unmarshal でエラーになることを確認する。
 	wez := &WezTerminal{
 		execFn: func(args ...string) ([]byte, error) {
-			return []byte(`[{"pane_id": "1", "title": "t", "tab_id": {"nested": true}, "cwd": "/tmp"}]`), nil
+			return []byte(`[{"pane_id": 1, "title": "t", "tab_id": {"nested": true}, "cwd": "/tmp"}]`), nil
 		},
 	}
 	_, err := wez.ListPanes()
@@ -155,7 +162,7 @@ func TestListPanesInvalidTabID(t *testing.T) {
 
 func TestFocusPaneNilExecFn(t *testing.T) {
 	wez := &WezTerminal{execFn: nil}
-	err := wez.FocusPane("1")
+	err := wez.FocusPane(1)
 	if err == nil {
 		t.Fatal("expected error for nil execFn")
 	}
@@ -163,7 +170,7 @@ func TestFocusPaneNilExecFn(t *testing.T) {
 
 func TestFocusPaneNilReceiver(t *testing.T) {
 	var wez *WezTerminal
-	err := wez.FocusPane("1")
+	err := wez.FocusPane(1)
 	if err == nil {
 		t.Fatal("expected error for nil receiver")
 	}
@@ -175,7 +182,7 @@ func TestFocusPaneExecError(t *testing.T) {
 			return nil, errors.New("activate failed")
 		},
 	}
-	err := wez.FocusPane("42")
+	err := wez.FocusPane(42)
 	if err == nil {
 		t.Fatal("expected error from exec failure")
 	}
@@ -202,23 +209,26 @@ func TestMapWeztermExecErrorOther(t *testing.T) {
 	}
 }
 
-func TestJsonValueToStringEmpty(t *testing.T) {
-	_, err := jsonValueToString(nil)
-	if err == nil {
-		t.Fatal("expected error for empty value")
+func TestNormalizeCWD(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"file://localhost prefix", "file://localhost/Users/foo/project", "/Users/foo/project"},
+		{"file:// prefix", "file:///tmp/project", "/tmp/project"},
+		{"already absolute path", "/tmp/project", "/tmp/project"},
+		{"trailing slash removed", "file://localhost/Users/foo/", "/Users/foo"},
+		{"root path preserved", "/", "/"},
+		{"empty string", "", ""},
 	}
-}
 
-func TestJsonValueToStringUnsupported(t *testing.T) {
-	_, err := jsonValueToString([]byte(`[1,2,3]`))
-	if err == nil {
-		t.Fatal("expected error for unsupported value type")
-	}
-}
-
-func TestJsonValueToStringBoolean(t *testing.T) {
-	_, err := jsonValueToString([]byte(`true`))
-	if err == nil {
-		t.Fatal("expected error for boolean value")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeCWD(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizeCWD(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }

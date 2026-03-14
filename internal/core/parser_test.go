@@ -8,38 +8,27 @@ import (
 
 func TestParseRecordValid(t *testing.T) {
 	// 正常な JSONL 1行を Entry に変換できることを確認する。
-	line := []byte(`{"type":"thinking","role":"assistant","created_at":"2026-03-01T10:00:00Z"}` + "\n")
+	line := []byte(`{"type":"assistant","subtype":"","message":{"role":"assistant","content":[],"stop_reason":"end_turn"},"timestamp":"2026-03-01T10:00:00Z"}` + "\n")
 
 	entry, err := ParseRecord(line)
 	if err != nil {
 		t.Fatalf("ParseRecord returned error: %v", err)
 	}
 
-	if entry.Type != "thinking" {
+	if entry.Type != "assistant" {
 		t.Fatalf("unexpected Type: got %q", entry.Type)
 	}
-	if entry.Role != "assistant" {
-		t.Fatalf("unexpected Role: got %q", entry.Role)
+	if entry.Message.Role != "assistant" {
+		t.Fatalf("unexpected Message.Role: got %q", entry.Message.Role)
 	}
-	if entry.CreatedAt.IsZero() {
-		t.Fatalf("CreatedAt should be parsed")
-	}
-
-	wantRaw := `{"type":"thinking","role":"assistant","created_at":"2026-03-01T10:00:00Z"}`
-	if string(entry.Raw) != wantRaw {
-		t.Fatalf("unexpected Raw: got %q, want %q", string(entry.Raw), wantRaw)
-	}
-
-	// Raw が入力バッファを参照せず、コピー保持されることを確認する。
-	line[2] = 'X'
-	if string(entry.Raw) != wantRaw {
-		t.Fatalf("Raw should not change after source mutation: got %q", string(entry.Raw))
+	if entry.Timestamp != "2026-03-01T10:00:00Z" {
+		t.Fatalf("unexpected Timestamp: got %q", entry.Timestamp)
 	}
 }
 
 func TestParseRecordInvalidJSON(t *testing.T) {
 	// 不正 JSON はエラーになることを確認する。
-	_, err := ParseRecord([]byte(`{"type":"thinking"` + "\n"))
+	_, err := ParseRecord([]byte(`{"type":"assistant"` + "\n"))
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -73,29 +62,36 @@ func TestDetermineSessionState(t *testing.T) {
 		{
 			name: "assistant with thinking content",
 			entries: []*Entry{
-				{Type: "assistant", Message: &Message{Content: []ContentBlock{{Type: "tool_use"}}}},
-				{Type: "assistant", Message: &Message{Content: []ContentBlock{{Type: "thinking"}}}},
+				{Type: "assistant", Message: Message{Content: []ContentBlock{{Type: "tool_use"}}}},
+				{Type: "assistant", Message: Message{Content: []ContentBlock{{Type: "thinking"}}}},
 			},
 			want: Thinking,
 		},
 		{
-			name: "tool use normalizes hyphen and case",
+			name: "assistant with stop_reason tool_use means Waiting",
 			entries: []*Entry{
-				{Type: "assistant", Message: &Message{Content: []ContentBlock{{Type: "Tool-Use"}}}},
+				{Type: "assistant", Message: Message{StopReason: "tool_use"}},
 			},
-			want: ToolUse,
+			want: Waiting,
+		},
+		{
+			name: "assistant with stop_reason end_turn means Idle",
+			entries: []*Entry{
+				{Type: "assistant", Message: Message{StopReason: "end_turn"}},
+			},
+			want: Idle,
 		},
 		{
 			name: "error content",
 			entries: []*Entry{
-				{Type: "assistant", Message: &Message{Content: []ContentBlock{{Type: "  error  "}}}},
+				{Type: "assistant", Message: Message{Content: []ContentBlock{{Type: "error"}}}},
 			},
 			want: Error,
 		},
 		{
 			name: "assistant with text content falls back to idle",
 			entries: []*Entry{
-				{Type: "assistant", Message: &Message{Content: []ContentBlock{{Type: "text"}}}},
+				{Type: "assistant", Message: Message{Content: []ContentBlock{{Type: "text"}}}},
 			},
 			want: Idle,
 		},
@@ -107,12 +103,33 @@ func TestDetermineSessionState(t *testing.T) {
 			want: Thinking,
 		},
 		{
-			name: "last entry nil skips to previous entry",
+			name: "user entry with tool_result content means thinking",
 			entries: []*Entry{
-				{Type: "assistant", Message: &Message{Content: []ContentBlock{{Type: "thinking"}}}},
-				nil,
+				{Type: "user", Message: Message{Content: []ContentBlock{{Type: "tool_result"}}}},
 			},
 			want: Thinking,
+		},
+		{
+			name: "progress entry means ToolUse",
+			entries: []*Entry{
+				{Type: "progress"},
+			},
+			want: ToolUse,
+		},
+		{
+			name: "system entry with turn_duration means Idle",
+			entries: []*Entry{
+				{Type: "system", SubType: "turn_duration"},
+			},
+			want: Idle,
+		},
+		{
+			name: "last entry nil means Idle",
+			entries: []*Entry{
+				{Type: "assistant", Message: Message{Content: []ContentBlock{{Type: "thinking"}}}},
+				nil,
+			},
+			want: Idle,
 		},
 	}
 
@@ -145,8 +162,8 @@ func TestIncrementalReaderReadNewBasicAndOffset(t *testing.T) {
 	// 追記分のみ取得し、オフセットが維持されることを確認する。
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
-	content := `{"type":"thinking","role":"assistant"}` + "\n" +
-		`{"type":"tool_use","role":"assistant"}` + "\n"
+	content := `{"type":"thinking"}` + "\n" +
+		`{"type":"tool_use"}` + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
@@ -188,9 +205,9 @@ func TestIncrementalReaderReadNewSkipsIncompleteLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
 
-	first := `{"type":"thinking","role":"assistant"}` + "\n"
-	second := `{"type":"tool_use","role":"assistant"}` + "\n"
-	thirdIncomplete := `{"type":"error","role":"assistant"}`
+	first := `{"type":"thinking"}` + "\n"
+	second := `{"type":"tool_use"}` + "\n"
+	thirdIncomplete := `{"type":"error"}`
 
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
@@ -269,8 +286,8 @@ func TestIncrementalReaderReadNewDetectsRotation(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
 
-	initial := `{"type":"thinking","role":"assistant"}` + "\n" +
-		`{"type":"tool_use","role":"assistant"}` + "\n"
+	initial := `{"type":"thinking"}` + "\n" +
+		`{"type":"tool_use"}` + "\n"
 	if err := os.WriteFile(path, []byte(initial), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
@@ -280,7 +297,7 @@ func TestIncrementalReaderReadNewDetectsRotation(t *testing.T) {
 		t.Fatalf("ReadNew failed: %v", err)
 	}
 
-	rotated := `{"type":"error","role":"assistant"}` + "\n"
+	rotated := `{"type":"error"}` + "\n"
 	if err := os.WriteFile(path, []byte(rotated), 0o644); err != nil {
 		t.Fatalf("WriteFile rotation failed: %v", err)
 	}
@@ -306,7 +323,7 @@ func TestIncrementalReaderReadNewInvalidLineSkipped(t *testing.T) {
 	// 途中に不正行があっても有効行だけを返すことを確認する。
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
-	content := `{"type":"thinking","role":"assistant"}` + "\n" +
+	content := `{"type":"thinking"}` + "\n" +
 		`{"type":"tool_use"` + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
@@ -329,7 +346,7 @@ func TestIncrementalReaderReset(t *testing.T) {
 	// Reset 後は先頭から再読することを確認する。
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
-	content := `{"type":"thinking","role":"assistant"}` + "\n"
+	content := `{"type":"thinking"}` + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
@@ -357,5 +374,54 @@ func TestIncrementalReaderReset(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Type != "thinking" {
 		t.Fatalf("expected to read from beginning after reset")
+	}
+}
+
+func TestReadLastEntry(t *testing.T) {
+	// ReadLastEntry がオフセットを更新せず末尾エントリを返すことを確認する。
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	content := `{"type":"thinking"}` + "\n" +
+		`{"type":"assistant","message":{"stop_reason":"end_turn"}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	r := NewIncrementalReader()
+	entry, err := r.ReadLastEntry(path)
+	if err != nil {
+		t.Fatalf("ReadLastEntry failed: %v", err)
+	}
+	if entry == nil {
+		t.Fatalf("expected non-nil entry")
+	}
+	if entry.Type != "assistant" {
+		t.Fatalf("unexpected Type: got %q, want %q", entry.Type, "assistant")
+	}
+	if entry.Message.StopReason != "end_turn" {
+		t.Fatalf("unexpected StopReason: got %q, want %q", entry.Message.StopReason, "end_turn")
+	}
+
+	// ReadLastEntry はオフセットを更新しないことを確認する。
+	if r.offsets[path] != 0 {
+		t.Fatalf("ReadLastEntry should not update offset, got %d", r.offsets[path])
+	}
+}
+
+func TestReadLastEntryEmptyFile(t *testing.T) {
+	// 空ファイルでは nil, nil を返すことを確認する。
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.jsonl")
+	if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	r := NewIncrementalReader()
+	entry, err := r.ReadLastEntry(path)
+	if err != nil {
+		t.Fatalf("ReadLastEntry failed: %v", err)
+	}
+	if entry != nil {
+		t.Fatalf("expected nil entry for empty file, got %+v", entry)
 	}
 }

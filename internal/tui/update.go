@@ -2,6 +2,8 @@ package tui
 
 import (
 	"errors"
+	"fmt"
+	"strconv"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -66,7 +68,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = errors.New("selected session has no pane id")
 				return m, nil
 			}
-			if err := m.terminal.FocusPane(selected.Session.PaneID); err != nil {
+			paneID, atoiErr := strconv.Atoi(selected.Session.PaneID)
+			if atoiErr != nil {
+				m.err = fmt.Errorf("invalid pane id %q: %w", selected.Session.PaneID, atoiErr)
+				return m, nil
+			}
+			if err := m.terminal.FocusPane(paneID); err != nil {
 				m.err = err
 			}
 			return m, nil

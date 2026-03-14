@@ -7,13 +7,33 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/yoshihiko555/baton/internal/terminal"
 )
+
+// sessionRecord は内部管理用のセッション集約レコード。
+// v2 Session（プロセスベース）とは別に、ファイルウォッチング由来の状態を保持する。
+type sessionRecord struct {
+	id          string
+	projectPath string
+	filePath    string
+	state       SessionState
+	lastActivity time.Time
+}
+
+// projectRecord は内部管理用のプロジェクト集約レコード。
+type projectRecord struct {
+	path        string
+	displayName string
+	sessions    []*sessionRecord
+	activeCount int
+}
 
 // StateManager は watcher イベントをプロジェクト/セッション単位で集約管理する。
 type StateManager struct {
 	watcher           *Watcher
 	incrementalReader *IncrementalReader
-	projects          map[string]*Project
+	projects          map[string]*projectRecord
 	mu                sync.RWMutex
 }
 
@@ -22,7 +42,7 @@ func NewStateManager(watcher *Watcher) *StateManager {
 	return &StateManager{
 		watcher:           watcher,
 		incrementalReader: NewIncrementalReader(),
-		projects:          make(map[string]*Project),
+		projects:          make(map[string]*projectRecord),
 	}
 }
 
@@ -75,7 +95,7 @@ func (s *StateManager) initialScan() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.projects = make(map[string]*Project)
+	s.projects = make(map[string]*projectRecord)
 	s.incrementalReader = NewIncrementalReader()
 
 	for _, info := range sessions {
@@ -134,35 +154,43 @@ func (s *StateManager) handleEvent(event WatchEvent) error {
 
 // GetProjects は全プロジェクトのスナップショット（コピー）を返す。
 func (s *StateManager) GetProjects() []Project {
+	return s.Projects()
+}
+
+// Projects は全プロジェクトのスナップショット（コピー）を返す。
+func (s *StateManager) Projects() []Project {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	projects := make([]Project, 0, len(s.projects))
-	for _, project := range s.projects {
-		projectCopy := Project{
-			Path:        project.Path,
-			DisplayName: project.DisplayName,
-			ActiveCount: project.ActiveCount,
-			Sessions:    make([]*Session, 0, len(project.Sessions)),
-		}
-
-		for _, session := range project.Sessions {
-			if session == nil {
+	for _, rec := range s.projects {
+		sessions := make([]*Session, 0, len(rec.sessions))
+		for _, sr := range rec.sessions {
+			if sr == nil {
 				continue
 			}
-			sessionCopy := *session
-			projectCopy.Sessions = append(projectCopy.Sessions, &sessionCopy)
+			s := &Session{
+				ID:           sr.id,
+				ProjectPath:  sr.projectPath,
+				FilePath:     sr.filePath,
+				State:        sr.state,
+				LastActivity: sr.lastActivity,
+			}
+			sessions = append(sessions, s)
 		}
-
-		// 呼び出し側で扱いやすいようセッション順を安定化する。
-		sort.Slice(projectCopy.Sessions, func(i, j int) bool {
-			return projectCopy.Sessions[i].ID < projectCopy.Sessions[j].ID
+		sort.Slice(sessions, func(i, j int) bool {
+			return sessions[i].ID < sessions[j].ID
 		})
-
-		projects = append(projects, projectCopy)
+		proj := Project{
+			Path:        rec.path,
+			Name:        rec.displayName,
+			DisplayName: rec.displayName,
+			ActiveCount: rec.activeCount,
+			Sessions:    sessions,
+		}
+		projects = append(projects, proj)
 	}
 
-	// プロジェクト順も安定化する。
 	sort.Slice(projects, func(i, j int) bool {
 		return projects[i].Path < projects[j].Path
 	})
@@ -170,11 +198,44 @@ func (s *StateManager) GetProjects() []Project {
 	return projects
 }
 
+// Summary は集計情報を返す（StateReader 実装）。
+func (s *StateManager) Summary() Summary {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	total, active, waiting := 0, 0, 0
+	for _, rec := range s.projects {
+		for _, sr := range rec.sessions {
+			if sr == nil {
+				continue
+			}
+			total++
+			switch sr.state {
+			case Thinking, ToolUse:
+				active++
+			case Waiting:
+				waiting++
+			}
+		}
+	}
+	return Summary{
+		TotalSessions: total,
+		Active:        active,
+		Waiting:       waiting,
+		ByTool:        map[string]int{},
+	}
+}
+
+// Panes は管理ペイン一覧を返す（StateReader 実装）。
+// v1 watcher ベースでは未使用のため空スライスを返す。
+func (s *StateManager) Panes() []terminal.Pane {
+	return nil
+}
+
 // GetStatus は現在時刻付きのステータス出力を生成する。
 func (s *StateManager) GetStatus() StatusOutput {
 	return StatusOutput{
-		Projects:  s.GetProjects(),
-		UpdatedAt: time.Now().UTC(),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 }
 
@@ -189,7 +250,6 @@ func (s *StateManager) upsertFromFileLocked(projectPath, sessionID, sessionPath 
 		s.incrementalReader = NewIncrementalReader()
 	}
 	if reset {
-		// Created などで再読込したい場合はオフセットを初期化する。
 		s.incrementalReader.Reset(sessionPath)
 	}
 
@@ -199,29 +259,27 @@ func (s *StateManager) upsertFromFileLocked(projectPath, sessionID, sessionPath 
 	}
 
 	project := s.getOrCreateProject(projectPath)
-	session := findSession(project.Sessions, sessionID)
+	session := findSessionRecord(project.sessions, sessionID)
 	if session == nil {
-		session = &Session{
-			ID:          sessionID,
-			ProjectPath: projectPath,
-			State:       Idle,
+		session = &sessionRecord{
+			id:          sessionID,
+			projectPath: projectPath,
+			state:       Idle,
 		}
-		project.Sessions = append(project.Sessions, session)
+		project.sessions = append(project.sessions, session)
 	}
 
-	session.FilePath = sessionPath
+	session.filePath = sessionPath
 	if len(entries) > 0 {
-		// 新規エントリがある場合のみ状態と最終活動時刻を更新する。
-		session.State = DetermineSessionState(entries)
+		session.state = DetermineSessionState(entries)
 		if lastCreatedAt := latestEntryCreatedAt(entries); !lastCreatedAt.IsZero() {
-			session.LastActivity = lastCreatedAt
+			session.lastActivity = lastCreatedAt
 		}
 	}
 
-	if session.LastActivity.IsZero() {
-		// created_at が無い場合はファイル更新時刻をフォールバックに使う。
+	if session.lastActivity.IsZero() {
 		if info, statErr := os.Stat(sessionPath); statErr == nil {
-			session.LastActivity = info.ModTime()
+			session.lastActivity = info.ModTime()
 		}
 	}
 
@@ -238,24 +296,22 @@ func (s *StateManager) removeSession(projectPath, sessionID, sessionPath string)
 		return
 	}
 
-	// 削除対象に紐づくファイルのオフセットをリセット対象として収集する。
 	var pathsToReset []string
 	if sessionPath != "" && sessionPath != "." {
 		pathsToReset = append(pathsToReset, sessionPath)
 	}
 
-	filtered := make([]*Session, 0, len(project.Sessions))
-	for _, session := range project.Sessions {
+	filtered := make([]*sessionRecord, 0, len(project.sessions))
+	for _, session := range project.sessions {
 		if session == nil {
 			continue
 		}
 
-		matchedByID := sessionID != "" && session.ID == sessionID
-		matchedByPath := sessionID == "" && sessionPath != "" && sessionPath != "." && session.FilePath == sessionPath
+		matchedByID := sessionID != "" && session.id == sessionID
+		matchedByPath := sessionID == "" && sessionPath != "" && sessionPath != "." && session.filePath == sessionPath
 		if matchedByID || matchedByPath {
-			// ID で一致した場合でも FilePath が異なれば併せてリセットする。
-			if session.FilePath != "" && session.FilePath != sessionPath {
-				pathsToReset = append(pathsToReset, session.FilePath)
+			if session.filePath != "" && session.filePath != sessionPath {
+				pathsToReset = append(pathsToReset, session.filePath)
 			}
 			continue
 		}
@@ -269,8 +325,8 @@ func (s *StateManager) removeSession(projectPath, sessionID, sessionPath string)
 		}
 	}
 
-	project.Sessions = filtered
-	if len(project.Sessions) == 0 {
+	project.sessions = filtered
+	if len(project.sessions) == 0 {
 		delete(s.projects, projectPath)
 		return
 	}
@@ -278,23 +334,21 @@ func (s *StateManager) removeSession(projectPath, sessionID, sessionPath string)
 	refreshActiveCount(project)
 }
 
-func (s *StateManager) getOrCreateProject(projectPath string) *Project {
+func (s *StateManager) getOrCreateProject(projectPath string) *projectRecord {
 	if project, ok := s.projects[projectPath]; ok {
 		return project
 	}
 
-	project := &Project{
-		Path: projectPath,
-		// 表示名は最後のディレクトリ名を利用する。
-		DisplayName: filepath.Base(projectPath),
-		Sessions:    []*Session{},
+	project := &projectRecord{
+		path:        projectPath,
+		displayName: filepath.Base(projectPath),
+		sessions:    []*sessionRecord{},
 	}
 	s.projects[projectPath] = project
 	return project
 }
 
 func resolveSessionFilePath(projectPath, sessionID string) (string, error) {
-	// 互換性のため jsonl/json の両方を探索する。
 	candidates := []string{
 		filepath.Join(projectPath, sessionID+".jsonl"),
 		filepath.Join(projectPath, sessionID+".json"),
@@ -317,9 +371,9 @@ func resolveSessionFilePath(projectPath, sessionID string) (string, error) {
 	return "", os.ErrNotExist
 }
 
-func findSession(sessions []*Session, sessionID string) *Session {
+func findSessionRecord(sessions []*sessionRecord, sessionID string) *sessionRecord {
 	for _, session := range sessions {
-		if session != nil && session.ID == sessionID {
+		if session != nil && session.id == sessionID {
 			return session
 		}
 	}
@@ -328,26 +382,28 @@ func findSession(sessions []*Session, sessionID string) *Session {
 
 func latestEntryCreatedAt(entries []*Entry) time.Time {
 	// 末尾側が最新想定のため逆順に最初の有効時刻を返す。
+	// v2 では CreatedAt が削除されたため Timestamp 文字列をパースする。
 	for i := len(entries) - 1; i >= 0; i-- {
 		entry := entries[i]
-		if entry == nil || entry.CreatedAt.IsZero() {
+		if entry == nil || entry.Timestamp == "" {
 			continue
 		}
-		return entry.CreatedAt
+		if t, err := time.Parse(time.RFC3339, entry.Timestamp); err == nil {
+			return t
+		}
 	}
 	return time.Time{}
 }
 
-func refreshActiveCount(project *Project) {
-	// active は Thinking / ToolUse のみをカウントする。
+func refreshActiveCount(project *projectRecord) {
 	count := 0
-	for _, session := range project.Sessions {
+	for _, session := range project.sessions {
 		if session == nil {
 			continue
 		}
-		if session.State == Thinking || session.State == ToolUse {
+		if session.state == Thinking || session.state == ToolUse {
 			count++
 		}
 	}
-	project.ActiveCount = count
+	project.activeCount = count
 }
