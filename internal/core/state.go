@@ -1,409 +1,267 @@
 package core
 
 import (
-	"errors"
-	"os"
+	"log"
 	"path/filepath"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/yoshihiko555/baton/internal/terminal"
 )
 
-// sessionRecord は内部管理用のセッション集約レコード。
-// v2 Session（プロセスベース）とは別に、ファイルウォッチング由来の状態を保持する。
-type sessionRecord struct {
-	id          string
-	projectPath string
-	filePath    string
-	state       SessionState
-	lastActivity time.Time
+// statePriority は Projects のソート用状態優先度マップ。
+// 値が小さいほど優先度が高い（先頭に表示される）。
+var statePriority = map[SessionState]int{
+	Waiting:  0,
+	Error:    1,
+	Thinking: 2,
+	ToolUse:  3,
+	Idle:     4,
 }
 
-// projectRecord は内部管理用のプロジェクト集約レコード。
-type projectRecord struct {
-	path        string
-	displayName string
-	sessions    []*sessionRecord
-	activeCount int
+// projectKey はプロセスのグルーピングキー。
+// Workspace が設定されている場合はワークスペース優先、それ以外は CWD 使用。
+type projectKey struct {
+	Workspace string // 空の場合は CWD ベースでグルーピング
+	CWD       string // Workspace が空の場合のフォールバック
 }
 
-// StateManager は watcher イベントをプロジェクト/セッション単位で集約管理する。
+// resolveProjectKey はプロセスとペインマップからプロジェクトキーを解決する。
+// Workspace が空でなく "default" でもない場合はワークスペース優先でグルーピングする。
+func resolveProjectKey(proc DetectedProcess, paneWorkspaceMap map[int]string) projectKey {
+	ws := paneWorkspaceMap[proc.PaneID]
+	if ws != "" && ws != "default" {
+		return projectKey{Workspace: ws}
+	}
+	return projectKey{CWD: proc.CWD}
+}
+
+// StateManager はスキャン結果をプロジェクト/セッション単位に集約するコンポーネント。
+// v2 ではポーリング + スナップショット照合方式を採用し、Watcher への依存を排除した。
 type StateManager struct {
-	watcher           *Watcher
-	incrementalReader *IncrementalReader
-	projects          map[string]*projectRecord
-	mu                sync.RWMutex
+	resolver   *StateResolver  // JSONL 解析・状態判定の委譲先
+	projects   []Project       // 最新プロジェクト一覧スナップショット（ソート済み）
+	summary    Summary         // 最新集計キャッシュ
+	panes      []terminal.Pane // 最新ペイン一覧（Ambiguous セッション解決用）
+	prevPIDSet map[int]bool    // 前回スキャンの PID セット（差分検出用）
+	mu         sync.RWMutex   // 読み書き保護
 }
 
 // NewStateManager は StateManager を初期化して返す。
-func NewStateManager(watcher *Watcher) *StateManager {
+func NewStateManager(resolver *StateResolver) *StateManager {
 	return &StateManager{
-		watcher:           watcher,
-		incrementalReader: NewIncrementalReader(),
-		projects:          make(map[string]*projectRecord),
+		resolver:   resolver,
+		prevPIDSet: make(map[int]bool),
 	}
 }
 
-// InitialScan はフルスキャンを実行し、集約状態を再構築する。
-func (s *StateManager) InitialScan() error {
-	return s.initialScan()
-}
-
-func (s *StateManager) initialScan() error {
-	if s.watcher == nil {
-		return errors.New("watcher is required")
-	}
-
-	// 第1段階: I/O が重い探索処理はロック外で実行する。
-	projectPaths, err := s.watcher.DiscoverProjects()
-	if err != nil {
-		return err
-	}
-
-	type sessionInfo struct {
-		projectPath string
-		sessionID   string
-		sessionPath string
-	}
-
-	var sessions []sessionInfo
-	for _, projectPath := range projectPaths {
-		sessionIDs, err := s.watcher.DiscoverSessions(projectPath)
-		if err != nil {
-			return err
-		}
-
-		for _, sessionID := range sessionIDs {
-			sessionPath, err := resolveSessionFilePath(projectPath, sessionID)
-			if err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					continue
-				}
-				return err
-			}
-			sessions = append(sessions, sessionInfo{
-				projectPath: projectPath,
-				sessionID:   sessionID,
-				sessionPath: sessionPath,
-			})
-		}
-	}
-
-	// 第2段階: 収集結果をもとにロック下で状態を再構築する。
+// UpdateFromScan はスキャン結果から状態を更新する（StateUpdater 実装）。
+//
+// 処理フロー:
+//  1. ScanResult.Err != nil → 前回スナップショットを保持して return nil
+//  2. Panes からワークスペースマップを構築
+//  3. Processes をワークスペース優先でグルーピング
+//  4. 各プロセスをセッションに変換（Claude は StateResolver 経由、Codex/Gemini は最小構成）
+//  5. Summary 再計算 + panes/prevPIDSet を更新
+func (s *StateManager) UpdateFromScan(result ScanResult) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.projects = make(map[string]*projectRecord)
-	s.incrementalReader = NewIncrementalReader()
-
-	for _, info := range sessions {
-		if err := s.upsertFromFileLocked(info.projectPath, info.sessionID, info.sessionPath, false); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return err
-		}
-	}
-
-	return nil
-}
-
-// HandleEvent は単一イベントを集約状態へ反映する。
-func (s *StateManager) HandleEvent(event WatchEvent) error {
-	return s.handleEvent(event)
-}
-
-func (s *StateManager) handleEvent(event WatchEvent) error {
-	switch event.Type {
-	case Removed:
-		sessionPath := event.Path
-		if sessionPath != "" {
-			sessionPath = filepath.Clean(sessionPath)
-		}
-		s.removeSession(event.ProjectPath, event.SessionID, sessionPath)
-		return nil
-	case Created, Modified:
-		sessionPath := filepath.Clean(event.Path)
-		if event.Path == "" {
-			resolvedPath, err := resolveSessionFilePath(event.ProjectPath, event.SessionID)
-			if err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					return nil
-				}
-				return err
-			}
-			sessionPath = resolvedPath
-		}
-
-		// 新規作成イベントは既存オフセットを捨てて先頭から読む。
-		reset := event.Type == Created
-		if err := s.upsertFromFile(event.ProjectPath, event.SessionID, sessionPath, reset); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				s.removeSession(event.ProjectPath, event.SessionID, sessionPath)
-				return nil
-			}
-			return err
-		}
-		return nil
-	default:
+	// Step 1: エラーチェック — 過渡的なエラーは前回スナップショットを維持する
+	if result.Err != nil {
 		return nil
 	}
-}
 
-// GetProjects は全プロジェクトのスナップショット（コピー）を返す。
-func (s *StateManager) GetProjects() []Project {
-	return s.Projects()
-}
+	// Step 2: PaneID → Workspace マッピングを構築する
+	paneWorkspaceMap := make(map[int]string, len(result.Panes))
+	for _, pane := range result.Panes {
+		paneWorkspaceMap[pane.ID] = pane.Workspace
+	}
 
-// Projects は全プロジェクトのスナップショット（コピー）を返す。
-func (s *StateManager) Projects() []Project {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	// Step 3 & 4: プロセスをグルーピングしてセッションに変換する
+	type sessionEntry struct {
+		key     projectKey
+		session *Session
+	}
 
-	projects := make([]Project, 0, len(s.projects))
-	for _, rec := range s.projects {
-		sessions := make([]*Session, 0, len(rec.sessions))
-		for _, sr := range rec.sessions {
-			if sr == nil {
-				continue
-			}
-			s := &Session{
-				ID:           sr.id,
-				ProjectPath:  sr.projectPath,
-				FilePath:     sr.filePath,
-				State:        sr.state,
-				LastActivity: sr.lastActivity,
-			}
-			sessions = append(sessions, s)
-		}
-		sort.Slice(sessions, func(i, j int) bool {
-			return sessions[i].ID < sessions[j].ID
-		})
+	entries := make([]sessionEntry, 0, len(result.Processes))
+	currentPIDSet := make(map[int]bool, len(result.Processes))
+
+	for _, proc := range result.Processes {
+		currentPIDSet[proc.PID] = true
+		key := resolveProjectKey(proc, paneWorkspaceMap)
+		sess := s.buildSession(proc)
+		entries = append(entries, sessionEntry{key: key, session: &sess})
+	}
+
+	// Step 5: グルーピング結果からプロジェクト一覧を構築する
+	projectMap := make(map[projectKey][]*Session)
+	for _, e := range entries {
+		projectMap[e.key] = append(projectMap[e.key], e.session)
+	}
+
+	projects := make([]Project, 0, len(projectMap))
+	for key, sessions := range projectMap {
+		// セッションをソートする（状態優先度順 → LastActivity 降順）
+		sortSessionPtrs(sessions)
+
 		proj := Project{
-			Path:        rec.path,
-			Name:        rec.displayName,
-			DisplayName: rec.displayName,
-			ActiveCount: rec.activeCount,
-			Sessions:    sessions,
+			Sessions: sessions,
+		}
+		if key.Workspace != "" {
+			proj.Name = key.Workspace
+			proj.Workspace = key.Workspace
+			proj.Path = key.Workspace
+		} else {
+			proj.Name = filepath.Base(key.CWD)
+			proj.Path = key.CWD
 		}
 		projects = append(projects, proj)
 	}
 
+	// プロジェクト一覧をソートする（状態優先度順 → プロジェクト名昇順）
 	sort.Slice(projects, func(i, j int) bool {
-		return projects[i].Path < projects[j].Path
+		pi := projectPriority(projects[i])
+		pj := projectPriority(projects[j])
+		if pi != pj {
+			return pi < pj
+		}
+		return projects[i].Name < projects[j].Name
 	})
 
-	return projects
+	// Step 6: Summary 再計算 + キャッシュ更新
+	s.projects = projects
+	s.summary = calcSummary(projects)
+	s.panes = result.Panes
+	s.prevPIDSet = currentPIDSet
+
+	return nil
 }
 
-// Summary は集計情報を返す（StateReader 実装）。
-func (s *StateManager) Summary() Summary {
+// buildSession はプロセス情報からセッションを構築する。
+// ToolClaude は StateResolver 経由で状態判定し、ToolCodex/ToolGemini は Thinking で最小構成を返す。
+func (s *StateManager) buildSession(proc DetectedProcess) Session {
+	sess := Session{
+		PID:        proc.PID,
+		Tool:       proc.ToolType,
+		WorkingDir: proc.CWD,
+		State:      Thinking,
+	}
+
+	if proc.ToolType != ToolClaude || s.resolver == nil {
+		return sess
+	}
+
+	resolved, err := s.resolver.ResolveState(proc)
+	if err != nil {
+		log.Printf("StateResolver error for PID %d: %v", proc.PID, err)
+		return sess
+	}
+
+	sess.State = resolved.State
+	sess.Branch = resolved.Branch
+	sess.CurrentTool = resolved.CurrentTool
+	sess.FirstPrompt = resolved.FirstPrompt
+	sess.InputTokens = resolved.InputTokens
+	sess.OutputTokens = resolved.OutputTokens
+
+	return sess
+}
+
+// Projects は全プロジェクトのスナップショット（コピー）を返す（StateReader 実装）。
+// ソート順: 状態優先度（Waiting > Error > Thinking > ToolUse > Idle）、同一状態内は LastActivity 降順。
+func (s *StateManager) Projects() []Project {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	total, active, waiting := 0, 0, 0
-	for _, rec := range s.projects {
-		for _, sr := range rec.sessions {
-			if sr == nil {
+	if s.projects == nil {
+		return []Project{}
+	}
+
+	copied := make([]Project, len(s.projects))
+	for i, p := range s.projects {
+		proj := p
+		sessions := make([]*Session, len(p.Sessions))
+		for j, sess := range p.Sessions {
+			if sess == nil {
 				continue
 			}
-			total++
-			switch sr.state {
-			case Thinking, ToolUse:
-				active++
-			case Waiting:
-				waiting++
-			}
+			clone := *sess
+			sessions[j] = &clone
 		}
+		proj.Sessions = sessions
+		copied[i] = proj
 	}
-	return Summary{
-		TotalSessions: total,
-		Active:        active,
-		Waiting:       waiting,
-		ByTool:        map[string]int{},
-	}
+	return copied
 }
 
-// Panes は管理ペイン一覧を返す（StateReader 実装）。
-// v1 watcher ベースでは未使用のため空スライスを返す。
+// GetProjects は v1 互換メソッド。Projects() に委譲する（tui が参照。v2 完全移行後に削除予定）。
+func (s *StateManager) GetProjects() []Project {
+	return s.Projects()
+}
+
+// Summary はキャッシュ済み集計情報を返す（StateReader 実装）。
+func (s *StateManager) Summary() Summary {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.summary
+}
+
+// Panes はキャッシュ済みペイン一覧を返す（StateReader 実装）。
 func (s *StateManager) Panes() []terminal.Pane {
-	return nil
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.panes
 }
 
-// GetStatus は現在時刻付きのステータス出力を生成する。
-func (s *StateManager) GetStatus() StatusOutput {
-	return StatusOutput{
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-}
-
-func (s *StateManager) upsertFromFile(projectPath, sessionID, sessionPath string, reset bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.upsertFromFileLocked(projectPath, sessionID, sessionPath, reset)
-}
-
-func (s *StateManager) upsertFromFileLocked(projectPath, sessionID, sessionPath string, reset bool) error {
-	if s.incrementalReader == nil {
-		s.incrementalReader = NewIncrementalReader()
-	}
-	if reset {
-		s.incrementalReader.Reset(sessionPath)
-	}
-
-	entries, err := s.incrementalReader.ReadNew(sessionPath)
-	if err != nil {
-		return err
-	}
-
-	project := s.getOrCreateProject(projectPath)
-	session := findSessionRecord(project.sessions, sessionID)
-	if session == nil {
-		session = &sessionRecord{
-			id:          sessionID,
-			projectPath: projectPath,
-			state:       Idle,
-		}
-		project.sessions = append(project.sessions, session)
-	}
-
-	session.filePath = sessionPath
-	if len(entries) > 0 {
-		session.state = DetermineSessionState(entries)
-		if lastCreatedAt := latestEntryCreatedAt(entries); !lastCreatedAt.IsZero() {
-			session.lastActivity = lastCreatedAt
-		}
-	}
-
-	if session.lastActivity.IsZero() {
-		if info, statErr := os.Stat(sessionPath); statErr == nil {
-			session.lastActivity = info.ModTime()
-		}
-	}
-
-	refreshActiveCount(project)
-	return nil
-}
-
-func (s *StateManager) removeSession(projectPath, sessionID, sessionPath string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	project, ok := s.projects[projectPath]
-	if !ok {
-		return
-	}
-
-	var pathsToReset []string
-	if sessionPath != "" && sessionPath != "." {
-		pathsToReset = append(pathsToReset, sessionPath)
-	}
-
-	filtered := make([]*sessionRecord, 0, len(project.sessions))
-	for _, session := range project.sessions {
-		if session == nil {
-			continue
-		}
-
-		matchedByID := sessionID != "" && session.id == sessionID
-		matchedByPath := sessionID == "" && sessionPath != "" && sessionPath != "." && session.filePath == sessionPath
-		if matchedByID || matchedByPath {
-			if session.filePath != "" && session.filePath != sessionPath {
-				pathsToReset = append(pathsToReset, session.filePath)
-			}
-			continue
-		}
-
-		filtered = append(filtered, session)
-	}
-
-	if s.incrementalReader != nil {
-		for _, p := range pathsToReset {
-			s.incrementalReader.Reset(p)
-		}
-	}
-
-	project.sessions = filtered
-	if len(project.sessions) == 0 {
-		delete(s.projects, projectPath)
-		return
-	}
-
-	refreshActiveCount(project)
-}
-
-func (s *StateManager) getOrCreateProject(projectPath string) *projectRecord {
-	if project, ok := s.projects[projectPath]; ok {
-		return project
-	}
-
-	project := &projectRecord{
-		path:        projectPath,
-		displayName: filepath.Base(projectPath),
-		sessions:    []*sessionRecord{},
-	}
-	s.projects[projectPath] = project
-	return project
-}
-
-func resolveSessionFilePath(projectPath, sessionID string) (string, error) {
-	candidates := []string{
-		filepath.Join(projectPath, sessionID+".jsonl"),
-		filepath.Join(projectPath, sessionID+".json"),
-	}
-
-	for _, candidate := range candidates {
-		info, err := os.Stat(candidate)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+// calcSummary は全プロジェクトのセッションを集計して Summary を返す。
+func calcSummary(projects []Project) Summary {
+	s := Summary{ByTool: make(map[string]int)}
+	for _, p := range projects {
+		for _, sess := range p.Sessions {
+			if sess == nil {
 				continue
 			}
-			return "", err
+			s.TotalSessions++
+			switch sess.State {
+			case Thinking, ToolUse, Waiting:
+				s.Active++
+			}
+			if sess.State == Waiting {
+				s.Waiting++
+			}
+			s.ByTool[sess.Tool.String()]++
 		}
-		if info.IsDir() {
-			continue
-		}
-		return candidate, nil
 	}
-
-	return "", os.ErrNotExist
+	return s
 }
 
-func findSessionRecord(sessions []*sessionRecord, sessionID string) *sessionRecord {
-	for _, session := range sessions {
-		if session != nil && session.id == sessionID {
-			return session
+// sortSessionPtrs はポインタスライスを状態優先度順（昇順）→ LastActivity 降順にソートする。
+func sortSessionPtrs(sessions []*Session) {
+	sort.Slice(sessions, func(i, j int) bool {
+		if sessions[i] == nil || sessions[j] == nil {
+			return sessions[i] != nil
 		}
-	}
-	return nil
+		pi := statePriority[sessions[i].State]
+		pj := statePriority[sessions[j].State]
+		if pi != pj {
+			return pi < pj
+		}
+		return sessions[i].LastActivity.After(sessions[j].LastActivity)
+	})
 }
 
-func latestEntryCreatedAt(entries []*Entry) time.Time {
-	// 末尾側が最新想定のため逆順に最初の有効時刻を返す。
-	// v2 では CreatedAt が削除されたため Timestamp 文字列をパースする。
-	for i := len(entries) - 1; i >= 0; i-- {
-		entry := entries[i]
-		if entry == nil || entry.Timestamp == "" {
+// projectPriority はプロジェクト内の最高優先度セッションの優先度値を返す。
+// セッションがなければ最低優先度を返す。
+func projectPriority(p Project) int {
+	best := len(statePriority) // セッションなしは最低優先度
+	for _, sess := range p.Sessions {
+		if sess == nil {
 			continue
 		}
-		if t, err := time.Parse(time.RFC3339, entry.Timestamp); err == nil {
-			return t
+		if v, ok := statePriority[sess.State]; ok && v < best {
+			best = v
 		}
 	}
-	return time.Time{}
-}
-
-func refreshActiveCount(project *projectRecord) {
-	count := 0
-	for _, session := range project.sessions {
-		if session == nil {
-			continue
-		}
-		if session.state == Thinking || session.state == ToolUse {
-			count++
-		}
-	}
-	project.activeCount = count
+	return best
 }
