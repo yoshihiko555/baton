@@ -9,7 +9,7 @@
     "tmux-monitor"
   ],
   "orchestra_dir": "/Users/yoshihiko/ghq/github.com/yoshihiko555/ai-orchestra",
-  "last_sync": "2026-03-14T08:00:06.582596+00:00",
+  "last_sync": "2026-03-15T09:36:11.326584+00:00",
   "synced_files": [
     "agents/ai-architect.md",
     "agents/ai-dev.md",
@@ -34,7 +34,10 @@
     "agents/security-reviewer.md",
     "agents/spec-reviewer.md",
     "agents/spec-writer.md",
+    "agents/specialized-mcp-builder.md",
+    "agents/support-executive-summary-generator.md",
     "agents/tester.md",
+    "agents/testing-reality-checker.md",
     "agents/ux-reviewer.md",
     "config/agent-routing/cli-tools.yaml",
     "config/cocoindex/cocoindex.yaml",
@@ -45,6 +48,7 @@
     "rules/codex-suggestion-compliance.md",
     "rules/coding-principles.md",
     "rules/config-loading.md",
+    "rules/context-sharing.md",
     "rules/gemini-delegation.md",
     "rules/gemini-suggestion-compliance.md",
     "rules/orchestra-usage.md",
