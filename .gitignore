@@ -58,3 +58,4 @@ baton
 
 # documentation
 docs/adr/
+.claude/.mcp-proxy.pid
