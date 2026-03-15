@@ -70,6 +70,34 @@ func TestDetermineSessionState(t *testing.T) {
 		{
 			name: "assistant with stop_reason tool_use means Waiting",
 			entries: []*Entry{
+				{Type: "assistant", Message: Message{StopReason: "tool_use", Content: []ContentBlock{{Type: "tool_use", Name: "Bash"}}}},
+			},
+			want: Waiting,
+		},
+		{
+			name: "assistant with stop_reason tool_use and Agent tool means Thinking",
+			entries: []*Entry{
+				{Type: "assistant", Message: Message{StopReason: "tool_use", Content: []ContentBlock{{Type: "text"}, {Type: "tool_use", Name: "Agent"}}}},
+			},
+			want: Thinking,
+		},
+		{
+			name: "assistant with stop_reason tool_use and Task tool means Thinking",
+			entries: []*Entry{
+				{Type: "assistant", Message: Message{StopReason: "tool_use", Content: []ContentBlock{{Type: "tool_use", Name: "Task"}}}},
+			},
+			want: Thinking,
+		},
+		{
+			name: "assistant with stop_reason tool_use and Skill tool means Thinking",
+			entries: []*Entry{
+				{Type: "assistant", Message: Message{StopReason: "tool_use", Content: []ContentBlock{{Type: "tool_use", Name: "Skill"}}}},
+			},
+			want: Thinking,
+		},
+		{
+			name: "assistant with stop_reason tool_use but no content means Waiting",
+			entries: []*Entry{
 				{Type: "assistant", Message: Message{StopReason: "tool_use"}},
 			},
 			want: Waiting,

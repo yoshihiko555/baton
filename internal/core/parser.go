@@ -79,6 +79,9 @@ func classifyEntry(e *Entry) SessionState {
 		case "end_turn":
 			return Idle
 		case "tool_use":
+			if isSubagentToolUse(e) {
+				return Thinking
+			}
 			return Waiting
 		}
 
@@ -105,6 +108,26 @@ func classifyEntry(e *Entry) SessionState {
 	default:
 		return Idle
 	}
+}
+
+// subagentToolNames はサブエージェント起動を示すツール名のセット。
+// これらの tool_use は承認待ちではなくサブエージェント実行中と判定する。
+var subagentToolNames = map[string]bool{
+	"Agent":    true,
+	"Task":     true,
+	"Skill":    true,
+	"dispatch": true,
+}
+
+// isSubagentToolUse は assistant エントリの最後の tool_use がサブエージェント系かを判定する。
+func isSubagentToolUse(e *Entry) bool {
+	for i := len(e.Message.Content) - 1; i >= 0; i-- {
+		block := e.Message.Content[i]
+		if block.Type == "tool_use" {
+			return subagentToolNames[block.Name]
+		}
+	}
+	return false
 }
 
 // IncrementalReader はファイル追記分だけを増分読み取りする。
