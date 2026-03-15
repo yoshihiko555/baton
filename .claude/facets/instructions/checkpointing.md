@@ -1,13 +1,3 @@
----
-name: checkpointing
-description: |
-  Save session context to agent configuration files or create full checkpoint files.
-  Supports three modes: session history (default), full checkpoint (--full),
-  and skill analysis (--full --analyze) for extracting reusable patterns.
-metadata:
-  short-description: Checkpoint session context with skill extraction support
----
-
 # Checkpointing — セッションコンテキストの永続化
 
 **セッション中の作業履歴を保存し、再利用可能なスキルパターンを発見します。**

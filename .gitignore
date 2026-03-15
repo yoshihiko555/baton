@@ -41,6 +41,7 @@ baton
 .claude/logs/
 .claude/state/
 .claude/checkpoints/
+.claude/context/
 .claude/Plans.md
 
 # Local config overrides

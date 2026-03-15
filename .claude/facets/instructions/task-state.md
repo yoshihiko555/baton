@@ -1,14 +1,3 @@
----
-name: task-state
-description: 'Plans.md (SSOT) のタスク状態を管理する。
-
-  タスクの追加・状態更新・一覧表示・Plans.md の初期化が可能。
-
-  '
-metadata:
-  short-description: SSOT タスク管理（Plans.md の作成・更新）
----
-
 # Task State — Plans.md によるタスク管理
 
 **Plans.md を SSOT として、タスクの進捗・状態をファイルベースで管理します。**
