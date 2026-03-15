@@ -31,6 +31,8 @@ type Terminal interface {
     ListPanes() ([]Pane, error)
     // FocusPane は指定 paneID のペインをアクティブにする。
     FocusPane(paneID int) error
+    // GetPaneText は指定ペインの画面テキスト末尾を返す。
+    GetPaneText(paneID int) (string, error)
     // IsAvailable はターミナルが利用可能かを返す。
     IsAvailable() bool
     // Name はターミナル識別子（例: "wezterm"）を返す。
@@ -153,21 +155,33 @@ panes = append(panes, Pane{
 
 ### FocusPane シグネチャ変更
 
+v2 では同一ワークスペース内の直接フォーカスに加え、別ワークスペースへの切り替えにも対応する（詳細は ADR-0007 参照）。
+
 ```go
 // FocusPane は指定ペインをアクティブ化する。
+// 別ワークスペースのペインの場合は、トリガーファイル経由で WezTerm Lua に
+// ワークスペース切り替えを依頼してから activate-pane を実行する。
 func (w *WezTerminal) FocusPane(paneID int) error {
-    if w == nil || w.execFn == nil {
-        return fmt.Errorf("wezterm exec function is not configured")
-    }
-
-    _, err := w.execFn("cli", "activate-pane", "--pane-id", strconv.Itoa(paneID))
-    if err != nil {
-        return mapWeztermExecError(err)
-    }
-
-    return nil
+    // 対象ペインと現在ペインのワークスペースを比較する
+    // 別 WS の場合: /tmp/wezterm-alfred-workspace.json にトリガーを書き込み、
+    //               Lua の SwitchToWorkspace 完了を 2 秒待機してから activate-pane
+    // 同一 WS の場合: 直接 activate-pane
 }
 ```
+
+### GetPaneText
+
+ToolUse 承認待ち検出のために追加したメソッド。`wezterm cli get-text` でペインの画面テキストを取得し、末尾 30 行を返す。
+
+```go
+// GetPaneText は指定ペインの画面テキスト末尾を返す。
+func (w *WezTerminal) GetPaneText(paneID int) (string, error) {
+    out, err := w.execFn("cli", "get-text", "--pane-id", strconv.Itoa(paneID))
+    // 末尾 30 行を返す（承認プロンプトの検出に十分）
+}
+```
+
+state.go はこのテキストを取得し、`Allow`・`y/n` 等の承認プロンプトパターンを検出した場合にセッション状態を `Waiting` に上書きする。
 
 ---
 

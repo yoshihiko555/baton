@@ -85,7 +85,11 @@ func run() error {
 	// doScan は TUI / ヘッドレス / ワンショット の全モードで共有するスキャン関数。
 	doScan := func() error {
 		result := scanner.Scan(ctx)
-		return stateManager.UpdateFromScan(result)
+		if err := stateManager.UpdateFromScan(result); err != nil {
+			return err
+		}
+		stateManager.RefineToolUseState(term)
+		return nil
 	}
 
 	writeStatus := func() error {

@@ -63,6 +63,10 @@ func (m *mockTerminal) FocusPane(paneID int) error {
 	return nil
 }
 
+func (m *mockTerminal) GetPaneText(paneID int) (string, error) {
+	return "", nil
+}
+
 func (m *mockTerminal) IsAvailable() bool {
 	return m.available
 }

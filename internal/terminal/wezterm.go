@@ -126,6 +126,26 @@ func (w *WezTerminal) FocusPane(paneID int) error {
 	return nil
 }
 
+// GetPaneText は指定ペインの画面テキスト末尾を返す。
+func (w *WezTerminal) GetPaneText(paneID int) (string, error) {
+	if w == nil || w.execFn == nil {
+		return "", fmt.Errorf("wezterm exec function is not configured")
+	}
+
+	out, err := w.execFn("cli", "get-text", "--pane-id", strconv.Itoa(paneID))
+	if err != nil {
+		return "", mapWeztermExecError(err)
+	}
+
+	// 末尾30行程度を返す（承認プロンプトの検出に十分）
+	lines := strings.Split(string(out), "\n")
+	start := len(lines) - 30
+	if start < 0 {
+		start = 0
+	}
+	return strings.Join(lines[start:], "\n"), nil
+}
+
 // IsAvailable は PATH 上に wezterm 実行ファイルがあるかを返す。
 func (w *WezTerminal) IsAvailable() bool {
 	_, err := exec.LookPath("wezterm")

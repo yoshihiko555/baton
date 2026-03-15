@@ -8,6 +8,8 @@ type Terminal interface {
 	ListPanes() ([]Pane, error)
 	// FocusPane は指定 paneID のペインをアクティブにする。
 	FocusPane(paneID int) error
+	// GetPaneText は指定ペインの画面テキスト末尾を返す。
+	GetPaneText(paneID int) (string, error)
 	// IsAvailable はターミナルが利用可能かを返す。
 	IsAvailable() bool
 	// Name はターミナル識別子（例: "wezterm"）を返す。

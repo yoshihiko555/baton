@@ -51,19 +51,19 @@ go vet ./...
 │   │   ├── model.go                 # ドメイン型（SessionState, Session, Project, StatusOutput）
 │   │   ├── parser.go                # JSONL パーサー + IncrementalReader
 │   │   ├── watcher.go               # fsnotify ファイルウォッチャー + デバウンス
-│   │   ├── state.go                 # 状態集約マネージャー
+│   │   ├── state.go                 # 状態集約マネージャー（ResolveMultiple 方式）
 │   │   └── exporter.go              # アトミック JSON 書き出し
 │   ├── terminal/
-│   │   ├── terminal.go              # Terminal インターフェース定義
-│   │   └── wezterm.go               # WezTerm CLI 実装
+│   │   ├── terminal.go              # Terminal インターフェース定義（GetPaneText 含む）
+│   │   └── wezterm.go               # WezTerm CLI 実装（WS 跨ぎジャンプ対応）
 │   ├── config/
 │   │   └── config.go                # YAML 設定読み込み
 │   └── tui/
 │       ├── model.go                 # bubbletea Model + Init
-│       ├── update.go                # キー入力・イベントハンドリング
+│       ├── update.go                # キー入力・イベントハンドリング（ペインジャンプ）
 │       └── view.go                  # 左右ペイン + ステータスバー描画
 └── wezterm/
-    └── baton-status.lua             # WezTerm ステータスバー Lua プラグイン
+    └── baton-status.lua             # WezTerm ステータスバー Lua プラグイン（active/total 表示）
 ```
 
 ---
@@ -81,5 +81,12 @@ go vet ./...
 
 - 設定ファイル: `~/.config/baton/config.yaml`（オプション）
 - ステータス出力: `/tmp/baton-status.json`（アトミック書き込み）
-- データフロー: watcher → channel → tea.Sub → bubbletea Msg → Update()
+- データフロー: Ticker → doScan → ScanResultMsg → Update()（ポーリング方式）
 - state.go は集約のみ、JSON 書き出しは exporter.go に分離
+- 同一 CWD の複数セッション: ResolveMultiple 方式で ModTime 上位 N 件から状態分布を取得
+- slug 生成: CWD の "/" と "." を "-" に変換（Claude Code のディレクトリ命名規則に準拠）
+- ペインジャンプ:
+  - 同一 WS → `wezterm cli activate-pane` で直接フォーカス
+  - 別 WS → `/tmp/wezterm-alfred-workspace.json` トリガーファイル経由で SwitchToWorkspace 後に activate-pane
+- ToolUse 承認待ち検出: `wezterm cli get-text` でペインテキストを取得し承認プロンプトを検出すると Waiting に変換
+- --no-tui モード: 起動メッセージと初回スキャン結果を標準出力に表示

@@ -281,6 +281,61 @@ func sortSessionPtrs(sessions []*Session) {
 	})
 }
 
+// approvalPatterns は承認待ちを示すペインテキストのパターン。
+var approvalPatterns = []string{
+	"Allow",
+	"allow",
+	"(y/n)",
+	"(Y/n)",
+	"yes/no",
+	"Yes/No",
+	"approve",
+	"permit",
+	"Do you want",
+}
+
+// RefineToolUseState は ToolUse 状態のセッションに対して、ペインテキストから
+// 承認待ちかどうかを判定し、承認待ちなら Waiting に修正する。
+func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if term == nil {
+		return
+	}
+
+	for i := range s.projects {
+		for j, sess := range s.projects[i].Sessions {
+			if sess == nil || sess.State != ToolUse {
+				continue
+			}
+			paneID, err := strconv.Atoi(sess.PaneID)
+			if err != nil {
+				continue
+			}
+			text, err := term.GetPaneText(paneID)
+			if err != nil {
+				continue
+			}
+			if containsApprovalPrompt(text) {
+				s.projects[i].Sessions[j].State = Waiting
+			}
+		}
+	}
+
+	// Waiting に変更された可能性があるので Summary を再計算する
+	s.summary = calcSummary(s.projects)
+}
+
+func containsApprovalPrompt(text string) bool {
+	for _, pattern := range approvalPatterns {
+		if strings.Contains(text, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
 // projectNeedsAttention はプロジェクト内に Waiting または Error のセッションがあるか返す。
 func projectNeedsAttention(p Project) bool {
 	for _, sess := range p.Sessions {
