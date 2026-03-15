@@ -1,7 +1,8 @@
 -- 使い方:
---   local baton_status = require 'wezterm.baton-status'
---   baton_status.setup({
---     path = '/tmp/baton-status.json', -- 省略可
+--   local baton = require 'config/baton-status'
+--   baton.setup({
+--     bin = '/path/to/baton',             -- 必須: baton バイナリのパス
+--     path = '/tmp/baton-status.json',    -- 省略可: ステータス JSON のパス
 --   })
 
 local M = {}
@@ -10,7 +11,7 @@ local wezterm = require 'wezterm'
 -- 状態ファイル読み取り結果の短期キャッシュ
 local cache = { data = nil, last_read = 0 }
 
-local CACHE_TTL_SECONDS = 5
+local CACHE_TTL_SECONDS = 2
 local DEFAULT_STATUS_PATH = '/tmp/baton-status.json'
 
 local function now_seconds()
