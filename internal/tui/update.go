@@ -239,12 +239,13 @@ func (m *Model) updateSessionList(projects []core.Project) {
 		return
 	}
 
-	currentSessionID := ""
+	// 現在選択中のセッションの PID を保持する。
+	currentPID := 0
 	if selected, ok := m.sessionList.SelectedItem().(SessionItem); ok {
-		currentSessionID = selected.Session.ID
+		currentPID = selected.Session.PID
 	}
 
-	// nil を除外してコピーし、優先度順にソートする。
+	// nil を除外してコピーし、PID 順で安定ソートする。
 	sessions := make([]*core.Session, 0, len(targetProject.Sessions))
 	for _, s := range targetProject.Sessions {
 		if s != nil {
@@ -252,28 +253,15 @@ func (m *Model) updateSessionList(projects []core.Project) {
 		}
 	}
 
-	priority := map[core.SessionState]int{
-		core.Waiting:  0,
-		core.Error:    1,
-		core.Thinking: 2,
-		core.ToolUse:  3,
-		core.Idle:     4,
-	}
 	sort.SliceStable(sessions, func(i, j int) bool {
-		pi := priority[sessions[i].State]
-		pj := priority[sessions[j].State]
-		if pi != pj {
-			return pi < pj
-		}
-		// 同一優先度内は LastActivity 降順（最新が上位）。
-		return sessions[i].LastActivity.After(sessions[j].LastActivity)
+		return sessions[i].PID < sessions[j].PID
 	})
 
 	items := make([]list.Item, 0, len(sessions))
 	selectedIndex := 0
 	for idx, s := range sessions {
 		items = append(items, SessionItem{Session: *s})
-		if s.ID == currentSessionID {
+		if s.PID == currentPID && currentPID != 0 {
 			selectedIndex = idx
 		}
 	}

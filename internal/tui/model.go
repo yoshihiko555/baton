@@ -53,8 +53,28 @@ func (i ProjectItem) Title() string {
 }
 
 // Description はプロジェクト行の補足説明文字列を返す。
+// 各状態のセッション数を表示する（例: "thinking: 3 · idle: 1 · waiting: 1"）。
 func (i ProjectItem) Description() string {
-	return fmt.Sprintf("sessions: %d", len(i.Project.Sessions))
+	counts := make(map[core.SessionState]int)
+	for _, s := range i.Project.Sessions {
+		if s != nil {
+			counts[s.State]++
+		}
+	}
+
+	// 優先度順に表示する（重要な状態が先）
+	order := []core.SessionState{core.Waiting, core.Error, core.Thinking, core.ToolUse, core.Idle}
+	var parts []string
+	for _, state := range order {
+		if n, ok := counts[state]; ok && n > 0 {
+			parts = append(parts, fmt.Sprintf("%s: %d", state, n))
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " · ")
 }
 
 // FilterValue はプロジェクト行の検索対象文字列を返す。

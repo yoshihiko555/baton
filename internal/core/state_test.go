@@ -405,13 +405,25 @@ func TestSortSessionPtrsNilSafe(t *testing.T) {
 	sortSessionPtrs(sessions) // パニックしなければ OK
 }
 
-func TestProjectPriorityNoSessions(t *testing.T) {
-	// セッションなしのプロジェクトは最低優先度を返すことを確認する。
+func TestProjectNeedsAttentionNoSessions(t *testing.T) {
+	// セッションなしのプロジェクトは attention 不要。
 	p := Project{}
-	got := projectPriority(p)
-	want := len(statePriority)
-	if got != want {
-		t.Errorf("projectPriority(empty) = %d, want %d", got, want)
+	if projectNeedsAttention(p) {
+		t.Error("projectNeedsAttention(empty) should be false")
+	}
+}
+
+func TestProjectNeedsAttentionWithWaiting(t *testing.T) {
+	p := Project{Sessions: []*Session{{State: Waiting}}}
+	if !projectNeedsAttention(p) {
+		t.Error("projectNeedsAttention with Waiting session should be true")
+	}
+}
+
+func TestProjectNeedsAttentionThinkingOnly(t *testing.T) {
+	p := Project{Sessions: []*Session{{State: Thinking}}}
+	if projectNeedsAttention(p) {
+		t.Error("projectNeedsAttention with only Thinking should be false")
 	}
 }
 

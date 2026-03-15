@@ -88,9 +88,13 @@ func newTestModel() (Model, *mockStateReader, *mockStateUpdater, *mockScanner, *
 
 func TestProjectItem(t *testing.T) {
 	item := ProjectItem{Project: core.Project{
-		Path:     "/home/user/project",
-		Name:     "my-project",
-		Sessions: make([]*core.Session, 3),
+		Path: "/home/user/project",
+		Name: "my-project",
+		Sessions: []*core.Session{
+			{State: core.Thinking},
+			{State: core.Thinking},
+			{State: core.Idle},
+		},
 	}}
 
 	title := item.Title()
@@ -99,8 +103,9 @@ func TestProjectItem(t *testing.T) {
 	}
 
 	desc := item.Description()
-	if desc != "sessions: 3" {
-		t.Errorf("Description() = %q, want %q", desc, "sessions: 3")
+	want := "thinking: 2 · idle: 1"
+	if desc != want {
+		t.Errorf("Description() = %q, want %q", desc, want)
 	}
 
 	fv := item.FilterValue()

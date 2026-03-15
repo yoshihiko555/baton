@@ -102,6 +102,16 @@ func run() error {
 
 	// ヘッドレスモード: TUI なしで定期スキャン。
 	if *noTUI {
+		fmt.Printf("baton: headless mode (interval=%s, output=%s)\n", cfg.ScanInterval, cfg.StatusOutputPath)
+		// 初回スキャンで起動確認メッセージを表示する
+		if err := doScan(); err != nil {
+			return err
+		}
+		if err := writeStatus(); err != nil {
+			return err
+		}
+		summary := stateManager.Summary()
+		fmt.Printf("baton: found %d sessions across %d projects\n", summary.TotalSessions, len(stateManager.Projects()))
 		return runNoTUI(ctx, scanner, stateManager, cfg.ScanInterval, writeStatus)
 	}
 

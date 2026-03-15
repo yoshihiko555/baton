@@ -4,6 +4,7 @@ import (
 	"log"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/yoshihiko555/baton/internal/terminal"
@@ -87,10 +88,34 @@ func (s *StateManager) UpdateFromScan(result ScanResult) error {
 	entries := make([]sessionEntry, 0, len(result.Processes))
 	currentPIDSet := make(map[int]bool, len(result.Processes))
 
-	for _, proc := range result.Processes {
+	// CWD ごとに Claude セッションをグループ化し、ResolveMultiple で状態分布を取得する。
+	// PID との1対1対応はできないが、重要度順に状態を割り当てる。
+	cwdClaudeProcs := make(map[string][]int) // CWD → プロセスインデックス
+	for i, proc := range result.Processes {
 		currentPIDSet[proc.PID] = true
+		if proc.ToolType == ToolClaude {
+			cwdClaudeProcs[proc.CWD] = append(cwdClaudeProcs[proc.CWD], i)
+		}
+	}
+
+	// CWD ごとに状態分布を解決する
+	cwdStates := make(map[string][]ResolvedSession)
+	if s.resolver != nil {
+		for cwd, indices := range cwdClaudeProcs {
+			states, err := s.resolver.ResolveMultiple(cwd, len(indices))
+			if err != nil {
+				log.Printf("ResolveMultiple error for CWD %s: %v", cwd, err)
+				continue
+			}
+			cwdStates[cwd] = states
+		}
+	}
+
+	// 各プロセスをセッションに変換する
+	cwdStateIndex := make(map[string]int) // CWD ごとの割り当てカウンタ
+	for _, proc := range result.Processes {
 		key := resolveProjectKey(proc, paneWorkspaceMap)
-		sess := s.buildSession(proc)
+		sess := s.buildSessionFromStates(proc, cwdStates, cwdStateIndex)
 		entries = append(entries, sessionEntry{key: key, session: &sess})
 	}
 
@@ -109,9 +134,10 @@ func (s *StateManager) UpdateFromScan(result ScanResult) error {
 			Sessions: sessions,
 		}
 		if key.Workspace != "" {
-			proj.Name = key.Workspace
-			proj.Workspace = key.Workspace
-			proj.Path = key.Workspace
+			ws := strings.TrimSpace(key.Workspace)
+			proj.Name = ws
+			proj.Workspace = ws
+			proj.Path = ws
 		} else {
 			proj.Name = filepath.Base(key.CWD)
 			proj.Path = key.CWD
@@ -119,12 +145,13 @@ func (s *StateManager) UpdateFromScan(result ScanResult) error {
 		projects = append(projects, proj)
 	}
 
-	// プロジェクト一覧をソートする（状態優先度順 → プロジェクト名昇順）
+	// プロジェクト一覧をソートする。
+	// Waiting/Error を持つプロジェクトを上に浮かせ、それ以外はプロジェクト名昇順で安定化。
 	sort.Slice(projects, func(i, j int) bool {
-		pi := projectPriority(projects[i])
-		pj := projectPriority(projects[j])
+		pi := projectNeedsAttention(projects[i])
+		pj := projectNeedsAttention(projects[j])
 		if pi != pj {
-			return pi < pj
+			return pi
 		}
 		return projects[i].Name < projects[j].Name
 	})
@@ -138,9 +165,10 @@ func (s *StateManager) UpdateFromScan(result ScanResult) error {
 	return nil
 }
 
-// buildSession はプロセス情報からセッションを構築する。
-// ToolClaude は StateResolver 経由で状態判定し、ToolCodex/ToolGemini は Thinking で最小構成を返す。
-func (s *StateManager) buildSession(proc DetectedProcess) Session {
+// buildSessionFromStates はプロセス情報と事前解決済みの状態分布からセッションを構築する。
+// Claude セッションは cwdStates から重要度順に状態を割り当てる。
+// Codex/Gemini はプロセス存在＝Thinking として最小構成を返す。
+func (s *StateManager) buildSessionFromStates(proc DetectedProcess, cwdStates map[string][]ResolvedSession, cwdStateIndex map[string]int) Session {
 	sess := Session{
 		PID:        proc.PID,
 		Tool:       proc.ToolType,
@@ -148,22 +176,22 @@ func (s *StateManager) buildSession(proc DetectedProcess) Session {
 		State:      Thinking,
 	}
 
-	if proc.ToolType != ToolClaude || s.resolver == nil {
+	if proc.ToolType != ToolClaude {
 		return sess
 	}
 
-	resolved, err := s.resolver.ResolveState(proc)
-	if err != nil {
-		log.Printf("StateResolver error for PID %d: %v", proc.PID, err)
-		return sess
+	states := cwdStates[proc.CWD]
+	idx := cwdStateIndex[proc.CWD]
+	if idx < len(states) {
+		resolved := states[idx]
+		sess.State = resolved.State
+		sess.Branch = resolved.Branch
+		sess.CurrentTool = resolved.CurrentTool
+		sess.FirstPrompt = resolved.FirstPrompt
+		sess.InputTokens = resolved.InputTokens
+		sess.OutputTokens = resolved.OutputTokens
+		cwdStateIndex[proc.CWD] = idx + 1
 	}
-
-	sess.State = resolved.State
-	sess.Branch = resolved.Branch
-	sess.CurrentTool = resolved.CurrentTool
-	sess.FirstPrompt = resolved.FirstPrompt
-	sess.InputTokens = resolved.InputTokens
-	sess.OutputTokens = resolved.OutputTokens
 
 	return sess
 }
@@ -251,17 +279,15 @@ func sortSessionPtrs(sessions []*Session) {
 	})
 }
 
-// projectPriority はプロジェクト内の最高優先度セッションの優先度値を返す。
-// セッションがなければ最低優先度を返す。
-func projectPriority(p Project) int {
-	best := len(statePriority) // セッションなしは最低優先度
+// projectNeedsAttention はプロジェクト内に Waiting または Error のセッションがあるか返す。
+func projectNeedsAttention(p Project) bool {
 	for _, sess := range p.Sessions {
 		if sess == nil {
 			continue
 		}
-		if v, ok := statePriority[sess.State]; ok && v < best {
-			best = v
+		if sess.State == Waiting || sess.State == Error {
+			return true
 		}
 	}
-	return best
+	return false
 }
