@@ -72,8 +72,12 @@ func (m Model) View() string {
 
 	view := lipgloss.JoinVertical(lipgloss.Left, panes, statusBar)
 
+	if m.jumping {
+		jumpLine := stateStyle(core.Thinking).Render("Switching workspace...")
+		return lipgloss.JoinVertical(lipgloss.Left, jumpLine, view)
+	}
+
 	if m.err != nil {
-		// エラー時は上段に明示表示する。
 		errLine := stateStyle(core.Error).Render(fmt.Sprintf("error: %v", m.err))
 		return lipgloss.JoinVertical(lipgloss.Left, errLine, view)
 	}

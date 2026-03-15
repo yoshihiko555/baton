@@ -32,6 +32,9 @@ type ScanResultMsg struct {
 // ErrMsg は非同期コマンドで発生したエラーを運ぶ。
 type ErrMsg error
 
+// JumpDoneMsg はペインジャンプ完了を通知する。
+type JumpDoneMsg struct{ Err error }
+
 // SubMenuItem はサブメニューの1行（ペイン候補）を表す。
 type SubMenuItem struct {
 	PaneID  int
@@ -139,6 +142,8 @@ type Model struct {
 	showSubMenu   bool
 	subMenuItems  []SubMenuItem
 	subMenuCursor int
+
+	jumping bool // ペインジャンプ実行中（キー入力をブロック）
 }
 
 // NewModel はデフォルト delegate を使って TUI モデルを初期化する。

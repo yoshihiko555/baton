@@ -56,12 +56,19 @@ func TestListPanes(t *testing.T) {
 }
 
 func TestFocusPane(t *testing.T) {
-	// activate-pane コマンドに正しい引数を渡すことを確認する。
-	var gotArgs []string
+	// 同一ワークスペース内のペインに activate-pane を正しく呼び出すことを確認する。
+	var activateArgs []string
+
+	listJSON := `[{"pane_id":42,"title":"t","tab_id":1,"cwd":"/tmp","tty_name":"/dev/ttys001","is_active":false,"workspace":"default"},{"pane_id":99,"title":"current","tab_id":2,"cwd":"/tmp","tty_name":"/dev/ttys002","is_active":true,"workspace":"default"}]`
 
 	wez := &WezTerminal{
 		execFn: func(args ...string) ([]byte, error) {
-			gotArgs = append([]string{}, args...)
+			if len(args) >= 2 && args[1] == "list" {
+				return []byte(listJSON), nil
+			}
+			if len(args) >= 2 && args[1] == "activate-pane" {
+				activateArgs = append([]string{}, args...)
+			}
 			return []byte(""), nil
 		},
 	}
@@ -71,8 +78,8 @@ func TestFocusPane(t *testing.T) {
 	}
 
 	wantArgs := []string{"cli", "activate-pane", "--pane-id", "42"}
-	if !reflect.DeepEqual(gotArgs, wantArgs) {
-		t.Fatalf("unexpected args: got=%v want=%v", gotArgs, wantArgs)
+	if !reflect.DeepEqual(activateArgs, wantArgs) {
+		t.Fatalf("unexpected args: got=%v want=%v", activateArgs, wantArgs)
 	}
 }
 

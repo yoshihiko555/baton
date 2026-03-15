@@ -354,9 +354,8 @@ func TestUpdateEnterKeyOnProjectPane(t *testing.T) {
 }
 
 func TestUpdateEnterKeyOnSessionPaneFocusSuccess(t *testing.T) {
-	m, _, _, _, term := newTestModel()
+	m, _, _, _, _ := newTestModel()
 
-	// セッションを投入する。
 	projects := []core.Project{
 		{
 			Path: "/project-a",
@@ -368,40 +367,24 @@ func TestUpdateEnterKeyOnSessionPaneFocusSuccess(t *testing.T) {
 	updated, _ := m.Update(ScanResultMsg{Projects: projects})
 	m = updated.(Model)
 
-	// pane 1 (session) で Enter を押す。
+	// pane 1 (session) で Enter → jumping=true, FocusPane が tea.Cmd として返る。
 	m.activePane = 1
 	msg := tea.KeyMsg{Type: tea.KeyEnter}
-	updated, _ = m.Update(msg)
+	updated, cmd := m.Update(msg)
 	m = updated.(Model)
 
-	if term.focused != "1" {
-		t.Errorf("focused = %q, want %q", term.focused, "1")
+	if !m.jumping {
+		t.Error("expected jumping=true after Enter")
 	}
-	if m.err != nil {
-		t.Errorf("err = %v, want nil", m.err)
+	if cmd == nil {
+		t.Error("expected cmd for async FocusPane")
 	}
-}
 
-func TestUpdateEnterKeyOnSessionPaneTerminalNil(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-	m.terminal = nil
-
-	projects := []core.Project{
-		{
-			Path:     "/project-a",
-			Sessions: []*core.Session{{ID: "s1", State: core.Thinking, PaneID: "1"}},
-		},
-	}
-	updated, _ := m.Update(ScanResultMsg{Projects: projects})
+	// JumpDoneMsg で tea.Quit が返る。
+	updated, cmd = m.Update(JumpDoneMsg{Err: nil})
 	m = updated.(Model)
-
-	m.activePane = 1
-	msg := tea.KeyMsg{Type: tea.KeyEnter}
-	updated, _ = m.Update(msg)
-	m = updated.(Model)
-
-	if m.err == nil {
-		t.Error("expected error for nil terminal")
+	if cmd == nil {
+		t.Error("expected tea.Quit after JumpDoneMsg")
 	}
 }
 

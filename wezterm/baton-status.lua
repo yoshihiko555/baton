@@ -87,15 +87,6 @@ end
 
 function M.setup(config)
   config = config or {}
-  local path = config.path or DEFAULT_STATUS_PATH
-
-  -- update-right-status のたびにキャッシュ経由で状態を読み取る
-  -- 間引きは read_status の TTL キャッシュで制御するため、ここでは interval 管理不要
-  wezterm.on('update-right-status', function(window, _pane)
-    local data = M.read_status(path)
-    local status = M.format_status(data)
-    window:set_right_status(status)
-  end)
 end
 
 return M

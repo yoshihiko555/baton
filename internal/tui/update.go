@@ -30,7 +30,18 @@ var (
 // Update は tea.Model のメッセージ処理を行う。
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case JumpDoneMsg:
+		if msg.Err != nil {
+			m.err = msg.Err
+			m.jumping = false
+			return m, nil
+		}
+		return m, tea.Quit
 	case tea.KeyMsg:
+		// ジャンプ実行中はキー入力を無視する。
+		if m.jumping {
+			return m, nil
+		}
 		// サブメニュー表示中は専用のキーハンドリングを行う。
 		if m.showSubMenu {
 			return m.updateSubMenu(msg)
@@ -65,7 +76,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if selected.Session.Ambiguous {
-				// Ambiguous セッションはサブメニューでペインを選択する。
 				m.showSubMenu = true
 				m.subMenuItems = buildSubMenuItems(selected.Session.CandidatePaneIDs, m.latestPanes)
 				m.subMenuCursor = 0
@@ -81,14 +91,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = fmt.Errorf("invalid pane id %q: %w", selected.Session.PaneID, atoiErr)
 				return m, nil
 			}
-			if m.terminal == nil {
-				m.err = errors.New("terminal is nil")
-				return m, nil
+			m.jumping = true
+			term := m.terminal
+			return m, func() tea.Msg {
+				err := term.FocusPane(paneID)
+				return JumpDoneMsg{Err: err}
 			}
-			if err := m.terminal.FocusPane(paneID); err != nil {
-				m.err = err
-			}
-			return m, nil
 		case key.Matches(msg, upKeys, downKeys):
 			return m.updateActiveList(msg)
 		default:
@@ -172,8 +180,22 @@ func (m Model) updateActiveList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	// プロジェクト側のカーソル移動前の選択を記憶する。
+	prevSelected := ""
+	if sel, ok := m.projectList.SelectedItem().(ProjectItem); ok {
+		prevSelected = sel.Project.Path
+	}
+
 	var cmd tea.Cmd
 	m.projectList, cmd = m.projectList.Update(msg)
+
+	// カーソルが別プロジェクトに移動したら右ペインを即座に更新する。
+	if sel, ok := m.projectList.SelectedItem().(ProjectItem); ok {
+		if sel.Project.Path != prevSelected {
+			m.updateSessionList(m.latestProjects)
+		}
+	}
+
 	return m, cmd
 }
 

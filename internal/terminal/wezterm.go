@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // WezTerminal は wezterm 向けの Terminal 実装。
@@ -63,13 +65,60 @@ func (w *WezTerminal) ListPanes() ([]Pane, error) {
 	return panes, nil
 }
 
+// wsTriggerPath は WezTerm Lua のワークスペース切り替えトリガーファイルのパス。
+// WezTerm の actions.lua (setup_alfred_watcher) が update-status で検知し、
+// SwitchToWorkspace を実行する。
+const wsTriggerPath = "/tmp/wezterm-alfred-workspace.json"
+
 // FocusPane は指定ペインをアクティブ化する。
+// 別ワークスペースのペインの場合は、トリガーファイル経由で WezTerm Lua に
+// ワークスペース切り替えを依頼してから activate-pane を実行する。
 func (w *WezTerminal) FocusPane(paneID int) error {
 	if w == nil || w.execFn == nil {
 		return fmt.Errorf("wezterm exec function is not configured")
 	}
 
-	_, err := w.execFn("cli", "activate-pane", "--pane-id", strconv.Itoa(paneID))
+	// 対象ペインの情報を取得する
+	panes, err := w.ListPanes()
+	if err != nil {
+		return err
+	}
+
+	currentWS := ""
+	targetWS := ""
+	myPaneID := os.Getenv("WEZTERM_PANE")
+	for _, p := range panes {
+		if strconv.Itoa(p.ID) == myPaneID {
+			currentWS = p.Workspace
+		}
+		if p.ID == paneID {
+			targetWS = p.Workspace
+		}
+	}
+
+	// 別ワークスペースの場合は Alfred watcher のトリガーファイルで WS を切り替え、
+	// 切り替え完了後に activate-pane でペインにフォーカスする。
+	if targetWS != "" && currentWS != "" && targetWS != currentWS {
+		targetCWD := ""
+		for _, p := range panes {
+			if p.ID == paneID {
+				targetCWD = p.WorkingDir
+				break
+			}
+		}
+		// Alfred watcher 互換のトリガーファイルでワークスペースを切り替える
+		trigger := fmt.Sprintf(`{"name":%q,"cwd":%q,"timestamp":%d}`, targetWS, targetCWD, time.Now().Unix())
+		if writeErr := os.WriteFile(wsTriggerPath, []byte(trigger), 0644); writeErr != nil {
+			return fmt.Errorf("write ws trigger: %w", writeErr)
+		}
+		// Lua が検知して WS 切り替えを完了するまで待機し、その後ペインにフォーカスする
+		time.Sleep(2 * time.Second)
+		_, _ = w.execFn("cli", "activate-pane", "--pane-id", strconv.Itoa(paneID))
+		return nil
+	}
+
+	// 同一ワークスペースの場合は直接 activate-pane
+	_, err = w.execFn("cli", "activate-pane", "--pane-id", strconv.Itoa(paneID))
 	if err != nil {
 		return mapWeztermExecError(err)
 	}

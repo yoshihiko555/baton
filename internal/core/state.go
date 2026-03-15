@@ -4,6 +4,7 @@ import (
 	"log"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -174,6 +175,7 @@ func (s *StateManager) buildSessionFromStates(proc DetectedProcess, cwdStates ma
 		Tool:       proc.ToolType,
 		WorkingDir: proc.CWD,
 		State:      Thinking,
+		PaneID:     strconv.Itoa(proc.PaneID),
 	}
 
 	if proc.ToolType != ToolClaude {
