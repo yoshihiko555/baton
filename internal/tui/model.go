@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/yoshihiko555/baton/internal/config"
 	"github.com/yoshihiko555/baton/internal/core"
@@ -93,24 +94,27 @@ type SessionItem struct {
 // Title はセッション行のタイトル文字列を返す。
 func (i SessionItem) Title() string {
 	icon := "●"
-	prefix := "  "
-	if i.Session.Ambiguous {
-		prefix = "~ "
-	}
-	parts := []string{prefix + stateStyle(i.Session.State).Render(icon), i.Session.Tool.String()}
-	parts = append(parts, i.Session.State.String())
-	if i.Session.Branch != "" {
-		parts = append(parts, i.Session.Branch)
+	s := i.Session
+	stateIcon := stateStyle(s.State).Render(icon)
+
+	parts := []string{stateIcon, s.Tool.String(), s.State.String()}
+	if s.Branch != "" {
+		parts = append(parts, s.Branch)
 	}
 	return strings.Join(parts, "  ")
 }
 
 // Description はセッション行の補足説明文字列を返す。
 func (i SessionItem) Description() string {
-	if i.Session.CurrentTool == "" && i.Session.InputTokens == 0 {
-		return ""
+	s := i.Session
+	parts := []string{fmt.Sprintf("PID:%d", s.PID)}
+	if s.CurrentTool != "" {
+		parts = append(parts, s.CurrentTool)
 	}
-	return fmt.Sprintf("    %s  |  %d tokens", i.Session.CurrentTool, i.Session.InputTokens)
+	if s.InputTokens > 0 {
+		parts = append(parts, fmt.Sprintf("%dk tokens", s.InputTokens/1000))
+	}
+	return strings.Join(parts, " · ")
 }
 
 // FilterValue はセッション行の検索対象文字列を返す。
@@ -154,11 +158,43 @@ func NewModel(
 	term terminal.Terminal,
 	cfg config.Config,
 ) Model {
-	projectList := list.New([]list.Item{}, list.NewDefaultDelegate(), defaultListWidth, defaultListHeight)
-	projectList.Title = "Projects"
+	brand := lipgloss.Color("#E8832A")
+	secondary := lipgloss.Color("#F5A623")
+	normalText := lipgloss.Color("#E8E4E0")
 
-	sessionList := list.New([]list.Item{}, list.NewDefaultDelegate(), defaultListWidth, defaultListHeight)
+	titleStyle := lipgloss.NewStyle().
+		Foreground(brand).
+		Bold(true).
+		Padding(0, 1)
+
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.NormalTitle = lipgloss.NewStyle().
+		Foreground(normalText).
+		Padding(0, 0, 0, 2)
+	delegate.Styles.NormalDesc = lipgloss.NewStyle().
+		Foreground(secondary).
+		Padding(0, 0, 0, 2)
+	delegate.Styles.SelectedTitle = lipgloss.NewStyle().
+		Foreground(brand).
+		Bold(true).
+		Border(lipgloss.NormalBorder(), false, false, false, true).
+		BorderForeground(brand).
+		Padding(0, 0, 0, 1)
+	delegate.Styles.SelectedDesc = lipgloss.NewStyle().
+		Foreground(secondary).
+		Border(lipgloss.NormalBorder(), false, false, false, true).
+		BorderForeground(brand).
+		Padding(0, 0, 0, 1)
+
+	projectList := list.New([]list.Item{}, delegate, defaultListWidth, defaultListHeight)
+	projectList.Title = "Projects"
+	projectList.Styles.Title = titleStyle
+	projectList.SetShowHelp(false)
+
+	sessionList := list.New([]list.Item{}, delegate, defaultListWidth, defaultListHeight)
 	sessionList.Title = "Sessions"
+	sessionList.Styles.Title = titleStyle
+	sessionList.SetShowHelp(false)
 
 	return Model{
 		projectList:  projectList,

@@ -302,16 +302,15 @@ func TestProjectItemTitleFallbackToPath(t *testing.T) {
 	}
 }
 
-func TestSessionItemDescriptionZeroTime(t *testing.T) {
+func TestSessionItemDescriptionShowsPID(t *testing.T) {
 	item := SessionItem{Session: core.Session{
-		ID:    "abc-123",
+		PID:   12345,
 		State: core.Idle,
 	}}
 
 	desc := item.Description()
-	// v2: Description() returns empty when CurrentTool=="" && InputTokens==0
-	if desc != "" {
-		t.Errorf("Description() = %q, want empty string for zero-value session", desc)
+	if desc != "PID:12345" {
+		t.Errorf("Description() = %q, want %q", desc, "PID:12345")
 	}
 }
 

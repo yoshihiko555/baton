@@ -11,13 +11,13 @@ import (
 
 var (
 	activeBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("62"))
+				Border(lipgloss.ThickBorder()).
+				BorderForeground(lipgloss.Color("#E8832A")) // brand orange
 	inactiveBorderStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("240"))
+				BorderForeground(lipgloss.Color("#2AADE8")) // blue
 	statusBarStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241")).
+			Foreground(lipgloss.Color("#E8E4E0")). // light gray
 			Padding(0, 1)
 )
 
@@ -87,11 +87,17 @@ func (m Model) View() string {
 
 func (m Model) renderStatusBar(totalWidth int) string {
 	s := m.latestSummary
-	status := fmt.Sprintf(
-		"%d sessions | %d active | %d waiting    q:quit enter:jump",
-		s.TotalSessions, s.Active, s.Waiting,
-	)
-	return statusBarStyle.Width(max(1, totalWidth)).Render(status)
+
+	left := fmt.Sprintf(" %d sessions · %d active · %d waiting", s.TotalSessions, s.Active, s.Waiting)
+	right := "↑↓/jk:move  tab:pane  enter:jump  q:quit "
+
+	gap := totalWidth - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 0 {
+		gap = 0
+	}
+
+	bar := left + strings.Repeat(" ", gap) + right
+	return statusBarStyle.Width(max(1, totalWidth)).Render(bar)
 }
 
 // renderSubMenu はサブメニューを描画する。
