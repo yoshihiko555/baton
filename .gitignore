@@ -60,4 +60,5 @@ baton
 
 # documentation
 docs/adr/
+docs/roadmap.md
 .claude/.mcp-proxy.pid
