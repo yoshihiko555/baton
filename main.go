@@ -59,6 +59,7 @@ func run() error {
 	reader := core.NewIncrementalReader()
 	resolver := core.NewStateResolver(reader, cfg.ClaudeProjectsDir, cfg.SessionMetaDir, cfg.ScanInterval)
 	stateManager := core.NewStateManager(resolver)
+	stateManager.SetProcessScanner(processScanner)
 	exporter := core.NewExporter(cfg.StatusOutputPath, core.ExporterConfig{
 		Format:    cfg.Statusbar.Format,
 		ToolIcons: cfg.Statusbar.ToolIcons,
@@ -167,8 +168,10 @@ func runNoTUI(
 
 func initTerminal(name string) (terminal.Terminal, error) {
 	switch name {
-	case "", "wezterm":
+	case "wezterm":
 		return terminal.NewWezTerminal(), nil
+	case "", "tmux":
+		return terminal.NewTmuxTerminal(), nil
 	default:
 		return nil, fmt.Errorf("unsupported terminal %q", name)
 	}

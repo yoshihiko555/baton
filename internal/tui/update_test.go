@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -41,6 +40,8 @@ func (m *mockStateUpdater) UpdateFromScan(result core.ScanResult) error {
 	return nil
 }
 
+func (m *mockStateUpdater) RefineToolUseState(term terminal.Terminal) {}
+
 type mockScanner struct {
 	result core.ScanResult
 }
@@ -58,12 +59,12 @@ func (m *mockTerminal) ListPanes() ([]terminal.Pane, error) {
 	return nil, nil
 }
 
-func (m *mockTerminal) FocusPane(paneID int) error {
-	m.focused = fmt.Sprintf("%d", paneID)
+func (m *mockTerminal) FocusPane(paneID string) error {
+	m.focused = paneID
 	return nil
 }
 
-func (m *mockTerminal) GetPaneText(paneID int) (string, error) {
+func (m *mockTerminal) GetPaneText(paneID string) (string, error) {
 	return "", nil
 }
 

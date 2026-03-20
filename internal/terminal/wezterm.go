@@ -52,13 +52,12 @@ func (w *WezTerminal) ListPanes() ([]Pane, error) {
 	panes := make([]Pane, 0, len(rawPanes))
 	for _, rawPane := range rawPanes {
 		panes = append(panes, Pane{
-			ID:         rawPane.ID,
-			Title:      rawPane.Title,
-			TabID:      rawPane.TabID,
-			WorkingDir: normalizeCWD(rawPane.WorkingDir),
-			TTYName:    rawPane.TTYName,
-			IsActive:   rawPane.IsActive,
-			Workspace:  rawPane.Workspace,
+			ID:          strconv.Itoa(rawPane.ID),
+			Title:       rawPane.Title,
+			WorkingDir:  normalizeCWD(rawPane.WorkingDir),
+			TTYName:     rawPane.TTYName,
+			IsActive:    rawPane.IsActive,
+			SessionName: rawPane.Workspace,
 		})
 	}
 
@@ -73,7 +72,7 @@ const wsTriggerPath = "/tmp/wezterm-alfred-workspace.json"
 // FocusPane は指定ペインをアクティブ化する。
 // 別ワークスペースのペインの場合は、トリガーファイル経由で WezTerm Lua に
 // ワークスペース切り替えを依頼してから activate-pane を実行する。
-func (w *WezTerminal) FocusPane(paneID int) error {
+func (w *WezTerminal) FocusPane(paneID string) error {
 	if w == nil || w.execFn == nil {
 		return fmt.Errorf("wezterm exec function is not configured")
 	}
@@ -88,11 +87,11 @@ func (w *WezTerminal) FocusPane(paneID int) error {
 	targetWS := ""
 	myPaneID := os.Getenv("WEZTERM_PANE")
 	for _, p := range panes {
-		if strconv.Itoa(p.ID) == myPaneID {
-			currentWS = p.Workspace
+		if p.ID == myPaneID {
+			currentWS = p.SessionName
 		}
 		if p.ID == paneID {
-			targetWS = p.Workspace
+			targetWS = p.SessionName
 		}
 	}
 
@@ -113,12 +112,12 @@ func (w *WezTerminal) FocusPane(paneID int) error {
 		}
 		// Lua が検知して WS 切り替えを完了するまで待機し、その後ペインにフォーカスする
 		time.Sleep(2 * time.Second)
-		_, _ = w.execFn("cli", "activate-pane", "--pane-id", strconv.Itoa(paneID))
+		_, _ = w.execFn("cli", "activate-pane", "--pane-id", paneID)
 		return nil
 	}
 
 	// 同一ワークスペースの場合は直接 activate-pane
-	_, err = w.execFn("cli", "activate-pane", "--pane-id", strconv.Itoa(paneID))
+	_, err = w.execFn("cli", "activate-pane", "--pane-id", paneID)
 	if err != nil {
 		return mapWeztermExecError(err)
 	}
@@ -127,12 +126,12 @@ func (w *WezTerminal) FocusPane(paneID int) error {
 }
 
 // GetPaneText は指定ペインの画面テキスト末尾を返す。
-func (w *WezTerminal) GetPaneText(paneID int) (string, error) {
+func (w *WezTerminal) GetPaneText(paneID string) (string, error) {
 	if w == nil || w.execFn == nil {
 		return "", fmt.Errorf("wezterm exec function is not configured")
 	}
 
-	out, err := w.execFn("cli", "get-text", "--pane-id", strconv.Itoa(paneID))
+	out, err := w.execFn("cli", "get-text", "--pane-id", paneID)
 	if err != nil {
 		return "", mapWeztermExecError(err)
 	}

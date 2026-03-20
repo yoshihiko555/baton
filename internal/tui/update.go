@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -86,13 +85,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = errors.New("selected session has no pane id")
 				return m, nil
 			}
-			paneID, atoiErr := strconv.Atoi(selected.Session.PaneID)
-			if atoiErr != nil {
-				m.err = fmt.Errorf("invalid pane id %q: %w", selected.Session.PaneID, atoiErr)
-				return m, nil
-			}
 			m.jumping = true
 			term := m.terminal
+			paneID := selected.Session.PaneID
 			return m, func() tea.Msg {
 				err := term.FocusPane(paneID)
 				return JumpDoneMsg{Err: err}
@@ -121,7 +116,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case TickMsg:
 		// 定期ポーリング: スキャンを実行する。
-		return m, doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader)
+		return m, doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader, m.terminal)
 	case ScanResultMsg:
 		// スキャン結果で状態を更新し、次 tick を予約する。
 		m.latestProjects = msg.Projects
@@ -309,14 +304,14 @@ func (m Model) projectsFromProjectList() []core.Project {
 }
 
 // buildSubMenuItems は候補ペイン ID リストからサブメニュー項目を生成する。
-func buildSubMenuItems(candidateIDs []int, panes []terminal.Pane) []SubMenuItem {
-	paneMap := make(map[int]terminal.Pane, len(panes))
+func buildSubMenuItems(candidateIDs []string, panes []terminal.Pane) []SubMenuItem {
+	paneMap := make(map[string]terminal.Pane, len(panes))
 	for _, p := range panes {
 		paneMap[p.ID] = p
 	}
 	items := make([]SubMenuItem, 0, len(candidateIDs))
 	for _, id := range candidateIDs {
-		item := SubMenuItem{PaneID: id, TTYName: fmt.Sprintf("pane %d", id)}
+		item := SubMenuItem{PaneID: id, TTYName: fmt.Sprintf("pane %s", id)}
 		if p, ok := paneMap[id]; ok && p.TTYName != "" {
 			item.TTYName = p.TTYName
 		}

@@ -1,10 +1,11 @@
 package core
 
 import (
+	"context"
 	"log"
 	"path/filepath"
+	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -30,7 +31,7 @@ type projectKey struct {
 
 // resolveProjectKey はプロセスとペインマップからプロジェクトキーを解決する。
 // Workspace が空でなく "default" でもない場合はワークスペース優先でグルーピングする。
-func resolveProjectKey(proc DetectedProcess, paneWorkspaceMap map[int]string) projectKey {
+func resolveProjectKey(proc DetectedProcess, paneWorkspaceMap map[string]string) projectKey {
 	ws := paneWorkspaceMap[proc.PaneID]
 	if ws != "" && ws != "default" {
 		return projectKey{Workspace: ws}
@@ -41,12 +42,13 @@ func resolveProjectKey(proc DetectedProcess, paneWorkspaceMap map[int]string) pr
 // StateManager はスキャン結果をプロジェクト/セッション単位に集約するコンポーネント。
 // v2 ではポーリング + スナップショット照合方式を採用し、Watcher への依存を排除した。
 type StateManager struct {
-	resolver   *StateResolver  // JSONL 解析・状態判定の委譲先
-	projects   []Project       // 最新プロジェクト一覧スナップショット（ソート済み）
-	summary    Summary         // 最新集計キャッシュ
-	panes      []terminal.Pane // 最新ペイン一覧（Ambiguous セッション解決用）
-	prevPIDSet map[int]bool    // 前回スキャンの PID セット（差分検出用）
-	mu         sync.RWMutex   // 読み書き保護
+	resolver       *StateResolver  // JSONL 解析・状態判定の委譲先
+	processScanner *ProcessScanner // Codex 子プロセス検査用
+	projects       []Project       // 最新プロジェクト一覧スナップショット（ソート済み）
+	summary        Summary         // 最新集計キャッシュ
+	panes          []terminal.Pane // 最新ペイン一覧（Ambiguous セッション解決用）
+	prevPIDSet     map[int]bool    // 前回スキャンの PID セット（差分検出用）
+	mu             sync.RWMutex   // 読み書き保護
 }
 
 // NewStateManager は StateManager を初期化して返す。
@@ -55,6 +57,11 @@ func NewStateManager(resolver *StateResolver) *StateManager {
 		resolver:   resolver,
 		prevPIDSet: make(map[int]bool),
 	}
+}
+
+// SetProcessScanner は Codex 子プロセス検査用の ProcessScanner を設定する。
+func (s *StateManager) SetProcessScanner(ps *ProcessScanner) {
+	s.processScanner = ps
 }
 
 // UpdateFromScan はスキャン結果から状態を更新する（StateUpdater 実装）。
@@ -74,10 +81,10 @@ func (s *StateManager) UpdateFromScan(result ScanResult) error {
 		return nil
 	}
 
-	// Step 2: PaneID → Workspace マッピングを構築する
-	paneWorkspaceMap := make(map[int]string, len(result.Panes))
+	// Step 2: PaneID → SessionName マッピングを構築する
+	paneWorkspaceMap := make(map[string]string, len(result.Panes))
 	for _, pane := range result.Panes {
-		paneWorkspaceMap[pane.ID] = pane.Workspace
+		paneWorkspaceMap[pane.ID] = pane.SessionName
 	}
 
 	// Step 3 & 4: プロセスをグルーピングしてセッションに変換する
@@ -168,14 +175,23 @@ func (s *StateManager) UpdateFromScan(result ScanResult) error {
 
 // buildSessionFromStates はプロセス情報と事前解決済みの状態分布からセッションを構築する。
 // Claude セッションは cwdStates から重要度順に状態を割り当てる。
-// Codex/Gemini はプロセス存在＝Thinking として最小構成を返す。
+// Codex はプロセスツリー検査で Working(Thinking)/Idle を判定する。
+// Gemini はプロセス存在＝Thinking として最小構成を返す。
 func (s *StateManager) buildSessionFromStates(proc DetectedProcess, cwdStates map[string][]ResolvedSession, cwdStateIndex map[string]int) Session {
 	sess := Session{
 		PID:        proc.PID,
 		Tool:       proc.ToolType,
 		WorkingDir: proc.CWD,
 		State:      Thinking,
-		PaneID:     strconv.Itoa(proc.PaneID),
+		PaneID:     proc.PaneID,
+	}
+
+	if proc.ToolType == ToolCodex && s.processScanner != nil {
+		hasChildren, err := s.processScanner.HasChildProcesses(context.Background(), proc.PID)
+		if err == nil && !hasChildren {
+			sess.State = Idle
+		}
+		return sess
 	}
 
 	if proc.ToolType != ToolClaude {
@@ -281,21 +297,29 @@ func sortSessionPtrs(sessions []*Session) {
 	})
 }
 
-// approvalPatterns は承認待ちを示すペインテキストのパターン。
+// approvalPatterns は Claude Code の承認待ちを示すペインテキストのパターン（小文字）。
+// JSONL の ToolUse 判定を補完する用途。containsApprovalPrompt で使用。
 var approvalPatterns = []string{
-	"Allow",
 	"allow",
 	"(y/n)",
-	"(Y/n)",
+	"[y/n]",
+	"[n/y]",
 	"yes/no",
-	"Yes/No",
 	"approve",
 	"permit",
-	"Do you want",
+	"do you want",
 }
 
-// RefineToolUseState は ToolUse 状態のセッションに対して、ペインテキストから
-// 承認待ちかどうかを判定し、承認待ちなら Waiting に修正する。
+// codexApprovalPattern は Codex CLI の承認プロンプトの構造を検出する正規表現。
+// Codex は番号付き選択肢（"1. Yes, ..." / "2. Yes, ..." / "3. No, ..."）を表示する。
+// 文言ではなく構造で判定するため、Codex のUI変更に強い。
+// codexApprovalPattern は Codex CLI の承認プロンプトの構造を検出する正規表現。
+// 番号付き選択肢（"1. Yes..." + "2. Yes..." or "2. No..."）の連続で判定する。
+// 単独の "1. Yes" ではなく後続行も確認することで誤検知を防ぐ。
+var codexApprovalPattern = regexp.MustCompile(`(?m)^\s*[›>]?\s*1\.\s+Yes.*\n\s*[›>]?\s*2\.\s+`)
+
+// RefineToolUseState はペインテキストから承認待ちかどうかを判定し、Waiting に修正する。
+// 対象: Claude の ToolUse 状態、Codex の Idle 状態。
 func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -306,18 +330,29 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 
 	for i := range s.projects {
 		for j, sess := range s.projects[i].Sessions {
-			if sess == nil || sess.State != ToolUse {
+			if sess == nil {
 				continue
 			}
-			paneID, err := strconv.Atoi(sess.PaneID)
+			// ToolUse（Claude）または Idle（Codex/Gemini）の承認待ち検出
+			switch {
+			case sess.State == ToolUse:
+				// Claude: JSONL で ToolUse → ペインテキストで承認待ちか確認
+			case sess.State == Idle && sess.Tool == ToolCodex:
+				// Codex: 子プロセスなし(Idle) → 承認待ちかもしれない
+			default:
+				continue
+			}
+			text, err := term.GetPaneText(sess.PaneID)
 			if err != nil {
 				continue
 			}
-			text, err := term.GetPaneText(paneID)
-			if err != nil {
-				continue
+			isWaiting := false
+			if sess.Tool == ToolClaude {
+				isWaiting = containsApprovalPrompt(text)
+			} else {
+				isWaiting = codexApprovalPattern.MatchString(text)
 			}
-			if containsApprovalPrompt(text) {
+			if isWaiting {
 				s.projects[i].Sessions[j].State = Waiting
 			}
 		}
@@ -328,8 +363,9 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 }
 
 func containsApprovalPrompt(text string) bool {
+	lower := strings.ToLower(text)
 	for _, pattern := range approvalPatterns {
-		if strings.Contains(text, pattern) {
+		if strings.Contains(lower, pattern) {
 			return true
 		}
 	}

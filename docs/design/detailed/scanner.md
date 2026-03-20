@@ -83,7 +83,7 @@ type DetectedProcess struct {
     PID      int
     Name     string   // COMM 名
     ToolType ToolType
-    PaneID   int      // Pane.ID と同じ int 型
+    PaneID   string   // Pane.ID と同じ string 型（tmux: "%5", wezterm: "42"）
     TTY      string
     CWD      string   // Pane.WorkingDir からコピー（正規化済み）
 }
@@ -113,6 +113,7 @@ func NewProcessScanner() *ProcessScanner
 func NewProcessScannerWithExec(execFn ...) *ProcessScanner  // テスト用
 
 func (s *ProcessScanner) FindAIProcesses(ctx context.Context, tty string) ([]DetectedProcess, error)
+func (s *ProcessScanner) HasChildProcesses(ctx context.Context, pid int) (bool, error)  // Codex 状態判定用
 ```
 
 ---
@@ -126,7 +127,7 @@ func (s *ProcessScanner) FindAIProcesses(ctx context.Context, tty string) ([]Det
 | 呼び出し | `Terminal.ListPanes()` |
 | 戻り値 | `([]Pane, error)` |
 | エラー時 | `ScanResult.Err` に格納して即 return（後続ペインのスキャンは行わない） |
-| Pane に必要なフィールド | `ID int`、`TTYName string`、`WorkingDir string` |
+| Pane に必要なフィールド | `ID string`、`TTYName string`、`WorkingDir string`、`CurrentCommand string`（tmux 最適化用） |
 
 ### DefaultScanner ↔ ProcessScanner
 
@@ -145,6 +146,11 @@ PaneID と CWD の付与は DefaultScanner の責任とする。これにより 
 ```go
 // DefaultScanner 内の処理イメージ
 for _, pane := range panes {
+    // CurrentCommand フィルタ（tmux 最適化）
+    // CurrentCommand が空（WezTerm）の場合はフィルタしない
+    if pane.CurrentCommand != "" && !isAICommand(pane.CurrentCommand) {
+        continue
+    }
     procs, err := s.processScanner.FindAIProcesses(ctx, pane.TTYName)
     if err != nil {
         log.Printf("warn: skip pane %s: %v", pane.TTYName, err)

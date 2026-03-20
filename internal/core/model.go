@@ -82,7 +82,7 @@ type Session struct {
 	InputTokens      int
 	OutputTokens     int
 	Ambiguous        bool
-	CandidatePaneIDs []int
+	CandidatePaneIDs []string
 
 	// 共通フィールド
 	State        SessionState
@@ -113,7 +113,7 @@ type DetectedProcess struct {
 	PID      int
 	Name     string
 	ToolType ToolType
-	PaneID   int
+	PaneID   string
 	TTY      string
 	CWD      string
 }
@@ -137,6 +137,7 @@ type Summary struct {
 // StateUpdater はスキャン結果から状態を更新するインターフェース。
 type StateUpdater interface {
 	UpdateFromScan(result ScanResult) error
+	RefineToolUseState(term terminal.Terminal)
 }
 
 // StateReader は集約済み状態への読み取り専用アクセスを定義する。

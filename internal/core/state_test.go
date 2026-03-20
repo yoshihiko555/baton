@@ -1,6 +1,9 @@
 package core
 
 import (
+	"context"
+	"fmt"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -143,12 +146,12 @@ func TestStateManagerUpdateFromScanWorkspaceGrouping(t *testing.T) {
 	manager := NewStateManager(nil)
 
 	panes := []terminal.Pane{
-		{ID: 1, Workspace: "my-workspace"},
-		{ID: 2, Workspace: "my-workspace"},
+		{ID: "1", SessionName: "my-workspace"},
+		{ID: "2", SessionName: "my-workspace"},
 	}
 	procs := []DetectedProcess{
-		{PID: 100, ToolType: ToolCodex, PaneID: 1, CWD: "/proj-a"},
-		{PID: 200, ToolType: ToolGemini, PaneID: 2, CWD: "/proj-b"},
+		{PID: 100, ToolType: ToolCodex, PaneID: "1", CWD: "/proj-a"},
+		{PID: 200, ToolType: ToolGemini, PaneID: "2", CWD: "/proj-b"},
 	}
 	result := ScanResult{
 		Processes: procs,
@@ -177,12 +180,12 @@ func TestStateManagerUpdateFromScanDefaultWorkspace(t *testing.T) {
 	manager := NewStateManager(nil)
 
 	panes := []terminal.Pane{
-		{ID: 1, Workspace: "default"},
-		{ID: 2, Workspace: "default"},
+		{ID: "1", SessionName: "default"},
+		{ID: "2", SessionName: "default"},
 	}
 	procs := []DetectedProcess{
-		{PID: 100, ToolType: ToolCodex, PaneID: 1, CWD: "/proj-a"},
-		{PID: 200, ToolType: ToolGemini, PaneID: 2, CWD: "/proj-b"},
+		{PID: 100, ToolType: ToolCodex, PaneID: "1", CWD: "/proj-a"},
+		{PID: 200, ToolType: ToolGemini, PaneID: "2", CWD: "/proj-b"},
 	}
 	result := ScanResult{
 		Processes: procs,
@@ -275,8 +278,8 @@ func TestStateManagerPanes(t *testing.T) {
 	manager := NewStateManager(nil)
 
 	panes := []terminal.Pane{
-		{ID: 1, TTYName: "/dev/ttys001"},
-		{ID: 2, TTYName: "/dev/ttys002"},
+		{ID: "1", TTYName: "/dev/ttys001"},
+		{ID: "2", TTYName: "/dev/ttys002"},
 	}
 	result := ScanResult{
 		Processes: []DetectedProcess{},
@@ -428,7 +431,7 @@ func TestProjectNeedsAttentionThinkingOnly(t *testing.T) {
 }
 
 func TestResolveProjectKey(t *testing.T) {
-	proc := DetectedProcess{PID: 1, PaneID: 10, CWD: "/my/project"}
+	proc := DetectedProcess{PID: 1, PaneID: "10", CWD: "/my/project"}
 
 	tests := []struct {
 		name      string
@@ -443,7 +446,7 @@ func TestResolveProjectKey(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			paneMap := map[int]string{10: tc.workspace}
+			paneMap := map[string]string{"10": tc.workspace}
 			key := resolveProjectKey(proc, paneMap)
 			if key.Workspace != tc.wantWS {
 				t.Errorf("Workspace = %q, want %q", key.Workspace, tc.wantWS)
@@ -452,5 +455,122 @@ func TestResolveProjectKey(t *testing.T) {
 				t.Errorf("CWD = %q, want %q", key.CWD, tc.wantCWD)
 			}
 		})
+	}
+}
+
+// newExitError1 は exit code 1 の *exec.ExitError を返すヘルパー。
+// pgrep が子プロセスなしのとき返すエラーを再現するために使用する。
+func newExitError1(t *testing.T) error {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", "exit 1")
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("expected non-nil error from 'sh -c exit 1'")
+	}
+	return err
+}
+
+func TestStateManagerCodexWithChildProcesses(t *testing.T) {
+	// Codex プロセスに作業用子プロセスがある場合、セッション状態が Thinking になることを確認する。
+	ps := NewProcessScannerWithExec(func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if name == "pgrep" {
+			return []byte("99999\n"), nil
+		}
+		if name == "ps" {
+			return []byte("sandbox-exec\n"), nil
+		}
+		return nil, fmt.Errorf("unexpected command: %s", name)
+	})
+
+	manager := NewStateManager(nil)
+	manager.SetProcessScanner(ps)
+
+	result := newScanResult(newProc(100, ToolCodex, "/project"))
+	if err := manager.UpdateFromScan(result); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	projects := manager.Projects()
+	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
+		t.Fatalf("unexpected projects/sessions: %v", projects)
+	}
+	if got := projects[0].Sessions[0].State; got != Thinking {
+		t.Errorf("state = %v, want Thinking (codex with child processes)", got)
+	}
+}
+
+func TestStateManagerCodexWithoutChildProcesses(t *testing.T) {
+	// Codex プロセスに作業用子プロセスがない場合（常駐のみ）、セッション状態が Idle になることを確認する。
+	ps := NewProcessScannerWithExec(func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if name == "pgrep" {
+			return []byte("99998\n99999\n"), nil
+		}
+		if name == "ps" {
+			return []byte("node\ncaffeinate\n"), nil
+		}
+		return nil, fmt.Errorf("unexpected command: %s", name)
+	})
+
+	manager := NewStateManager(nil)
+	manager.SetProcessScanner(ps)
+
+	result := newScanResult(newProc(200, ToolCodex, "/project"))
+	if err := manager.UpdateFromScan(result); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	projects := manager.Projects()
+	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
+		t.Fatalf("unexpected projects/sessions: %v", projects)
+	}
+	if got := projects[0].Sessions[0].State; got != Idle {
+		t.Errorf("state = %v, want Idle (codex without child processes)", got)
+	}
+}
+
+func TestStateManagerCodexWithNilProcessScanner(t *testing.T) {
+	// ProcessScanner が nil の場合、Codex セッションはデフォルトの Thinking になることを確認する。
+	manager := NewStateManager(nil)
+	// SetProcessScanner を呼ばない（nil のまま）
+
+	result := newScanResult(newProc(300, ToolCodex, "/project"))
+	if err := manager.UpdateFromScan(result); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	projects := manager.Projects()
+	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
+		t.Fatalf("unexpected projects/sessions: %v", projects)
+	}
+	if got := projects[0].Sessions[0].State; got != Thinking {
+		t.Errorf("state = %v, want Thinking (nil processScanner fallback)", got)
+	}
+}
+
+func TestStateManagerGeminiIgnoresChildProcesses(t *testing.T) {
+	// Gemini プロセスは子プロセスの有無に関わらず常に Thinking になることを確認する。
+	// pgrep が呼ばれた場合はテスト失敗とすることで、Gemini が HasChildProcesses を呼ばないことも検証する。
+	ps := NewProcessScannerWithExec(func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if name == "pgrep" {
+			t.Error("HasChildProcesses should NOT be called for Gemini process")
+			return []byte("99999\n"), nil
+		}
+		return nil, fmt.Errorf("unexpected command: %s", name)
+	})
+
+	manager := NewStateManager(nil)
+	manager.SetProcessScanner(ps)
+
+	result := newScanResult(newProc(400, ToolGemini, "/project"))
+	if err := manager.UpdateFromScan(result); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	projects := manager.Projects()
+	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
+		t.Fatalf("unexpected projects/sessions: %v", projects)
+	}
+	if got := projects[0].Sessions[0].State; got != Thinking {
+		t.Errorf("state = %v, want Thinking (gemini always Thinking)", got)
 	}
 }

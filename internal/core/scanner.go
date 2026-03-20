@@ -3,10 +3,25 @@ package core
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/yoshihiko555/baton/internal/terminal"
 )
+
+// aiCommands は AI ツールの CurrentCommand 名。
+var aiCommands = []string{"claude", "codex", "gemini"}
+
+// isAICommand は CurrentCommand が AI ツールかを判定する（大文字小文字無視）。
+func isAICommand(cmd string) bool {
+	lower := strings.ToLower(cmd)
+	for _, ai := range aiCommands {
+		if strings.Contains(lower, ai) {
+			return true
+		}
+	}
+	return false
+}
 
 // DefaultScanner は Terminal と ProcessScanner を組み合わせてプロセス検出を行う。
 type DefaultScanner struct {
@@ -34,9 +49,14 @@ func (s *DefaultScanner) Scan(ctx context.Context) ScanResult {
 
 	var allProcesses []DetectedProcess
 	for _, pane := range panes {
+		// CurrentCommand が AI ツールでなければ ps をスキップ（tmux 最適化）
+		// WezTerm は CurrentCommand が空なのでフィルタされない
+		if pane.CurrentCommand != "" && !isAICommand(pane.CurrentCommand) {
+			continue
+		}
 		procs, err := s.processScanner.FindAIProcesses(ctx, pane.TTYName)
 		if err != nil {
-			log.Printf("warn: skip pane %d (tty=%s): %v", pane.ID, pane.TTYName, err)
+			log.Printf("warn: skip pane %s (tty=%s): %v", pane.ID, pane.TTYName, err)
 			continue
 		}
 		for i := range procs {

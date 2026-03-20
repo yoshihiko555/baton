@@ -20,7 +20,7 @@ func TestDefault(t *testing.T) {
 	if got.ScanInterval != 2*time.Second {
 		t.Fatalf("unexpected ScanInterval: got %v", got.ScanInterval)
 	}
-	if got.Terminal != "wezterm" {
+	if got.Terminal != "tmux" {
 		t.Fatalf("unexpected Terminal: got %q", got.Terminal)
 	}
 	if got.LogLevel != "info" {
@@ -150,7 +150,7 @@ func TestLoadMissingYAML(t *testing.T) {
 	if got.ScanInterval != 2*time.Second {
 		t.Fatalf("unexpected ScanInterval: got %v", got.ScanInterval)
 	}
-	if got.Terminal != "wezterm" {
+	if got.Terminal != "tmux" {
 		t.Fatalf("unexpected Terminal: got %q", got.Terminal)
 	}
 	if got.LogLevel != "info" {

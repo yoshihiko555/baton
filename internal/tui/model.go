@@ -38,7 +38,7 @@ type JumpDoneMsg struct{ Err error }
 
 // SubMenuItem はサブメニューの1行（ペイン候補）を表す。
 type SubMenuItem struct {
-	PaneID  int
+	PaneID  string
 	TTYName string
 }
 
@@ -230,12 +230,14 @@ func doScanCmd(
 	scanner core.Scanner,
 	sm core.StateUpdater,
 	sr core.StateReader,
+	term terminal.Terminal,
 ) tea.Cmd {
 	return func() tea.Msg {
 		result := scanner.Scan(ctx)
 		if err := sm.UpdateFromScan(result); err != nil {
 			return ErrMsg(err)
 		}
+		sm.RefineToolUseState(term)
 		return ScanResultMsg{
 			Projects: sr.Projects(),
 			Summary:  sr.Summary(),

@@ -35,7 +35,7 @@ func Default() Config {
 		ClaudeProjectsDir: "~/.claude/projects",
 		SessionMetaDir:    "~/.claude/projects",
 		StatusOutputPath:  "/tmp/baton-status.json",
-		Terminal:          "wezterm",
+		Terminal:          "tmux",
 		LogLevel:          "info",
 		Statusbar: StatusbarConfig{
 			Format: "{{.Active}}/{{.TotalSessions}}",

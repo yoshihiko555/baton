@@ -108,7 +108,7 @@ func (m Model) renderSubMenu() string {
 		if i == m.subMenuCursor {
 			cursor = "> "
 		}
-		lines = append(lines, fmt.Sprintf("%s[%d] %s", cursor, item.PaneID, item.TTYName))
+		lines = append(lines, fmt.Sprintf("%s[%s] %s", cursor, item.PaneID, item.TTYName))
 	}
 	lines = append(lines, "  esc: cancel")
 	style := lipgloss.NewStyle().

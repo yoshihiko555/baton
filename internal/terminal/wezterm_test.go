@@ -31,22 +31,20 @@ func TestListPanes(t *testing.T) {
 
 	want := []Pane{
 		{
-			ID:         1,
-			Title:      "editor",
-			TabID:      2,
-			WorkingDir: "/tmp/project",
-			TTYName:    "/dev/ttys001",
-			IsActive:   true,
-			Workspace:  "default",
+			ID:          "1",
+			Title:       "editor",
+			WorkingDir:  "/tmp/project",
+			TTYName:     "/dev/ttys001",
+			IsActive:    true,
+			SessionName: "default",
 		},
 		{
-			ID:         3,
-			Title:      "logs",
-			TabID:      4,
-			WorkingDir: "/tmp/logs",
-			TTYName:    "/dev/ttys002",
-			IsActive:   false,
-			Workspace:  "default",
+			ID:          "3",
+			Title:       "logs",
+			WorkingDir:  "/tmp/logs",
+			TTYName:     "/dev/ttys002",
+			IsActive:    false,
+			SessionName: "default",
 		},
 	}
 
@@ -73,7 +71,7 @@ func TestFocusPane(t *testing.T) {
 		},
 	}
 
-	if err := wez.FocusPane(42); err != nil {
+	if err := wez.FocusPane("42"); err != nil {
 		t.Fatalf("FocusPane returned error: %v", err)
 	}
 
@@ -169,7 +167,7 @@ func TestListPanesInvalidTabID(t *testing.T) {
 
 func TestFocusPaneNilExecFn(t *testing.T) {
 	wez := &WezTerminal{execFn: nil}
-	err := wez.FocusPane(1)
+	err := wez.FocusPane("1")
 	if err == nil {
 		t.Fatal("expected error for nil execFn")
 	}
@@ -177,7 +175,7 @@ func TestFocusPaneNilExecFn(t *testing.T) {
 
 func TestFocusPaneNilReceiver(t *testing.T) {
 	var wez *WezTerminal
-	err := wez.FocusPane(1)
+	err := wez.FocusPane("1")
 	if err == nil {
 		t.Fatal("expected error for nil receiver")
 	}
@@ -189,7 +187,7 @@ func TestFocusPaneExecError(t *testing.T) {
 			return nil, errors.New("activate failed")
 		},
 	}
-	err := wez.FocusPane(42)
+	err := wez.FocusPane("42")
 	if err == nil {
 		t.Fatal("expected error from exec failure")
 	}
