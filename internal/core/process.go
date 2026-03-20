@@ -39,10 +39,36 @@ func normalizeTTY(tty string) string {
 	return strings.TrimPrefix(tty, "/dev/")
 }
 
+// detectFromArgs は ARGS 文字列から AI ツールを検出する。
+// COMM が "node" 等の汎用ランタイム名の場合にフォールバックとして使用する。
+// 各トークンのパス末尾（basename）がツール名と完全一致するかで判定する。
+func detectFromArgs(args string) (ToolType, bool) {
+	for _, token := range strings.Fields(args) {
+		base := token
+		if idx := strings.LastIndex(token, "/"); idx >= 0 {
+			base = token[idx+1:]
+		}
+		base = strings.ToLower(base)
+		if toolType, ok := toolTypeMap[base]; ok {
+			return toolType, true
+		}
+	}
+	return ToolUnknown, false
+}
+
+// parsedProcess は parse の中間結果。親子関係の重複排除に使用する。
+type parsedProcess struct {
+	pid      int
+	ppid     int
+	toolType ToolType
+}
+
 // parse は ps コマンドの出力を解析して DetectedProcess の一覧に変換する。
+// COMM で AI ツールを直接検出し、失敗した場合は ARGS からフォールバック検出する。
+// 同一ツールの親子プロセス（例: node が gemini を起動）は親のみを採用する。
 func (s *ProcessScanner) parse(output []byte) []DetectedProcess {
 	lines := strings.Split(string(output), "\n")
-	var results []DetectedProcess
+	var parsed []parsedProcess
 
 	for i, line := range lines {
 		if i == 0 {
@@ -56,14 +82,38 @@ func (s *ProcessScanner) parse(output []byte) []DetectedProcess {
 		if err != nil {
 			continue
 		}
-		toolType, ok := toolTypeMap[fields[2]]
+		ppid, _ := strconv.Atoi(fields[1])
+		comm := fields[2]
+		toolType, ok := toolTypeMap[comm]
 		if !ok {
+			// COMM がランタイム名（node 等）の場合、ARGS にフォールバック
+			if len(fields) >= 4 {
+				args := strings.Join(fields[3:], " ")
+				toolType, ok = detectFromArgs(args)
+			}
+			if !ok {
+				continue
+			}
+		}
+		parsed = append(parsed, parsedProcess{pid: pid, ppid: ppid, toolType: toolType})
+	}
+
+	// 同一ツールの親子関係を検出し、子プロセスを除外する
+	pidTools := make(map[int]ToolType, len(parsed))
+	for _, p := range parsed {
+		pidTools[p.pid] = p.toolType
+	}
+
+	var results []DetectedProcess
+	for _, p := range parsed {
+		// 親が同一ツールとして検出されている場合はスキップ（重複排除）
+		if parentTool, exists := pidTools[p.ppid]; exists && parentTool == p.toolType {
 			continue
 		}
 		results = append(results, DetectedProcess{
-			PID:      pid,
-			Name:     fields[2],
-			ToolType: toolType,
+			PID:      p.pid,
+			Name:     p.toolType.String(),
+			ToolType: p.toolType,
 		})
 	}
 	return results
@@ -72,7 +122,7 @@ func (s *ProcessScanner) parse(output []byte) []DetectedProcess {
 // FindAIProcesses は指定 TTY で動作中の AI プロセス一覧を返す。
 func (s *ProcessScanner) FindAIProcesses(ctx context.Context, tty string) ([]DetectedProcess, error) {
 	normalizedTTY := normalizeTTY(tty)
-	output, err := s.execFn(ctx, "ps", "-t", normalizedTTY, "-o", "pid,ppid,comm")
+	output, err := s.execFn(ctx, "ps", "-t", normalizedTTY, "-o", "pid,ppid,comm,args")
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +134,7 @@ func (s *ProcessScanner) FindAIProcesses(ctx context.Context, tty string) ([]Det
 var backgroundCommands = map[string]bool{
 	"node":         true, // MCP サーバー
 	"npm":          true, // MCP サーバー起動
+	"uv":           true, // MCP サーバー起動（uvx 経由）
 	"caffeinate":   true, // スリープ防止
 	"gopls":        true, // LSP サーバー
 	"claude-tmux":  true, // tmux 統合プロセス

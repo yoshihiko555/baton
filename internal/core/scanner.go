@@ -13,6 +13,7 @@ import (
 var aiCommands = []string{"claude", "codex", "gemini"}
 
 // isAICommand は CurrentCommand が AI ツールかを判定する（大文字小文字無視）。
+// "node" は nodeBasedAI ツール（Gemini 等）の可能性があるため通過させる。
 func isAICommand(cmd string) bool {
 	lower := strings.ToLower(cmd)
 	for _, ai := range aiCommands {
@@ -20,7 +21,8 @@ func isAICommand(cmd string) bool {
 			return true
 		}
 	}
-	return false
+	// node ランタイムで動作する AI ツールの可能性がある
+	return lower == "node"
 }
 
 // DefaultScanner は Terminal と ProcessScanner を組み合わせてプロセス検出を行う。

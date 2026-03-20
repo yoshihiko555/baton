@@ -176,7 +176,7 @@ func (s *StateManager) UpdateFromScan(result ScanResult) error {
 // buildSessionFromStates はプロセス情報と事前解決済みの状態分布からセッションを構築する。
 // Claude セッションは cwdStates から重要度順に状態を割り当てる。
 // Codex はプロセスツリー検査で Working(Thinking)/Idle を判定する。
-// Gemini はプロセス存在＝Thinking として最小構成を返す。
+// Gemini はプロセス存在＝Thinking として最小構成を返す（承認待ちは RefineToolUseState で検出）。
 func (s *StateManager) buildSessionFromStates(proc DetectedProcess, cwdStates map[string][]ResolvedSession, cwdStateIndex map[string]int) Session {
 	sess := Session{
 		PID:        proc.PID,
@@ -318,8 +318,15 @@ var approvalPatterns = []string{
 // 単独の "1. Yes" ではなく後続行も確認することで誤検知を防ぐ。
 var codexApprovalPattern = regexp.MustCompile(`(?m)^\s*[›>]?\s*1\.\s+Yes.*\n\s*[›>]?\s*2\.\s+`)
 
-// RefineToolUseState はペインテキストから承認待ちかどうかを判定し、Waiting に修正する。
-// 対象: Claude の ToolUse 状態、Codex の Idle 状態。
+// geminiIdlePattern は Gemini CLI の入力待ちプロンプトを検出する正規表現。
+// Gemini はアイドル時にステータスバーに "workspace" と "sandbox" を表示する。
+// このパターンは Gemini 固有の UI 要素であり、他のツールとの誤検知リスクが低い。
+var geminiIdlePattern = regexp.MustCompile(`(?m)workspace\s+\(.+\)\s+.*sandbox`)
+
+// RefineToolUseState はペインテキストから状態を精緻化する。
+// - Claude ToolUse → Waiting（承認待ち検出）
+// - Codex Idle → Waiting（承認待ち検出）
+// - Gemini Thinking → Waiting（承認待ち）または Idle（入力プロンプト検出）
 func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -333,12 +340,14 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 			if sess == nil {
 				continue
 			}
-			// ToolUse（Claude）または Idle（Codex/Gemini）の承認待ち検出
+			// ToolUse（Claude）、Idle（Codex）、Thinking（Gemini）の状態精緻化
 			switch {
 			case sess.State == ToolUse:
 				// Claude: JSONL で ToolUse → ペインテキストで承認待ちか確認
 			case sess.State == Idle && sess.Tool == ToolCodex:
 				// Codex: 子プロセスなし(Idle) → 承認待ちかもしれない
+			case sess.State == Thinking && sess.Tool == ToolGemini:
+				// Gemini: 子プロセス検査不可 → ペインテキストで状態判定
 			default:
 				continue
 			}
@@ -346,10 +355,22 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 			if err != nil {
 				continue
 			}
+
+			if sess.Tool == ToolGemini {
+				// Gemini: 承認待ち → Waiting、入力プロンプト → Idle、それ以外 → Thinking 維持
+				if containsApprovalPrompt(text) {
+					s.projects[i].Sessions[j].State = Waiting
+				} else if geminiIdlePattern.MatchString(text) {
+					s.projects[i].Sessions[j].State = Idle
+				}
+				continue
+			}
+
 			isWaiting := false
 			if sess.Tool == ToolClaude {
 				isWaiting = containsApprovalPrompt(text)
 			} else {
+				// Codex: 番号付き選択肢の構造パターンで検出
 				isWaiting = codexApprovalPattern.MatchString(text)
 			}
 			if isWaiting {
@@ -358,7 +379,7 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 		}
 	}
 
-	// Waiting に変更された可能性があるので Summary を再計算する
+	// 状態が変更された可能性があるので Summary を再計算する
 	s.summary = calcSummary(s.projects)
 }
 

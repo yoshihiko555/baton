@@ -68,6 +68,23 @@ func TestScanCurrentCommandBash(t *testing.T) {
 	}
 }
 
+func TestScanCurrentCommandNode(t *testing.T) {
+	called := map[string]bool{}
+	mt := &mockTerminal{
+		panes: []terminal.Pane{
+			{ID: "5", TTYName: "/dev/ttys005", CurrentCommand: "node"},
+		},
+	}
+	ps := newTrackingScanner(called)
+	sc := NewDefaultScanner(mt, ps)
+
+	sc.Scan(context.Background())
+
+	if !called["ttys005"] {
+		t.Error("expected FindAIProcesses to be called for ttys005 (node is an AI runtime for Gemini CLI), but it was not")
+	}
+}
+
 func TestScanCurrentCommandEmpty(t *testing.T) {
 	called := map[string]bool{}
 	mt := &mockTerminal{
@@ -112,7 +129,7 @@ func TestIsAICommand(t *testing.T) {
 		{"gemini", true},
 		{"Claude", true},
 		{"bash", false},
-		{"node", false},
+		{"node", true},
 		{"zsh", false},
 		{"", false},
 	}
