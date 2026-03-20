@@ -3,21 +3,15 @@ package tui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/yoshihiko555/baton/internal/config"
 	"github.com/yoshihiko555/baton/internal/core"
 	"github.com/yoshihiko555/baton/internal/terminal"
-)
-
-const (
-	defaultListWidth  = 32
-	defaultListHeight = 16
 )
 
 // TickMsg は定期リフレッシュタイマー発火時に送られる。
@@ -28,6 +22,12 @@ type ScanResultMsg struct {
 	Projects []core.Project
 	Summary  core.Summary
 	Panes    []terminal.Pane
+}
+
+// PreviewResultMsg はプレビューテキスト取得完了時に送られる。
+type PreviewResultMsg struct {
+	Text string
+	Err  error
 }
 
 // ErrMsg は非同期コマンドで発生したエラーを運ぶ。
@@ -42,90 +42,20 @@ type SubMenuItem struct {
 	TTYName string
 }
 
-// ProjectItem はプロジェクト一覧の1行を表す。
-type ProjectItem struct {
-	Project core.Project
-}
-
-// Title はプロジェクト行のタイトル文字列を返す。
-func (i ProjectItem) Title() string {
-	name := i.Project.Name
-	if name == "" {
-		name = i.Project.Path
-	}
-	return fmt.Sprintf("%s  %d sessions", name, len(i.Project.Sessions))
-}
-
-// Description はプロジェクト行の補足説明文字列を返す。
-// 各状態のセッション数を表示する（例: "thinking: 3 · idle: 1 · waiting: 1"）。
-func (i ProjectItem) Description() string {
-	counts := make(map[core.SessionState]int)
-	for _, s := range i.Project.Sessions {
-		if s != nil {
-			counts[s.State]++
-		}
-	}
-
-	// 優先度順に表示する（重要な状態が先）
-	order := []core.SessionState{core.Waiting, core.Error, core.Thinking, core.ToolUse, core.Idle}
-	var parts []string
-	for _, state := range order {
-		if n, ok := counts[state]; ok && n > 0 {
-			parts = append(parts, fmt.Sprintf("%s: %d", state, n))
-		}
-	}
-
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.Join(parts, " · ")
-}
-
-// FilterValue はプロジェクト行の検索対象文字列を返す。
-func (i ProjectItem) FilterValue() string {
-	return strings.Join([]string{i.Project.Name, i.Project.Path}, " ")
-}
-
-// SessionItem はセッション一覧の1行を表す。
-type SessionItem struct {
-	Session core.Session
-}
-
-// Title はセッション行のタイトル文字列を返す。
-func (i SessionItem) Title() string {
-	icon := "●"
-	s := i.Session
-	stateIcon := stateStyle(s.State).Render(icon)
-
-	parts := []string{stateIcon, s.Tool.String(), s.State.String()}
-	if s.Branch != "" {
-		parts = append(parts, s.Branch)
-	}
-	return strings.Join(parts, "  ")
-}
-
-// Description はセッション行の補足説明文字列を返す。
-func (i SessionItem) Description() string {
-	s := i.Session
-	parts := []string{fmt.Sprintf("PID:%d", s.PID)}
-	if s.CurrentTool != "" {
-		parts = append(parts, s.CurrentTool)
-	}
-	if s.InputTokens > 0 {
-		parts = append(parts, fmt.Sprintf("%dk tokens", s.InputTokens/1000))
-	}
-	return strings.Join(parts, " · ")
-}
-
-// FilterValue はセッション行の検索対象文字列を返す。
-func (i SessionItem) FilterValue() string {
-	return strings.Join([]string{i.Session.ID, i.Session.ProjectPath, i.Session.State.String()}, " ")
+// sessionEntry はセッションリストの1エントリ。ヘッダーまたはセッション行。
+type sessionEntry struct {
+	isHeader bool
+	header   string
+	icon     string
+	state    core.SessionState
+	session  *core.Session
+	project  *core.Project
 }
 
 // Model は TUI 全体を表す Bubble Tea のルートモデル。
 type Model struct {
-	projectList list.Model
-	sessionList list.Model
+	entries []sessionEntry // グループ化されたセッションリスト
+	cursor  int           // 現在のカーソル位置（エントリ index）
 
 	scanner      core.Scanner
 	stateUpdater core.StateUpdater
@@ -137,20 +67,23 @@ type Model struct {
 	latestSummary  core.Summary
 	latestPanes    []terminal.Pane
 
-	activePane      int
-	width           int
-	height          int
-	err             error
-	selectedProject string
+	activePane int // 0=sessions, 1=preview
+	width      int
+	height     int
+	err        error
+
+	previewText     string
+	previewPaneID   string // 現在プレビュー中の PaneID
+	previewLoading  bool
 
 	showSubMenu   bool
 	subMenuItems  []SubMenuItem
 	subMenuCursor int
 
-	jumping bool // ペインジャンプ実行中（キー入力をブロック）
+	jumping bool
 }
 
-// NewModel はデフォルト delegate を使って TUI モデルを初期化する。
+// NewModel はデフォルト設定で TUI モデルを初期化する。
 func NewModel(
 	scanner core.Scanner,
 	stateUpdater core.StateUpdater,
@@ -158,47 +91,7 @@ func NewModel(
 	term terminal.Terminal,
 	cfg config.Config,
 ) Model {
-	brand := lipgloss.Color("#E8832A")
-	secondary := lipgloss.Color("#F5A623")
-	normalText := lipgloss.Color("#E8E4E0")
-
-	titleStyle := lipgloss.NewStyle().
-		Foreground(brand).
-		Bold(true).
-		Padding(0, 1)
-
-	delegate := list.NewDefaultDelegate()
-	delegate.Styles.NormalTitle = lipgloss.NewStyle().
-		Foreground(normalText).
-		Padding(0, 0, 0, 2)
-	delegate.Styles.NormalDesc = lipgloss.NewStyle().
-		Foreground(secondary).
-		Padding(0, 0, 0, 2)
-	delegate.Styles.SelectedTitle = lipgloss.NewStyle().
-		Foreground(brand).
-		Bold(true).
-		Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(brand).
-		Padding(0, 0, 0, 1)
-	delegate.Styles.SelectedDesc = lipgloss.NewStyle().
-		Foreground(secondary).
-		Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(brand).
-		Padding(0, 0, 0, 1)
-
-	projectList := list.New([]list.Item{}, delegate, defaultListWidth, defaultListHeight)
-	projectList.Title = "Projects"
-	projectList.Styles.Title = titleStyle
-	projectList.SetShowHelp(false)
-
-	sessionList := list.New([]list.Item{}, delegate, defaultListWidth, defaultListHeight)
-	sessionList.Title = "Sessions"
-	sessionList.Styles.Title = titleStyle
-	sessionList.SetShowHelp(false)
-
 	return Model{
-		projectList:  projectList,
-		sessionList:  sessionList,
 		scanner:      scanner,
 		stateUpdater: stateUpdater,
 		stateReader:  stateReader,
@@ -214,7 +107,6 @@ func (m Model) Init() tea.Cmd {
 
 func tickCmd(interval time.Duration) tea.Cmd {
 	if interval <= 0 {
-		// 無効値が来た場合のフォールバック
 		interval = time.Second
 	}
 	return func() tea.Msg {
@@ -244,4 +136,149 @@ func doScanCmd(
 			Panes:    sr.Panes(),
 		}
 	}
+}
+
+// fetchPreviewCmd は指定ペインのテキストを非同期で取得する。
+func fetchPreviewCmd(term terminal.Terminal, paneID string) tea.Cmd {
+	return func() tea.Msg {
+		text, err := term.GetPaneText(paneID)
+		return PreviewResultMsg{Text: text, Err: err}
+	}
+}
+
+// selectedSession はカーソル位置のセッションを返す。
+func (m Model) selectedSession() *sessionEntry {
+	if m.cursor < 0 || m.cursor >= len(m.entries) {
+		return nil
+	}
+	e := &m.entries[m.cursor]
+	if e.isHeader {
+		return nil
+	}
+	return e
+}
+
+// buildEntries はプロジェクト一覧からグループ化されたエントリリストを構築する。
+func buildEntries(projects []core.Project) []sessionEntry {
+	// 全セッションをフラットに集める
+	type sessionWithProject struct {
+		session *core.Session
+		project *core.Project
+	}
+	var all []sessionWithProject
+	for i := range projects {
+		p := &projects[i]
+		for _, s := range p.Sessions {
+			if s != nil {
+				all = append(all, sessionWithProject{session: s, project: p})
+			}
+		}
+	}
+
+	// 状態グループ別に分類
+	// WORKING グループは Thinking + ToolUse をまとめる
+	type groupDef struct {
+		icon    string
+		label   string
+		state   core.SessionState
+		entries []sessionWithProject
+	}
+
+	groups := []groupDef{
+		{icon: "!", label: "WAITING", state: core.Waiting},
+		{icon: "x", label: "ERROR", state: core.Error},
+		{icon: "*", label: "WORKING", state: core.Thinking}, // Thinking + ToolUse
+		{icon: "~", label: "IDLE", state: core.Idle},
+	}
+
+	for _, sp := range all {
+		switch sp.session.State {
+		case core.Waiting:
+			groups[0].entries = append(groups[0].entries, sp)
+		case core.Error:
+			groups[1].entries = append(groups[1].entries, sp)
+		case core.Thinking, core.ToolUse:
+			groups[2].entries = append(groups[2].entries, sp)
+		case core.Idle:
+			groups[3].entries = append(groups[3].entries, sp)
+		default:
+			groups[3].entries = append(groups[3].entries, sp) // unknown → idle
+		}
+	}
+
+	var entries []sessionEntry
+	for _, g := range groups {
+		if len(g.entries) == 0 {
+			continue
+		}
+		// PID でソート
+		sort.SliceStable(g.entries, func(i, j int) bool {
+			return g.entries[i].session.PID < g.entries[j].session.PID
+		})
+		// グループヘッダー
+		entries = append(entries, sessionEntry{
+			isHeader: true,
+			header:   g.label,
+			icon:     g.icon,
+			state:    g.state,
+		})
+		// セッション行
+		for _, sp := range g.entries {
+			entries = append(entries, sessionEntry{
+				session: sp.session,
+				project: sp.project,
+				state:   sp.session.State,
+			})
+		}
+	}
+
+	return entries
+}
+
+// sessionDisplayName はセッション行の表示名を返す。
+func sessionDisplayName(e *sessionEntry) string {
+	if e.project == nil || e.session == nil {
+		return "?"
+	}
+	name := e.project.Name
+	if name == "" {
+		// パスの最後のセグメントを使う
+		parts := strings.Split(e.project.Path, "/")
+		name = parts[len(parts)-1]
+	}
+	return name
+}
+
+// sessionDetailLine はセッション行の詳細情報を返す。
+func sessionDetailLine(e *sessionEntry) string {
+	if e.session == nil {
+		return ""
+	}
+	s := e.session
+	var parts []string
+	if s.Branch != "" {
+		parts = append(parts, s.Branch)
+	}
+	parts = append(parts, fmt.Sprintf("[%s]", s.State))
+	if s.CurrentTool != "" {
+		parts = append(parts, s.CurrentTool)
+	}
+	return strings.Join(parts, "  ")
+}
+
+// buildSubMenuItems は候補ペイン ID リストからサブメニュー項目を生成する。
+func buildSubMenuItems(candidateIDs []string, panes []terminal.Pane) []SubMenuItem {
+	paneMap := make(map[string]terminal.Pane, len(panes))
+	for _, p := range panes {
+		paneMap[p.ID] = p
+	}
+	items := make([]SubMenuItem, 0, len(candidateIDs))
+	for _, id := range candidateIDs {
+		item := SubMenuItem{PaneID: id, TTYName: fmt.Sprintf("pane %s", id)}
+		if p, ok := paneMap[id]; ok && p.TTYName != "" {
+			item.TTYName = p.TTYName
+		}
+		items = append(items, item)
+	}
+	return items
 }

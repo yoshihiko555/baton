@@ -4,14 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/yoshihiko555/baton/internal/core"
-	"github.com/yoshihiko555/baton/internal/terminal"
 )
 
 var (
@@ -20,10 +17,8 @@ var (
 	enterKey = key.NewBinding(key.WithKeys("enter"))
 	escKey   = key.NewBinding(key.WithKeys("esc"))
 
-	leftKeys  = key.NewBinding(key.WithKeys("h", "left"))
-	rightKeys = key.NewBinding(key.WithKeys("l", "right"))
-	upKeys    = key.NewBinding(key.WithKeys("k", "up"))
-	downKeys  = key.NewBinding(key.WithKeys("j", "down"))
+	upKeys   = key.NewBinding(key.WithKeys("k", "up"))
+	downKeys = key.NewBinding(key.WithKeys("j", "down"))
 )
 
 // Update は tea.Model のメッセージ処理を行う。
@@ -37,11 +32,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case tea.KeyMsg:
-		// ジャンプ実行中はキー入力を無視する。
 		if m.jumping {
 			return m, nil
 		}
-		// サブメニュー表示中は専用のキーハンドリングを行う。
 		if m.showSubMenu {
 			return m.updateSubMenu(msg)
 		}
@@ -49,88 +42,146 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, quitKeys):
 			return m, tea.Quit
 		case key.Matches(msg, tabKey):
-			// 左右ペインのアクティブ状態をトグルする。
 			m.activePane = 1 - m.activePane
 			return m, nil
-		case key.Matches(msg, leftKeys):
-			m.activePane = 0
-			return m, nil
-		case key.Matches(msg, rightKeys):
-			m.activePane = 1
-			return m, nil
 		case key.Matches(msg, enterKey):
-			if m.activePane == 0 {
-				// project 側で Enter: 選択プロジェクトを固定して session 側へ移動。
-				if selected, ok := m.projectList.SelectedItem().(ProjectItem); ok {
-					m.selectedProject = selected.Project.Path
-					m.activePane = 1
-					m.updateSessionList(m.latestProjects)
-				}
-				return m, nil
-			}
-
-			selected, ok := m.sessionList.SelectedItem().(SessionItem)
-			if !ok {
-				return m, nil
-			}
-
-			if selected.Session.Ambiguous {
-				m.showSubMenu = true
-				m.subMenuItems = buildSubMenuItems(selected.Session.CandidatePaneIDs, m.latestPanes)
-				m.subMenuCursor = 0
-				return m, nil
-			}
-
-			if selected.Session.PaneID == "" {
-				m.err = errors.New("selected session has no pane id")
-				return m, nil
-			}
-			m.jumping = true
-			term := m.terminal
-			paneID := selected.Session.PaneID
-			return m, func() tea.Msg {
-				err := term.FocusPane(paneID)
-				return JumpDoneMsg{Err: err}
-			}
-		case key.Matches(msg, upKeys, downKeys):
-			return m.updateActiveList(msg)
-		default:
-			return m.updateActiveList(msg)
+			return m.handleEnter()
+		case key.Matches(msg, upKeys):
+			return m.moveCursor(-1)
+		case key.Matches(msg, downKeys):
+			return m.moveCursor(1)
 		}
+		return m, nil
 	case tea.WindowSizeMsg:
-		// 画面サイズ変更時に左右リストのサイズを再計算する。
 		m.width = msg.Width
 		m.height = msg.Height
-
-		leftWidth := msg.Width / 2
-		if leftWidth < 1 {
-			leftWidth = 1
-		}
-		rightWidth := msg.Width - leftWidth
-		if rightWidth < 1 {
-			rightWidth = 1
-		}
-
-		m.projectList.SetSize(leftWidth, msg.Height)
-		m.sessionList.SetSize(rightWidth, msg.Height)
 		return m, nil
 	case TickMsg:
-		// 定期ポーリング: スキャンを実行する。
 		return m, doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader, m.terminal)
 	case ScanResultMsg:
-		// スキャン結果で状態を更新し、次 tick を予約する。
 		m.latestProjects = msg.Projects
 		m.latestSummary = msg.Summary
 		m.latestPanes = msg.Panes
-		m.updateProjectList(msg.Projects)
-		m.updateSessionList(msg.Projects)
-		return m, tickCmd(m.config.ScanInterval)
+		m.rebuildEntries()
+		// 選択セッションが変わったらプレビュー更新
+		cmd := m.maybeUpdatePreview()
+		return m, tea.Batch(tickCmd(m.config.ScanInterval), cmd)
+	case PreviewResultMsg:
+		m.previewLoading = false
+		if msg.Err != nil {
+			m.previewText = fmt.Sprintf("Error: %v", msg.Err)
+		} else {
+			m.previewText = msg.Text
+		}
+		return m, nil
 	case ErrMsg:
 		m.err = msg
 		return m, tickCmd(m.config.ScanInterval)
-	default:
-		return m.updateActiveList(msg)
 	}
+	return m, nil
+}
+
+// handleEnter は Enter キーの処理を行う。
+func (m Model) handleEnter() (tea.Model, tea.Cmd) {
+	sel := m.selectedSession()
+	if sel == nil {
+		return m, nil
+	}
+
+	s := sel.session
+	if s.Ambiguous {
+		m.showSubMenu = true
+		m.subMenuItems = buildSubMenuItems(s.CandidatePaneIDs, m.latestPanes)
+		m.subMenuCursor = 0
+		return m, nil
+	}
+
+	if s.PaneID == "" {
+		m.err = errors.New("selected session has no pane id")
+		return m, nil
+	}
+	m.jumping = true
+	term := m.terminal
+	paneID := s.PaneID
+	return m, func() tea.Msg {
+		err := term.FocusPane(paneID)
+		return JumpDoneMsg{Err: err}
+	}
+}
+
+// moveCursor はカーソルを上下に移動する（ヘッダーをスキップ）。
+func (m Model) moveCursor(delta int) (tea.Model, tea.Cmd) {
+	if len(m.entries) == 0 {
+		return m, nil
+	}
+
+	newCursor := m.cursor
+	for {
+		newCursor += delta
+		if newCursor < 0 || newCursor >= len(m.entries) {
+			// 範囲外なら元の位置のまま
+			return m, m.maybeUpdatePreview()
+		}
+		if !m.entries[newCursor].isHeader {
+			break
+		}
+	}
+
+	m.cursor = newCursor
+	cmd := m.maybeUpdatePreview()
+	return m, cmd
+}
+
+// rebuildEntries はスキャン結果からエントリリストを再構築する。
+func (m *Model) rebuildEntries() {
+	// 現在選択中のセッション PID を記憶
+	currentPID := 0
+	if sel := m.selectedSession(); sel != nil && sel.session != nil {
+		currentPID = sel.session.PID
+	}
+
+	m.entries = buildEntries(m.latestProjects)
+
+	// カーソル復元: 同じ PID のエントリを探す
+	m.cursor = -1
+	for i, e := range m.entries {
+		if !e.isHeader && e.session != nil && e.session.PID == currentPID {
+			m.cursor = i
+			break
+		}
+	}
+
+	// 見つからなかった場合は最初のセッション行へ
+	if m.cursor < 0 {
+		for i, e := range m.entries {
+			if !e.isHeader {
+				m.cursor = i
+				break
+			}
+		}
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+}
+
+// maybeUpdatePreview は選択セッションが変わった場合にプレビューを更新する。
+func (m *Model) maybeUpdatePreview() tea.Cmd {
+	sel := m.selectedSession()
+	if sel == nil || sel.session == nil {
+		m.previewPaneID = ""
+		m.previewText = ""
+		return nil
+	}
+
+	paneID := sel.session.PaneID
+	if paneID == "" || paneID == m.previewPaneID {
+		return nil
+	}
+
+	m.previewPaneID = paneID
+	m.previewLoading = true
+	return fetchPreviewCmd(m.terminal, paneID)
 }
 
 // updateSubMenu はサブメニュー表示中のキー入力を処理する。
@@ -161,161 +212,29 @@ func (m Model) updateSubMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if err := m.terminal.FocusPane(item.PaneID); err != nil {
 			m.err = err
+			return m, nil
 		}
-		return m, nil
+		return m, tea.Quit
 	}
 	return m, nil
 }
 
-func (m Model) updateActiveList(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// アクティブな側の list.Model にのみ入力を渡す。
-	if m.activePane == 1 {
-		var cmd tea.Cmd
-		m.sessionList, cmd = m.sessionList.Update(msg)
-		return m, cmd
-	}
+// --- 以下は v1 互換のために残す型（テストが参照） ---
 
-	// プロジェクト側のカーソル移動前の選択を記憶する。
-	prevSelected := ""
-	if sel, ok := m.projectList.SelectedItem().(ProjectItem); ok {
-		prevSelected = sel.Project.Path
-	}
-
-	var cmd tea.Cmd
-	m.projectList, cmd = m.projectList.Update(msg)
-
-	// カーソルが別プロジェクトに移動したら右ペインを即座に更新する。
-	if sel, ok := m.projectList.SelectedItem().(ProjectItem); ok {
-		if sel.Project.Path != prevSelected {
-			m.updateSessionList(m.latestProjects)
-		}
-	}
-
-	return m, cmd
+// ProjectItem はプロジェクト一覧の1行を表す（後方互換）。
+type ProjectItem struct {
+	Project core.Project
 }
 
-func (m *Model) updateProjectList(projects []core.Project) {
-	// 既存選択をできるだけ維持する。
-	currentPath := m.selectedProject
-	if currentPath == "" {
-		if selected, ok := m.projectList.SelectedItem().(ProjectItem); ok {
-			currentPath = selected.Project.Path
-		}
-	}
+func (i ProjectItem) Title() string       { return i.Project.Name }
+func (i ProjectItem) Description() string { return "" }
+func (i ProjectItem) FilterValue() string { return i.Project.Path }
 
-	items := make([]list.Item, 0, len(projects))
-	selectedIndex := 0
-	selectedFound := false
-
-	for i := range projects {
-		project := projects[i]
-		items = append(items, ProjectItem{Project: project})
-		if project.Path == currentPath {
-			selectedIndex = i
-			selectedFound = true
-		}
-	}
-
-	m.projectList.SetItems(items)
-
-	if len(items) == 0 {
-		m.selectedProject = ""
-		m.sessionList.SetItems([]list.Item{})
-		return
-	}
-
-	m.projectList.Select(selectedIndex)
-	if m.selectedProject != "" && !selectedFound {
-		m.selectedProject = ""
-	}
+// SessionItem はセッション一覧の1行を表す（後方互換）。
+type SessionItem struct {
+	Session core.Session
 }
 
-func (m *Model) updateSessionList(projects []core.Project) {
-	// selectedProject があれば優先し、無ければ現在選択中の project を使う。
-	targetProjectPath := m.selectedProject
-	if targetProjectPath == "" {
-		if selected, ok := m.projectList.SelectedItem().(ProjectItem); ok {
-			targetProjectPath = selected.Project.Path
-		}
-	}
-
-	var targetProject *core.Project
-	for i := range projects {
-		if projects[i].Path == targetProjectPath {
-			targetProject = &projects[i]
-			break
-		}
-	}
-	if targetProject == nil && len(projects) > 0 {
-		// 対象未決定時は先頭プロジェクトを採用する。
-		targetProject = &projects[0]
-	}
-
-	if targetProject == nil {
-		m.sessionList.SetItems([]list.Item{})
-		return
-	}
-
-	// 現在選択中のセッションの PID を保持する。
-	currentPID := 0
-	if selected, ok := m.sessionList.SelectedItem().(SessionItem); ok {
-		currentPID = selected.Session.PID
-	}
-
-	// nil を除外してコピーし、PID 順で安定ソートする。
-	sessions := make([]*core.Session, 0, len(targetProject.Sessions))
-	for _, s := range targetProject.Sessions {
-		if s != nil {
-			sessions = append(sessions, s)
-		}
-	}
-
-	sort.SliceStable(sessions, func(i, j int) bool {
-		return sessions[i].PID < sessions[j].PID
-	})
-
-	items := make([]list.Item, 0, len(sessions))
-	selectedIndex := 0
-	for idx, s := range sessions {
-		items = append(items, SessionItem{Session: *s})
-		if s.PID == currentPID && currentPID != 0 {
-			selectedIndex = idx
-		}
-	}
-
-	m.sessionList.SetItems(items)
-	if len(items) > 0 {
-		m.sessionList.Select(selectedIndex)
-	}
-}
-
-func (m Model) projectsFromProjectList() []core.Project {
-	// 画面表示中の project items を core.Project のスライスへ戻す。
-	items := m.projectList.Items()
-	projects := make([]core.Project, 0, len(items))
-
-	for _, item := range items {
-		if pi, ok := item.(ProjectItem); ok {
-			projects = append(projects, pi.Project)
-		}
-	}
-
-	return projects
-}
-
-// buildSubMenuItems は候補ペイン ID リストからサブメニュー項目を生成する。
-func buildSubMenuItems(candidateIDs []string, panes []terminal.Pane) []SubMenuItem {
-	paneMap := make(map[string]terminal.Pane, len(panes))
-	for _, p := range panes {
-		paneMap[p.ID] = p
-	}
-	items := make([]SubMenuItem, 0, len(candidateIDs))
-	for _, id := range candidateIDs {
-		item := SubMenuItem{PaneID: id, TTYName: fmt.Sprintf("pane %s", id)}
-		if p, ok := paneMap[id]; ok && p.TTYName != "" {
-			item.TTYName = p.TTYName
-		}
-		items = append(items, item)
-	}
-	return items
-}
+func (i SessionItem) Title() string       { return i.Session.Tool.String() }
+func (i SessionItem) Description() string { return "" }
+func (i SessionItem) FilterValue() string { return i.Session.ID }

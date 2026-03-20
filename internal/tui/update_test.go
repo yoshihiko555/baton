@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +55,7 @@ func (m *mockScanner) Scan(ctx context.Context) core.ScanResult {
 type mockTerminal struct {
 	available bool
 	focused   string
+	paneText  string
 }
 
 func (m *mockTerminal) ListPanes() ([]terminal.Pane, error) {
@@ -65,7 +68,7 @@ func (m *mockTerminal) FocusPane(paneID string) error {
 }
 
 func (m *mockTerminal) GetPaneText(paneID string) (string, error) {
-	return "", nil
+	return m.paneText, nil
 }
 
 func (m *mockTerminal) IsAvailable() bool {
@@ -89,54 +92,13 @@ func newTestModel() (Model, *mockStateReader, *mockStateUpdater, *mockScanner, *
 	return model, reader, updater, scanner, term
 }
 
+// feedProjects はテスト用にプロジェクトをモデルに投入する。
+func feedProjects(m Model, projects []core.Project) Model {
+	updated, _ := m.Update(ScanResultMsg{Projects: projects})
+	return updated.(Model)
+}
+
 // --- テスト ---
-
-func TestProjectItem(t *testing.T) {
-	item := ProjectItem{Project: core.Project{
-		Path: "/home/user/project",
-		Name: "my-project",
-		Sessions: []*core.Session{
-			{State: core.Thinking},
-			{State: core.Thinking},
-			{State: core.Idle},
-		},
-	}}
-
-	title := item.Title()
-	if title == "" {
-		t.Error("Title() should not be empty")
-	}
-
-	desc := item.Description()
-	want := "thinking: 2 · idle: 1"
-	if desc != want {
-		t.Errorf("Description() = %q, want %q", desc, want)
-	}
-
-	fv := item.FilterValue()
-	if fv == "" {
-		t.Error("FilterValue() should not be empty")
-	}
-}
-
-func TestSessionItem(t *testing.T) {
-	item := SessionItem{Session: core.Session{
-		ID:           "abc-123",
-		ProjectPath:  "/home/user/project",
-		State:        core.Thinking,
-		LastActivity: time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC),
-	}}
-
-	title := item.Title()
-	if title == "" {
-		t.Errorf("Title() should not be empty, got %q", title)
-	}
-
-	fv := item.FilterValue()
-	if fv == "" {
-		t.Error("FilterValue() should not be empty")
-	}
-}
 
 func TestNewModel(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
@@ -167,7 +129,6 @@ func TestUpdateQuitKey(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected quit command, got nil")
 	}
-	// tea.Quit は tea.QuitMsg を返す。
 	result := cmd()
 	if _, ok := result.(tea.QuitMsg); !ok {
 		t.Errorf("expected tea.QuitMsg, got %T", result)
@@ -197,26 +158,6 @@ func TestUpdateTabKey(t *testing.T) {
 	}
 }
 
-func TestUpdateArrowKeys(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-
-	// 右矢印 -> pane 1
-	msg := tea.KeyMsg{Type: tea.KeyRight}
-	updated, _ := m.Update(msg)
-	m = updated.(Model)
-	if m.activePane != 1 {
-		t.Errorf("activePane after right = %d, want 1", m.activePane)
-	}
-
-	// 左矢印 -> pane 0
-	msg = tea.KeyMsg{Type: tea.KeyLeft}
-	updated, _ = m.Update(msg)
-	m = updated.(Model)
-	if m.activePane != 0 {
-		t.Errorf("activePane after left = %d, want 0", m.activePane)
-	}
-}
-
 func TestUpdateScanResultMsg(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
@@ -225,25 +166,22 @@ func TestUpdateScanResultMsg(t *testing.T) {
 			Path: "/project-a",
 			Name: "project-a",
 			Sessions: []*core.Session{
-				{ID: "s1", State: core.Thinking},
+				{ID: "s1", State: core.Thinking, PID: 100},
 			},
 		},
 	}
 
-	updated, _ := m.Update(ScanResultMsg{Projects: projects})
-	m = updated.(Model)
+	m = feedProjects(m, projects)
 
-	items := m.projectList.Items()
-	if len(items) != 1 {
-		t.Fatalf("projectList items = %d, want 1", len(items))
+	// entries にはヘッダー + セッション行が含まれるはず
+	sessionCount := 0
+	for _, e := range m.entries {
+		if !e.isHeader {
+			sessionCount++
+		}
 	}
-
-	pi, ok := items[0].(ProjectItem)
-	if !ok {
-		t.Fatal("expected ProjectItem")
-	}
-	if pi.Project.Name != "project-a" {
-		t.Errorf("project name = %q, want %q", pi.Project.Name, "project-a")
+	if sessionCount != 1 {
+		t.Fatalf("session entries = %d, want 1", sessionCount)
 	}
 }
 
@@ -292,87 +230,19 @@ func TestUpdateWindowSizeMsgSmallValues(t *testing.T) {
 	}
 }
 
-func TestProjectItemTitleFallbackToPath(t *testing.T) {
-	item := ProjectItem{Project: core.Project{
-		Path: "/home/user/project",
-		Name: "",
-	}}
-
-	if item.Title() != "/home/user/project  0 sessions" {
-		// Title() uses Name; if empty falls back to Path
-		title := item.Title()
-		if title == "" {
-			t.Error("Title() should not be empty when Name is empty")
-		}
-	}
-}
-
-func TestSessionItemDescriptionShowsPID(t *testing.T) {
-	item := SessionItem{Session: core.Session{
-		PID:   12345,
-		State: core.Idle,
-	}}
-
-	desc := item.Description()
-	if desc != "PID:12345" {
-		t.Errorf("Description() = %q, want %q", desc, "PID:12345")
-	}
-}
-
-func TestUpdateEnterKeyOnProjectPane(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-
-	// プロジェクトを投入する。
-	projects := []core.Project{
-		{
-			Path: "/project-a",
-			Name: "project-a",
-			Sessions: []*core.Session{
-				{ID: "s1", State: core.Thinking},
-			},
-		},
-		{
-			Path: "/project-b",
-			Name: "project-b",
-			Sessions: []*core.Session{
-				{ID: "s2", State: core.Idle},
-			},
-		},
-	}
-	updated, _ := m.Update(ScanResultMsg{Projects: projects})
-	m = updated.(Model)
-
-	// pane 0 (project) で Enter を押す。
-	m.activePane = 0
-	msg := tea.KeyMsg{Type: tea.KeyEnter}
-	updated, _ = m.Update(msg)
-	m = updated.(Model)
-
-	// 選択プロジェクトが固定され、pane 1 に移動する。
-	if m.activePane != 1 {
-		t.Errorf("activePane = %d, want 1", m.activePane)
-	}
-	if m.selectedProject != "/project-a" {
-		t.Errorf("selectedProject = %q, want %q", m.selectedProject, "/project-a")
-	}
-}
-
-func TestUpdateEnterKeyOnSessionPaneFocusSuccess(t *testing.T) {
+func TestUpdateEnterKeyJumpSuccess(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
 	projects := []core.Project{
 		{
 			Path: "/project-a",
 			Sessions: []*core.Session{
-				{ID: "s1", State: core.Thinking, PaneID: "1"},
+				{ID: "s1", State: core.Thinking, PaneID: "1", PID: 100},
 			},
 		},
 	}
-	updated, _ := m.Update(ScanResultMsg{Projects: projects})
-	m = updated.(Model)
+	m = feedProjects(m, projects)
 
-	// pane 1 (session) で Enter → jumping=true, FocusPane が tea.Cmd として返る。
-	m.activePane = 1
 	msg := tea.KeyMsg{Type: tea.KeyEnter}
 	updated, cmd := m.Update(msg)
 	m = updated.(Model)
@@ -392,45 +262,19 @@ func TestUpdateEnterKeyOnSessionPaneFocusSuccess(t *testing.T) {
 	}
 }
 
-func TestUpdateEnterKeyOnSessionPaneTerminalUnavailable(t *testing.T) {
-	// v2 の update.go は IsAvailable() をチェックしない。
-	// terminal が nil でなく PaneID が有効なら FocusPane が呼ばれるだけ。
-	m, _, _, _, term := newTestModel()
-	term.available = false
-
-	projects := []core.Project{
-		{
-			Path:     "/project-a",
-			Sessions: []*core.Session{{ID: "s1", State: core.Thinking, PaneID: "1"}},
-		},
-	}
-	updated, _ := m.Update(ScanResultMsg{Projects: projects})
-	m = updated.(Model)
-
-	m.activePane = 1
-	msg := tea.KeyMsg{Type: tea.KeyEnter}
-	updated, _ = m.Update(msg)
-	m = updated.(Model)
-
-	// v2 では IsAvailable チェックなし。FocusPane が呼ばれ err は nil のまま。
-	_ = m
-}
-
-func TestUpdateEnterKeyOnSessionPaneNoPaneID(t *testing.T) {
+func TestUpdateEnterKeyNoPaneID(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
 	projects := []core.Project{
 		{
 			Path:     "/project-a",
-			Sessions: []*core.Session{{ID: "s1", State: core.Thinking, PaneID: ""}},
+			Sessions: []*core.Session{{ID: "s1", State: core.Thinking, PaneID: "", PID: 100}},
 		},
 	}
-	updated, _ := m.Update(ScanResultMsg{Projects: projects})
-	m = updated.(Model)
+	m = feedProjects(m, projects)
 
-	m.activePane = 1
 	msg := tea.KeyMsg{Type: tea.KeyEnter}
-	updated, _ = m.Update(msg)
+	updated, _ := m.Update(msg)
 	m = updated.(Model)
 
 	if m.err == nil {
@@ -449,105 +293,149 @@ func TestUpdateTickMsg(t *testing.T) {
 	}
 }
 
-func TestUpdateActiveListDelegation(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-
-	// pane 0 でキー入力。
-	m.activePane = 0
-	msg := tea.KeyMsg{Type: tea.KeyDown}
-	updated, _ := m.Update(msg)
-	_ = updated.(Model)
-
-	// pane 1 でキー入力。
-	m.activePane = 1
-	updated, _ = m.Update(msg)
-	_ = updated.(Model)
-	// パニックしなければ OK。
-}
-
-func TestProjectsFromProjectList(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-
-	projects := []core.Project{
-		{Path: "/project-a", Name: "a"},
-		{Path: "/project-b", Name: "b"},
-	}
-	updated, _ := m.Update(ScanResultMsg{Projects: projects})
-	m = updated.(Model)
-
-	result := m.projectsFromProjectList()
-	if len(result) != 2 {
-		t.Fatalf("projectsFromProjectList() len = %d, want 2", len(result))
-	}
-	if result[0].Path != "/project-a" {
-		t.Errorf("result[0].Path = %q, want %q", result[0].Path, "/project-a")
-	}
-	if result[1].Path != "/project-b" {
-		t.Errorf("result[1].Path = %q, want %q", result[1].Path, "/project-b")
-	}
-}
-
-func TestUpdateProjectListEmptyProjects(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-
-	// まずプロジェクトを投入する。
-	projects := []core.Project{
-		{Path: "/project-a", Name: "a"},
-	}
-	updated, _ := m.Update(ScanResultMsg{Projects: projects})
-	m = updated.(Model)
-	m.selectedProject = "/project-a"
-
-	// 空リストで更新する。
-	updated, _ = m.Update(ScanResultMsg{Projects: []core.Project{}})
-	m = updated.(Model)
-
-	if len(m.projectList.Items()) != 0 {
-		t.Errorf("projectList items = %d, want 0", len(m.projectList.Items()))
-	}
-	if m.selectedProject != "" {
-		t.Errorf("selectedProject = %q, want empty", m.selectedProject)
-	}
-}
-
-func TestUpdateProjectListSelectedNotFound(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-
-	// プロジェクトAを選択状態にする。
-	m.selectedProject = "/project-a"
-
-	// プロジェクトBのみのリストで更新する（Aは消えた）。
-	projects := []core.Project{
-		{Path: "/project-b", Name: "b"},
-	}
-	updated, _ := m.Update(ScanResultMsg{Projects: projects})
-	m = updated.(Model)
-
-	// 選択が解除される。
-	if m.selectedProject != "" {
-		t.Errorf("selectedProject = %q, want empty (should be cleared)", m.selectedProject)
-	}
-}
-
-func TestUpdateSessionListWithNilSession(t *testing.T) {
+func TestMoveCursorSkipsHeaders(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
 	projects := []core.Project{
 		{
 			Path: "/project-a",
+			Name: "project-a",
 			Sessions: []*core.Session{
-				{ID: "s1", State: core.Thinking},
-				nil,
-				{ID: "s2", State: core.Idle},
+				{ID: "s1", State: core.Thinking, PID: 100},
+				{ID: "s2", State: core.Idle, PID: 200},
 			},
 		},
 	}
-	updated, _ := m.Update(ScanResultMsg{Projects: projects})
+	m = feedProjects(m, projects)
+
+	// カーソルはヘッダーではなくセッション行にあるはず
+	sel := m.selectedSession()
+	if sel == nil {
+		t.Fatal("expected a selected session")
+	}
+	if sel.isHeader {
+		t.Error("cursor should not be on a header")
+	}
+
+	// 下に移動
+	msg := tea.KeyMsg{Type: tea.KeyDown}
+	updated, _ := m.Update(msg)
 	m = updated.(Model)
 
-	items := m.sessionList.Items()
-	if len(items) != 2 {
-		t.Errorf("sessionList items = %d, want 2 (nil session skipped)", len(items))
+	sel = m.selectedSession()
+	if sel == nil {
+		t.Fatal("expected a selected session after move")
+	}
+	if sel.isHeader {
+		t.Error("cursor should skip headers")
+	}
+}
+
+func TestBuildEntriesGrouping(t *testing.T) {
+	projects := []core.Project{
+		{
+			Path: "/p1",
+			Name: "p1",
+			Sessions: []*core.Session{
+				{PID: 1, State: core.Thinking},
+				{PID: 2, State: core.Idle},
+				{PID: 3, State: core.Waiting},
+				{PID: 4, State: core.ToolUse},
+			},
+		},
+	}
+
+	entries := buildEntries(projects)
+
+	// グループ順: WAITING, WORKING (Thinking+ToolUse), IDLE
+	headerOrder := []string{}
+	for _, e := range entries {
+		if e.isHeader {
+			headerOrder = append(headerOrder, e.header)
+		}
+	}
+
+	if len(headerOrder) != 3 {
+		t.Fatalf("expected 3 group headers, got %d: %v", len(headerOrder), headerOrder)
+	}
+	if headerOrder[0] != "WAITING" {
+		t.Errorf("first group = %q, want WAITING", headerOrder[0])
+	}
+	if headerOrder[1] != "WORKING" {
+		t.Errorf("second group = %q, want WORKING", headerOrder[1])
+	}
+	if headerOrder[2] != "IDLE" {
+		t.Errorf("third group = %q, want IDLE", headerOrder[2])
+	}
+}
+
+func TestBuildEntriesNilSessionSkipped(t *testing.T) {
+	projects := []core.Project{
+		{
+			Path: "/p1",
+			Sessions: []*core.Session{
+				{PID: 1, State: core.Thinking},
+				nil,
+				{PID: 2, State: core.Idle},
+			},
+		},
+	}
+
+	entries := buildEntries(projects)
+	sessionCount := 0
+	for _, e := range entries {
+		if !e.isHeader {
+			sessionCount++
+		}
+	}
+	if sessionCount != 2 {
+		t.Errorf("session entries = %d, want 2 (nil skipped)", sessionCount)
+	}
+}
+
+func TestBuildEntriesEmpty(t *testing.T) {
+	entries := buildEntries(nil)
+	if len(entries) != 0 {
+		t.Errorf("entries = %d, want 0 for nil projects", len(entries))
+	}
+}
+
+func TestRebuildEntriesPreservesCursor(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	projects := []core.Project{
+		{
+			Path: "/p1",
+			Name: "p1",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Thinking},
+				{PID: 200, State: core.Idle},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	// カーソルを2番目のセッション（PID:200）に移動
+	msg := tea.KeyMsg{Type: tea.KeyDown}
+	updated, _ := m.Update(msg)
+	m = updated.(Model)
+
+	sel := m.selectedSession()
+	if sel == nil || sel.session == nil {
+		t.Fatal("expected selected session")
+	}
+	pid := sel.session.PID
+
+	// 再スキャンでリビルド（同じデータ）
+	m = feedProjects(m, projects)
+
+	// カーソルが同じ PID を指しているか
+	sel2 := m.selectedSession()
+	if sel2 == nil || sel2.session == nil {
+		t.Fatal("expected selected session after rebuild")
+	}
+	if sel2.session.PID != pid {
+		t.Errorf("cursor PID = %d, want %d (cursor should be preserved)", sel2.session.PID, pid)
 	}
 }
 
@@ -568,7 +456,6 @@ func TestTickCmdZeroIntervalFallback(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected command for zero interval")
 	}
-	// フォールバックで 1s になるが、テスト不要（コマンドが返ることを確認）。
 }
 
 func TestInitReturnsCmd(t *testing.T) {
@@ -576,6 +463,398 @@ func TestInitReturnsCmd(t *testing.T) {
 
 	cmd := m.Init()
 	if cmd == nil {
-		t.Error("Init() should return a batch command")
+		t.Error("Init() should return a command")
+	}
+}
+
+func TestPreviewResultMsg(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	updated, _ := m.Update(PreviewResultMsg{Text: "hello world", Err: nil})
+	m = updated.(Model)
+
+	if m.previewText != "hello world" {
+		t.Errorf("previewText = %q, want %q", m.previewText, "hello world")
+	}
+	if m.previewLoading {
+		t.Error("previewLoading should be false after result")
+	}
+}
+
+func TestSessionDisplayName(t *testing.T) {
+	e := &sessionEntry{
+		project: &core.Project{Path: "/home/user/my-project", Name: ""},
+		session: &core.Session{},
+	}
+	name := sessionDisplayName(e)
+	if name != "my-project" {
+		t.Errorf("sessionDisplayName = %q, want %q", name, "my-project")
+	}
+
+	e.project.Name = "custom-name"
+	name = sessionDisplayName(e)
+	if name != "custom-name" {
+		t.Errorf("sessionDisplayName = %q, want %q", name, "custom-name")
+	}
+}
+
+func TestProjectItemCompat(t *testing.T) {
+	item := ProjectItem{Project: core.Project{
+		Path: "/home/user/project",
+		Name: "my-project",
+	}}
+
+	if item.Title() != "my-project" {
+		t.Errorf("Title() = %q, want %q", item.Title(), "my-project")
+	}
+	if item.FilterValue() != "/home/user/project" {
+		t.Errorf("FilterValue() = %q, want %q", item.FilterValue(), "/home/user/project")
+	}
+}
+
+func TestSessionItemCompat(t *testing.T) {
+	item := SessionItem{Session: core.Session{
+		ID:    "abc-123",
+		State: core.Thinking,
+		Tool:  core.ToolClaude,
+	}}
+
+	if item.Title() != "claude" {
+		t.Errorf("Title() = %q, want %q", item.Title(), "claude")
+	}
+	if item.FilterValue() != "abc-123" {
+		t.Errorf("FilterValue() = %q, want %q", item.FilterValue(), "abc-123")
+	}
+}
+
+// C1: カーソルが別セッションに移動したときプレビューが更新される
+func TestPreviewUpdatesOnCursorChange(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	// 同じ状態グループ（Idle）に2セッション、異なる PaneID
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", State: core.Idle, PaneID: "%1", PID: 100},
+				{ID: "s2", State: core.Idle, PaneID: "%2", PID: 200},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	// 投入後、最初のセッションが選択され previewPaneID がセットされているはず
+	if m.previewPaneID == "" {
+		t.Fatal("previewPaneID should be set after feeding projects with PaneID")
+	}
+	firstPaneID := m.previewPaneID
+
+	// カーソルを下に移動（第2セッションへ）
+	msg := tea.KeyMsg{Type: tea.KeyDown}
+	updated, cmd := m.Update(msg)
+	m = updated.(Model)
+
+	// fetchPreviewCmd が返るはず（PaneID が変わったため）
+	if cmd == nil {
+		t.Error("expected fetchPreviewCmd to be returned when cursor moves to different PaneID")
+	}
+
+	// previewPaneID が第2セッションに切り替わっているはず
+	if m.previewPaneID == firstPaneID {
+		t.Errorf("previewPaneID = %q, want different pane (was %q)", m.previewPaneID, firstPaneID)
+	}
+	if m.previewPaneID != "%2" {
+		t.Errorf("previewPaneID = %q, want %%2", m.previewPaneID)
+	}
+}
+
+// C2: 同じ PaneID のままカーソルが動かないとき再フェッチしない
+func TestPreviewNotRefetchedForSamePaneID(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", State: core.Idle, PaneID: "%1", PID: 100},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	if m.previewPaneID != "%1" {
+		t.Fatalf("previewPaneID = %q, want %%1", m.previewPaneID)
+	}
+
+	// セッションが1件なのでカーソルは動かない → 同じ PaneID
+	msg := tea.KeyMsg{Type: tea.KeyDown}
+	_, cmd := m.Update(msg)
+
+	// 再フェッチ不要なので cmd は nil
+	if cmd != nil {
+		t.Error("expected nil cmd when pane ID did not change")
+	}
+}
+
+// C3: PreviewResultMsg にエラーがあるとき previewText にエラー内容が入る
+func TestPreviewResultMsgError(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	updated, _ := m.Update(PreviewResultMsg{Text: "", Err: fmt.Errorf("connection failed")})
+	m = updated.(Model)
+
+	if !strings.Contains(m.previewText, "Error") {
+		t.Errorf("previewText = %q, want to contain 'Error'", m.previewText)
+	}
+	if !strings.Contains(m.previewText, "connection failed") {
+		t.Errorf("previewText = %q, want to contain 'connection failed'", m.previewText)
+	}
+	if m.previewLoading {
+		t.Error("previewLoading should be false after receiving PreviewResultMsg")
+	}
+}
+
+// C4: セッションが存在しないとき View() が "Select a session" を含む
+func TestPreviewShowsSelectMessageWhenNoSession(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	// セッションを投入しない（空のまま）
+	view := m.View()
+
+	if !strings.Contains(view, "Select a session") {
+		t.Errorf("View() output does not contain 'Select a session', got: %q", view)
+	}
+}
+
+// B1: カーソルが下移動でグループヘッダーをスキップする
+func TestCursorDownSkipsGroupHeader(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	// Entries will be: [WORKING header, session(PID=100), IDLE header, session(PID=200)]
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", State: core.Thinking, PID: 100},
+				{ID: "s2", State: core.Idle, PID: 200},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	// Cursor should start on the first session (PID=100)
+	sel := m.selectedSession()
+	if sel == nil {
+		t.Fatal("expected a selected session after feedProjects")
+	}
+	if sel.session.PID != 100 {
+		t.Fatalf("initial cursor PID = %d, want 100", sel.session.PID)
+	}
+
+	// Move cursor down — should skip the IDLE header and land on session(PID=200)
+	msg := tea.KeyMsg{Type: tea.KeyDown}
+	updated, _ := m.Update(msg)
+	m = updated.(Model)
+
+	sel = m.selectedSession()
+	if sel == nil {
+		t.Fatal("expected a selected session after moving down")
+	}
+	if sel.isHeader {
+		t.Error("cursor should not be on a header after moving down")
+	}
+	if sel.session.PID != 200 {
+		t.Errorf("cursor PID = %d, want 200 (should have skipped IDLE header)", sel.session.PID)
+	}
+}
+
+// B2: カーソルが上移動でグループヘッダーをスキップする
+func TestCursorUpSkipsGroupHeader(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	// Entries will be: [WORKING header, session(PID=100), IDLE header, session(PID=200)]
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", State: core.Thinking, PID: 100},
+				{ID: "s2", State: core.Idle, PID: 200},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	// Move down to land on session(PID=200)
+	downMsg := tea.KeyMsg{Type: tea.KeyDown}
+	updated, _ := m.Update(downMsg)
+	m = updated.(Model)
+
+	sel := m.selectedSession()
+	if sel == nil || sel.session.PID != 200 {
+		t.Fatalf("setup failed: expected cursor on PID=200, got %v", sel)
+	}
+
+	// Move cursor up — should skip the WORKING header and land on session(PID=100)
+	upMsg := tea.KeyMsg{Type: tea.KeyUp}
+	updated, _ = m.Update(upMsg)
+	m = updated.(Model)
+
+	sel = m.selectedSession()
+	if sel == nil {
+		t.Fatal("expected a selected session after moving up")
+	}
+	if sel.isHeader {
+		t.Error("cursor should not be on a header after moving up")
+	}
+	if sel.session.PID != 100 {
+		t.Errorf("cursor PID = %d, want 100 (should have skipped WORKING header)", sel.session.PID)
+	}
+}
+
+// B3: カーソルが先頭で上移動しても範囲外にならない
+func TestCursorUpAtTopStaysInBounds(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", State: core.Thinking, PID: 100},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	// Verify cursor is on the only session
+	sel := m.selectedSession()
+	if sel == nil || sel.session.PID != 100 {
+		t.Fatalf("setup failed: expected cursor on PID=100")
+	}
+	initialCursor := m.cursor
+
+	// Move cursor up — should stay in place
+	upMsg := tea.KeyMsg{Type: tea.KeyUp}
+	updated, _ := m.Update(upMsg)
+	m = updated.(Model)
+
+	if m.cursor < 0 {
+		t.Errorf("cursor = %d, must not go negative", m.cursor)
+	}
+	if m.cursor != initialCursor {
+		t.Errorf("cursor = %d, want %d (should stay at top)", m.cursor, initialCursor)
+	}
+	sel = m.selectedSession()
+	if sel == nil {
+		t.Fatal("expected a selected session after up-at-top")
+	}
+	if sel.session.PID != 100 {
+		t.Errorf("cursor PID = %d, want 100", sel.session.PID)
+	}
+}
+
+// B4: カーソルが末尾で下移動しても範囲外にならない
+func TestCursorDownAtBottomStaysInBounds(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", State: core.Thinking, PID: 100},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	// Verify cursor is on the only session
+	sel := m.selectedSession()
+	if sel == nil || sel.session.PID != 100 {
+		t.Fatalf("setup failed: expected cursor on PID=100")
+	}
+	initialCursor := m.cursor
+
+	// Move cursor down — should stay in place
+	downMsg := tea.KeyMsg{Type: tea.KeyDown}
+	updated, _ := m.Update(downMsg)
+	m = updated.(Model)
+
+	if m.cursor >= len(m.entries) {
+		t.Errorf("cursor = %d, must not exceed entries length %d", m.cursor, len(m.entries))
+	}
+	if m.cursor != initialCursor {
+		t.Errorf("cursor = %d, want %d (should stay at bottom)", m.cursor, initialCursor)
+	}
+	sel = m.selectedSession()
+	if sel == nil {
+		t.Fatal("expected a selected session after down-at-bottom")
+	}
+	if sel.session.PID != 100 {
+		t.Errorf("cursor PID = %d, want 100", sel.session.PID)
+	}
+}
+
+// B5: カーソルが複数グループをまたいで移動できる
+func TestCursorMovesAcrossGroups(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	// Entries: [WAITING header, session(PID=100), WORKING header, session(PID=200), IDLE header, session(PID=300)]
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", State: core.Waiting, PID: 100},
+				{ID: "s2", State: core.Thinking, PID: 200},
+				{ID: "s3", State: core.Idle, PID: 300},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	// Cursor should start on the first session (PID=100, Waiting)
+	sel := m.selectedSession()
+	if sel == nil {
+		t.Fatal("expected a selected session after feedProjects")
+	}
+	if sel.session.PID != 100 {
+		t.Fatalf("initial cursor PID = %d, want 100", sel.session.PID)
+	}
+
+	// Move down twice — should skip WORKING header to land on PID=200, then skip IDLE header to land on PID=300
+	downMsg := tea.KeyMsg{Type: tea.KeyDown}
+
+	updated, _ := m.Update(downMsg)
+	m = updated.(Model)
+
+	sel = m.selectedSession()
+	if sel == nil || sel.session.PID != 200 {
+		pid := 0
+		if sel != nil && sel.session != nil {
+			pid = sel.session.PID
+		}
+		t.Fatalf("after 1st down: cursor PID = %d, want 200", pid)
+	}
+
+	updated, _ = m.Update(downMsg)
+	m = updated.(Model)
+
+	sel = m.selectedSession()
+	if sel == nil {
+		t.Fatal("expected a selected session after 2nd down")
+	}
+	if sel.isHeader {
+		t.Error("cursor should not be on a header after 2nd down")
+	}
+	if sel.session.PID != 300 {
+		t.Errorf("cursor PID = %d, want 300 (Idle session)", sel.session.PID)
+	}
+	if sel.state != core.Idle {
+		t.Errorf("cursor state = %v, want core.Idle", sel.state)
 	}
 }
