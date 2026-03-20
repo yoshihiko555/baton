@@ -30,7 +30,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.jumping = false
 			return m, nil
 		}
-		return m, tea.Quit
+		if m.exitOnJump {
+			return m, tea.Quit
+		}
+		m.jumping = false
+		return m, nil
 	case tea.KeyMsg:
 		if m.jumping {
 			return m, nil
@@ -210,11 +214,15 @@ func (m Model) updateSubMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.err = errors.New("terminal is nil")
 			return m, nil
 		}
+		// サブメニュー経由のジャンプは同期実行（通常パスは JumpDoneMsg 経由の非同期）
 		if err := m.terminal.FocusPane(item.PaneID); err != nil {
 			m.err = err
 			return m, nil
 		}
-		return m, tea.Quit
+		if m.exitOnJump {
+			return m, tea.Quit
+		}
+		return m, nil
 	}
 	return m, nil
 }

@@ -88,7 +88,7 @@ func newTestModel() (Model, *mockStateReader, *mockStateUpdater, *mockScanner, *
 	term := &mockTerminal{available: true}
 	cfg := config.Default()
 
-	model := NewModel(scanner, updater, reader, term, cfg)
+	model := NewModel(scanner, updater, reader, term, cfg, false)
 	return model, reader, updater, scanner, term
 }
 
@@ -254,11 +254,134 @@ func TestUpdateEnterKeyJumpSuccess(t *testing.T) {
 		t.Error("expected cmd for async FocusPane")
 	}
 
-	// JumpDoneMsg で tea.Quit が返る。
+	// デフォルト（exitOnJump=false）: JumpDoneMsg 後 TUI に戻る
+	updated, cmd = m.Update(JumpDoneMsg{Err: nil})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Error("expected nil cmd (no quit) when exitOnJump=false")
+	}
+	if m.jumping {
+		t.Error("expected jumping=false after JumpDoneMsg")
+	}
+}
+
+func TestJumpDoneExitOnJumpTrue(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	m.exitOnJump = true
+
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", State: core.Thinking, PaneID: "1", PID: 100},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	updated, cmd := m.Update(msg)
+	m = updated.(Model)
+
+	if !m.jumping {
+		t.Error("expected jumping=true after Enter")
+	}
+	if cmd == nil {
+		t.Fatal("expected cmd for async FocusPane")
+	}
+
+	// exitOnJump=true: JumpDoneMsg 後 tea.Quit が返る
 	updated, cmd = m.Update(JumpDoneMsg{Err: nil})
 	m = updated.(Model)
 	if cmd == nil {
-		t.Error("expected tea.Quit after JumpDoneMsg")
+		t.Fatal("expected tea.Quit after JumpDoneMsg with exitOnJump=true")
+	}
+	result := cmd()
+	if _, ok := result.(tea.QuitMsg); !ok {
+		t.Errorf("expected tea.QuitMsg, got %T", result)
+	}
+}
+
+func TestJumpDoneErrorIgnoresExitOnJump(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	m.exitOnJump = true
+
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", State: core.Thinking, PaneID: "1", PID: 100},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	updated, _ := m.Update(msg)
+	m = updated.(Model)
+
+	// エラー時は exitOnJump に関係なく jumping=false + エラー設定
+	updated, cmd := m.Update(JumpDoneMsg{Err: fmt.Errorf("focus failed")})
+	m = updated.(Model)
+
+	if cmd != nil {
+		t.Error("expected nil cmd on JumpDoneMsg error")
+	}
+	if m.jumping {
+		t.Error("expected jumping=false on JumpDoneMsg error")
+	}
+	if m.err == nil {
+		t.Error("expected err to be set on JumpDoneMsg error")
+	}
+}
+
+func TestSubMenuEnterExitOnJumpFalse(t *testing.T) {
+	m, _, _, _, term := newTestModel()
+
+	// サブメニュー状態をセットアップ
+	m.showSubMenu = true
+	m.subMenuItems = []SubMenuItem{{PaneID: "%5", TTYName: "pane %5"}}
+	m.subMenuCursor = 0
+
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	updated, cmd := m.Update(msg)
+	m = updated.(Model)
+
+	// exitOnJump=false（デフォルト）: FocusPane 実行後 TUI に戻る
+	if cmd != nil {
+		t.Error("expected nil cmd (no quit) when exitOnJump=false in submenu")
+	}
+	if m.showSubMenu {
+		t.Error("expected showSubMenu=false after submenu Enter")
+	}
+	if term.focused != "%5" {
+		t.Errorf("expected focused pane %%5, got %q", term.focused)
+	}
+}
+
+func TestSubMenuEnterExitOnJumpTrue(t *testing.T) {
+	m, _, _, _, term := newTestModel()
+	m.exitOnJump = true
+
+	// サブメニュー状態をセットアップ
+	m.showSubMenu = true
+	m.subMenuItems = []SubMenuItem{{PaneID: "%5", TTYName: "pane %5"}}
+	m.subMenuCursor = 0
+
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	updated, cmd := m.Update(msg)
+	m = updated.(Model)
+
+	// exitOnJump=true: FocusPane 実行後 tea.Quit が返る
+	if cmd == nil {
+		t.Fatal("expected tea.Quit after submenu Enter with exitOnJump=true")
+	}
+	result := cmd()
+	if _, ok := result.(tea.QuitMsg); !ok {
+		t.Errorf("expected tea.QuitMsg, got %T", result)
+	}
+	if term.focused != "%5" {
+		t.Errorf("expected focused pane %%5, got %q", term.focused)
 	}
 }
 

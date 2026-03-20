@@ -80,7 +80,8 @@ type Model struct {
 	subMenuItems  []SubMenuItem
 	subMenuCursor int
 
-	jumping bool
+	jumping    bool
+	exitOnJump bool
 }
 
 // NewModel はデフォルト設定で TUI モデルを初期化する。
@@ -90,6 +91,7 @@ func NewModel(
 	stateReader core.StateReader,
 	term terminal.Terminal,
 	cfg config.Config,
+	exitOnJump bool,
 ) Model {
 	return Model{
 		scanner:      scanner,
@@ -97,6 +99,7 @@ func NewModel(
 		stateReader:  stateReader,
 		terminal:     term,
 		config:       cfg,
+		exitOnJump:   exitOnJump,
 	}
 }
 

@@ -32,6 +32,7 @@ func run() error {
 	configPath := flag.String("config", "", "path to config file")
 	noTUI := flag.Bool("no-tui", false, "run without TUI")
 	once := flag.Bool("once", false, "write status JSON once and exit")
+	exitOnJump := flag.Bool("exit", false, "exit after pane jump")
 	showVersion := flag.Bool("version", false, "print version")
 	flag.Parse()
 
@@ -121,7 +122,7 @@ func run() error {
 	}
 
 	// TUI モード: stateManager は StateUpdater と StateReader を両方実装する。
-	model := tui.NewModel(scanner, stateManager, stateManager, term, cfg)
+	model := tui.NewModel(scanner, stateManager, stateManager, term, cfg, *exitOnJump)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 
 	go func() {

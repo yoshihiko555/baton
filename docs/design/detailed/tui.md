@@ -155,7 +155,7 @@ func doScanCmd(
 |------|------|
 | `j` / `↓` | サブメニュー選択を下へ |
 | `k` / `↑` | サブメニュー選択を上へ |
-| `enter` | 選択ペインに FocusPane(paneID int) |
+| `enter` | 選択ペインに FocusPane → `exitOnJump` が true なら終了、false なら TUI に戻る（同期実行） |
 | `esc` | サブメニューを閉じる |
 
 ### 通常モード (session ペインで Enter)

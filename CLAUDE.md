@@ -31,8 +31,11 @@ go test ./... -v
 # 静的解析
 go vet ./...
 
-# TUI 起動
+# TUI 起動（ペインジャンプ後も TUI に戻る）
 ./baton
+
+# TUI 起動（ペインジャンプ後に終了、tmux popup 等で便利）
+./baton --exit
 
 # ヘッドレスモード（JSON出力のみ）
 ./baton --no-tui
@@ -100,6 +103,7 @@ go vet ./...
 - ペインジャンプ:
   - tmux: switch-client → select-window → select-pane（同期的、sleep 不要）
   - WezTerm: 同一 WS → `wezterm cli activate-pane`、別 WS → トリガーファイル経由
+  - デフォルト: ジャンプ後 TUI に戻る。`--exit` フラグで従来の自動終了動作を選択可能
 - ToolUse 承認待ち検出: `tmux capture-pane` / `wezterm cli get-text` でペインテキストを取得し承認プロンプトを検出すると Waiting に変換
 - Hook セッション除外: tmux の `claude-*-<digits>` パターン（unattached）を自動除外
 - --no-tui モード: 起動メッセージと初回スキャン結果を標準出力に表示

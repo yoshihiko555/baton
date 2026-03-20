@@ -46,7 +46,7 @@ run()
   ├─ signal handling
   ├─ [--once] doScan(); exporter.Write(); return
   ├─ [--no-tui] goroutine{ ticker → doScan() → exporter.Write() }
-  └─ [TUI]      tui.NewModel(scanner, stateManager, term, cfg) → tea.Run()
+  └─ [TUI]      tui.NewModel(scanner, stateManager, term, cfg, exitOnJump) → tea.Run()
                   └─ TickMsg → doScan() → ScanResultMsg → Update()
 ```
 
@@ -150,7 +150,7 @@ go func() {
 ### TUI モード
 
 ```go
-model := tui.NewModel(scanner, stateManager, term, cfg)
+model := tui.NewModel(scanner, stateManager, term, cfg, *exitOnJump)
 p := tea.NewProgram(model, tea.WithAltScreen())
 _, err = p.Run()
 return err
