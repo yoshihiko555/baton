@@ -43,6 +43,7 @@ baton
 .claude/checkpoints/
 .claude/context/
 .claude/Plans.md
+.claude/Plans.archive.md
 
 # Local config overrides
 .claude/config/**/*.local.yaml
