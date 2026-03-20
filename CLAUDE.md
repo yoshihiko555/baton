@@ -21,6 +21,10 @@
 # ビルド
 go build -o baton .
 
+# ビルド＆ローカルインストール（~/.local/bin）
+# 重要: macOS では cp 後に codesign が必須。省略するとカーネルが SIGKILL する。
+go build -o baton . && cp baton ~/.local/bin/baton && codesign -f -s - ~/.local/bin/baton
+
 # テスト実行
 go test ./... -v
 
