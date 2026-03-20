@@ -12,10 +12,10 @@ import (
 var (
 	activeBorderStyle = lipgloss.NewStyle().
 				Border(lipgloss.ThickBorder()).
-				BorderForeground(lipgloss.Color("#E8832A")) // brand orange
+				BorderForeground(lipgloss.Color("#836FFF")) // soft electric blue
 	inactiveBorderStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#555555")) // dim gray
+				BorderForeground(lipgloss.Color("#3D2A7A")) // muted midnight
 	statusBarStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#888888")).
 			Padding(0, 1)
@@ -26,26 +26,26 @@ var (
 
 // グループヘッダーの色
 var groupHeaderColors = map[string]lipgloss.Color{
-	"WAITING": lipgloss.Color("#E8832A"), // orange
-	"ERROR":   lipgloss.Color("#FF4444"), // red
-	"WORKING": lipgloss.Color("#44DD44"), // green
-	"IDLE":    lipgloss.Color("#666666"), // dim
+	"WAITING": lipgloss.Color("#FF2DAA"), // hot pink
+	"ERROR":   lipgloss.Color("#FF4444"), // red (keep)
+	"WORKING": lipgloss.Color("#15F5BA"), // neon mint
+	"IDLE":    lipgloss.Color("#836FFF"), // soft electric blue
 }
 
 // セッション状態の色
 var stateColors = map[core.SessionState]lipgloss.Color{
-	core.Idle:     lipgloss.Color("#666666"),
-	core.Thinking: lipgloss.Color("#44DD44"),
-	core.ToolUse:  lipgloss.Color("#00CCCC"),
-	core.Waiting:  lipgloss.Color("#E8832A"),
+	core.Idle:     lipgloss.Color("#836FFF"),
+	core.Thinking: lipgloss.Color("#15F5BA"),
+	core.ToolUse:  lipgloss.Color("#15F5BA"),
+	core.Waiting:  lipgloss.Color("#FF2DAA"),
 	core.Error:    lipgloss.Color("#FF4444"),
 }
 
 // ツールタイプの色
 var toolColors = map[core.ToolType]lipgloss.Color{
-	core.ToolClaude: lipgloss.Color("#D4A574"),
-	core.ToolCodex:  lipgloss.Color("#74B9D4"),
-	core.ToolGemini: lipgloss.Color("#74D4A5"),
+	core.ToolClaude: lipgloss.Color("#F0F3FF"),
+	core.ToolCodex:  lipgloss.Color("#15F5BA"),
+	core.ToolGemini: lipgloss.Color("#836FFF"),
 }
 
 // 外側マージン
@@ -130,13 +130,13 @@ func (m Model) View() string {
 // renderHeader はアプリ名 + セッション概要のヘッダー行を描画する。
 func (m Model) renderHeader(totalWidth int) string {
 	brand := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E8832A")).
+		Foreground(lipgloss.Color("#836FFF")).
 		Bold(true)
 	subtitle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#888888"))
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	activeColor := lipgloss.NewStyle().Foreground(lipgloss.Color("#44DD44"))
-	waitColor := lipgloss.NewStyle().Foreground(lipgloss.Color("#E8832A"))
+	activeColor := lipgloss.NewStyle().Foreground(lipgloss.Color("#15F5BA"))
+	waitColor := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF2DAA"))
 
 	left := brand.Render("baton") + subtitle.Render("  AI Session Monitor")
 
@@ -258,7 +258,7 @@ func renderSessionEntry(e *sessionEntry, width int, isSelected bool) []string {
 	cursor := "  "
 	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E8E4E0"))
 	if isSelected {
-		cursor = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8832A")).Render("▎ ")
+		cursor = lipgloss.NewStyle().Foreground(lipgloss.Color("#836FFF")).Render("▎ ")
 		nameStyle = nameStyle.Bold(true)
 	}
 
@@ -284,7 +284,7 @@ func renderSessionEntry(e *sessionEntry, width int, isSelected bool) []string {
 // renderPreview は右ペインのプレビューを描画する。
 func (m Model) renderPreview(width, height int) string {
 	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E8832A")).
+		Foreground(lipgloss.Color("#836FFF")).
 		Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 
@@ -379,7 +379,7 @@ func (m Model) renderSubMenu() string {
 	lines = append(lines, "  esc: cancel")
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#E8832A")).
+		BorderForeground(lipgloss.Color("#836FFF")).
 		Padding(0, 1)
 	return style.Render(strings.Join(lines, "\n"))
 }
