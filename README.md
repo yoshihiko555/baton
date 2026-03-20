@@ -1,18 +1,36 @@
 # baton
 
-Claude Code のセッション状態をリアルタイム監視する Go アプリケーション。TUI ダッシュボードと WezTerm ステータスバーで確認できます。
+[日本語](docs/README.ja.md)
+
+AI coding session monitor for tmux. Track Claude Code, Codex, and Gemini sessions in real-time with a TUI dashboard.
+
+![baton TUI](docs/assets/preview.png)
+
+## Overview
+
+baton discovers AI coding sessions running in tmux panes and displays their status in a grouped dashboard. It works as a **pane indexer + status tracker + switcher** — it doesn't launch sessions, it finds and manages them.
+
+Key design decisions:
+
+- **Pane-centric**: Primary key is `TMUX_PANE`, not tmux session name. Multiple AI sessions in the same tmux session are tracked individually.
+- **Non-intrusive**: Sessions are started manually; baton discovers them via `ps` + JSONL log parsing.
+- **Hook-free status**: State is derived from JSONL logs, child process detection, and screen scraping — no Claude Code hooks required.
 
 ## Features
 
-- Claude Code の JSONL ログをリアルタイム監視（fsnotify）
-- プロジェクト・セッション単位の状態集約（idle / thinking / tool_use / error）
-- bubbletea ベースの TUI ダッシュボード（左右ペイン + ステータスバー）
-- ヘッドレスモード（`/tmp/baton-status.json` への JSON 出力）
-- WezTerm ステータスバー連携（Lua プラグイン）
+- Real-time status monitoring: `Thinking` / `ToolUse` / `Waiting` / `Idle` / `Error`
+- State-grouped session list with terminal preview pane
+- Pane jump: select a session and switch to its tmux pane
+- Multi-tool support: Claude Code, Codex CLI, Gemini CLI
+- Approval prompt detection via `tmux capture-pane` screen scraping
+- Codex idle/working detection via child process inspection
+- Status bar JSON export for tmux status line integration
+- Headless mode for background monitoring
 
 ## Requirements
 
 - Go 1.22+
+- tmux (default terminal backend)
 
 ## Install
 
@@ -20,120 +38,160 @@ Claude Code のセッション状態をリアルタイム監視する Go アプ�
 go install github.com/yoshihiko555/baton@latest
 ```
 
-または手動ビルド:
+Or build from source:
 
 ```bash
 git clone https://github.com/yoshihiko555/baton.git
 cd baton
 go build -o baton .
+
+# macOS: codesign is required after copying the binary
+cp baton ~/.local/bin/baton && codesign -f -s - ~/.local/bin/baton
 ```
 
 ## Usage
 
 ```bash
-# TUI ダッシュボード起動
-./baton
+# TUI dashboard (stays open after pane jump)
+baton
 
-# ヘッドレスモード（JSON 出力のみ、バックグラウンド実行向け）
-./baton --no-tui
+# TUI dashboard (exit after pane jump, useful for tmux popup)
+baton --exit
 
-# ワンショット（1回だけ状態を出力して終了）
-./baton --once
+# Headless mode (JSON export only, for background monitoring)
+baton --no-tui
 
-# 設定ファイルを指定
-./baton --config ~/.config/baton/config.yaml
+# One-shot (scan once, write status JSON, exit)
+baton --once
 
-# バージョン表示
-./baton --version
+# Specify config file
+baton --config ~/.config/baton/config.yaml
+
+# Version
+baton --version
 ```
 
-### TUI キー操作
+### tmux popup integration
 
-| キー | 動作 |
-|------|------|
-| `Tab` | 左右ペインの切り替え |
-| `q` / `Ctrl+C` | 終了 |
+```bash
+# Add to tmux.conf for quick access
+bind b display-popup -E -w 80% -h 80% "baton --exit"
+
+# Or without --exit to keep browsing after jump
+bind b display-popup -E -w 80% -h 80% "baton"
+```
+
+### TUI keybindings
+
+| Key | Action |
+|-----|--------|
+| `j` / `Down` | Move cursor down |
+| `k` / `Up` | Move cursor up |
+| `Enter` | Jump to selected pane |
+| `Tab` | Switch focus between session list and preview |
+| `Esc` | Close submenu (for ambiguous sessions) |
+| `q` / `Ctrl+C` | Quit |
+
+### State groups
+
+Sessions are grouped by status in the following order:
+
+| Group | Icon | Description |
+|-------|------|-------------|
+| WAITING | `!` | Approval prompt detected, needs user action |
+| ERROR | `x` | Error state |
+| WORKING | `*` | Thinking or executing tools |
+| IDLE | `~` | Waiting for user input |
 
 ## Configuration
 
-設定ファイル（オプション）: `~/.config/baton/config.yaml`
+Optional config file: `~/.config/baton/config.yaml`
 
 ```yaml
-# 監視対象ディレクトリ（デフォルト: Claude Code のセッションディレクトリ）
-watch_path: ""
+# Scan interval (default: 2s)
+scan_interval: "2s"
 
-# ステータス JSON の出力先
+# Claude Code projects directory
+claude_projects_dir: "~/.claude/projects"
+
+# Status JSON output path
 status_output_path: "/tmp/baton-status.json"
 
-# ヘッドレスモードの更新間隔
-refresh_interval: "1s"
+# Terminal backend: "tmux" (default) or "wezterm" (legacy)
+terminal: "tmux"
 
-# 使用するターミナル（現在 wezterm のみ対応）
-terminal: "wezterm"
+# Status bar format (Go template)
+statusbar:
+  format: "{{.Active}} active / {{.TotalSessions}} total{{if .Waiting}} | {{.Waiting}} waiting{{end}}"
+  tool_icons:
+    claude: ""
+    codex: ""
+    gemini: ""
+    default: "●"
 ```
 
-## WezTerm Integration
+## How it works
 
-WezTerm のステータスバーに baton の監視情報を表示できます。
-
-### セットアップ
-
-1. `wezterm/baton-status.lua` を WezTerm の設定ディレクトリにコピーまたはシンボリックリンク:
-
-```bash
-ln -s /path/to/baton/wezterm/baton-status.lua ~/.config/wezterm/baton-status.lua
+```
+Ticker (2s)
+  └── Scanner.Scan()
+        ├── tmux list-panes -a          # discover all panes
+        ├── ps + pgrep                  # find AI processes per pane
+        └── JSONL log parsing           # determine session state
+  └── StateManager.UpdateFromScan()
+        ├── ResolveMultiple()           # match processes to JSONL logs
+        └── RefineToolUseState()        # screen scrape for approval prompts
+  └── ScanResultMsg → TUI Update()
+  └── Exporter.Write()                  # /tmp/baton-status.json
 ```
 
-2. WezTerm の設定で読み込み:
+### State detection by tool
 
-```lua
--- wezterm.lua または config/statusbar.lua
-local baton_status = require 'baton-status'
-baton_status.setup({
-  path = '/tmp/baton-status.json', -- 省略可
-  interval = 5,                     -- 省略可（秒）
-})
-```
-
-3. baton をヘッドレスモードで起動:
-
-```bash
-./baton --no-tui &
-```
+| Tool | Working | Idle | Waiting |
+|------|---------|------|---------|
+| Claude Code | JSONL `assistant` entries | JSONL `end_turn` | Screen: approval prompt patterns |
+| Codex CLI | `pgrep -P`: child process exists | No child processes | Screen: approval prompt patterns |
+| Gemini CLI | Process running | — | — |
 
 ## Project Structure
 
 ```
 .
-├── main.go                    # エントリポイント
+├── main.go                          # Entry point (--no-tui / --once / --exit / --config)
 ├── internal/
 │   ├── core/
-│   │   ├── model.go           # ドメイン型定義
-│   │   ├── parser.go          # JSONL パーサー
-│   │   ├── watcher.go         # ファイルウォッチャー
-│   │   ├── state.go           # 状態集約マネージャー
-│   │   └── exporter.go        # JSON エクスポーター
+│   │   ├── model.go                 # Domain types (SessionState, Session, Project)
+│   │   ├── parser.go                # JSONL parser + IncrementalReader
+│   │   ├── process.go               # Process detection (ps/pgrep)
+│   │   ├── scanner.go               # DefaultScanner (pane scan + CurrentCommand filter)
+│   │   ├── watcher.go               # fsnotify file watcher + debounce
+│   │   ├── state.go                 # State aggregation manager
+│   │   └── exporter.go              # Atomic JSON export
 │   ├── terminal/
-│   │   ├── terminal.go        # Terminal インターフェース
-│   │   └── wezterm.go         # WezTerm 実装
+│   │   ├── terminal.go              # Terminal interface
+│   │   ├── tmux.go                  # tmux implementation (default)
+│   │   └── wezterm.go               # WezTerm implementation (legacy)
 │   ├── config/
-│   │   └── config.go          # 設定読み込み
+│   │   └── config.go                # YAML config loader
 │   └── tui/
-│       ├── model.go           # bubbletea Model
-│       ├── update.go          # イベントハンドリング
-│       └── view.go            # 描画ロジック
+│       ├── model.go                 # bubbletea Model + Init
+│       ├── update.go                # Key input, event handling, pane jump
+│       └── view.go                  # Session list + preview pane rendering
 └── wezterm/
-    └── baton-status.lua       # WezTerm プラグイン
+    └── baton-status.lua             # WezTerm status bar plugin (legacy)
 ```
 
 ## Development
 
 ```bash
-# テスト
+# Run tests
 go test ./... -v
 
-# 静的解析
+# Static analysis
 go vet ./...
+
+# Build and install locally (macOS)
+go build -o baton . && cp baton ~/.local/bin/baton && codesign -f -s - ~/.local/bin/baton
 ```
 
 ## License
