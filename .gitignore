@@ -36,15 +36,6 @@ baton
 /tmp/
 *.log
 
-# calude
-.claude/docs/
-.claude/logs/
-.claude/state/
-.claude/checkpoints/
-.claude/context/
-.claude/Plans.md
-.claude/Plans.archive.md
-
 # Local config overrides
 .claude/config/**/*.local.yaml
 .claude/config/**/*.local.json
@@ -62,3 +53,15 @@ baton
 docs/adr/
 docs/roadmap.md
 .claude/.mcp-proxy.pid
+
+# >>> AI Orchestra (.claude) >>>
+.claude/docs/
+.claude/logs/
+.claude/state/
+.claude/checkpoints/
+.claude/context/
+.claude/.facet-packages-hash
+.claude/.facet-manifest.json
+.claude/Plans.md
+.claude/Plans.archive.md
+# <<< AI Orchestra (.claude) <<<
