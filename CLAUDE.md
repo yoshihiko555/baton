@@ -58,7 +58,7 @@ go vet ./...
 │   ├── core/
 │   │   ├── model.go                 # ドメイン型（SessionState, Session, Project, StatusOutput）
 │   │   ├── parser.go                # JSONL パーサー + IncrementalReader
-│   │   ├── process.go               # プロセス検出（ps/pgrep ベース）
+│   │   ├── process.go               # プロセス検出（ps/pgrep ベース、ARGS フォールバック + 親子重複排除）
 │   │   ├── scanner.go               # DefaultScanner（ペイン走査 + CurrentCommand フィルタ）
 │   │   ├── watcher.go               # fsnotify ファイルウォッチャー + デバウンス
 │   │   ├── state.go                 # 状態集約マネージャー（ResolveMultiple 方式）
@@ -98,8 +98,9 @@ go vet ./...
 - 同一 CWD の複数セッション: ResolveMultiple 方式で ModTime 上位 N 件から状態分布を取得
 - slug 生成: CWD の "/" と "." を "-" に変換（Claude Code のディレクトリ命名規則に準拠）
 - Pane.ID は string 型（tmux: "%5" 形式、WezTerm: "42" 形式）
-- Scanner 最適化: tmux の `CurrentCommand` で AI ペインのみ `ps` 実行（不要な呼び出しを削減）
+- Scanner 最適化: tmux の `CurrentCommand` で AI ペインのみ `ps` 実行（不要な呼び出しを削減）。`node` も通過させる（Gemini 検出用）
 - Codex 状態検出: `pgrep -P` で子プロセス有無を検査（子プロセスあり → Thinking、なし → Idle）
+- Gemini 状態検出: COMM が `node` のため ARGS basename 完全一致でフォールバック検出。子プロセス検査は不可（MCP サーバーのみ）。`capture-pane` でステータスバー（`workspace ... sandbox`）を検出して Idle、承認パターンで Waiting に精緻化
 - ペインジャンプ:
   - tmux: switch-client → select-window → select-pane（同期的、sleep 不要）
   - WezTerm: 同一 WS → `wezterm cli activate-pane`、別 WS → トリガーファイル経由
