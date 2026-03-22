@@ -18,7 +18,7 @@ import (
 	"github.com/yoshihiko555/baton/internal/tui"
 )
 
-const version = "0.2.0"
+var version = "0.1.0"
 
 func main() {
 	if err := run(); err != nil {

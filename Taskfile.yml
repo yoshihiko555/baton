@@ -7,6 +7,11 @@ vars:
   BINARY: baton
   LOCAL_BIN_DIR: "{{.HOME}}/.local/bin"
 
+includes:
+  shared:
+    taskfile: /Users/yoshihiko/ghq/github.com/yoshihiko555/dotfiles/taskfiles/release.yml
+    dir: .
+
 tasks:
   default:
     desc: 利用可能なタスク一覧を表示
@@ -41,3 +46,18 @@ tasks:
     deps: [build, install-local]
     cmds:
       - shasum "./{{.BINARY}}" "{{.LOCAL_BIN_DIR}}/{{.BINARY}}"
+
+  release:
+    desc: 共通 release.yml を使ってリリースを作成（VERSION=vX.Y.Z または BUMP=major|minor|patch）
+    cmds:
+      - task shared:release VERSION="{{.VERSION}}" BUMP="{{.BUMP}}" MAIN_BRANCH="{{.MAIN_BRANCH}}"
+
+  release:status:
+    desc: 共通 release.yml を使ってリリース状態を表示
+    cmds:
+      - task shared:release:status MAIN_BRANCH="{{.MAIN_BRANCH}}"
+
+  release:list:
+    desc: 共通 release.yml を使って過去のリリース一覧を表示
+    cmds:
+      - task shared:release:list

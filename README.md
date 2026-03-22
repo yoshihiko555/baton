@@ -38,6 +38,14 @@ Key design decisions:
 go install github.com/yoshihiko555/baton@latest
 ```
 
+Install a fixed release version:
+
+```bash
+go install github.com/yoshihiko555/baton@v0.1.0
+```
+
+Or download prebuilt binaries from GitHub Releases (`baton_<tag>_<os>_<arch>.tar.gz` / `.zip`).
+
 Or build from source:
 
 ```bash
