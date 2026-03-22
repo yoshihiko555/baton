@@ -29,7 +29,7 @@ Key design decisions:
 
 ## Requirements
 
-- Go 1.22+
+- Go 1.25.5+ (as declared in `go.mod`)
 - tmux (default terminal backend)
 
 ## Install
@@ -45,6 +45,8 @@ go install github.com/yoshihiko555/baton@v0.1.0
 ```
 
 Or download prebuilt binaries from GitHub Releases (`baton_<tag>_<os>_<arch>.tar.gz` / `.zip`).
+
+If `baton` is not found after installation, ensure your Go bin directory is in `PATH`.
 
 Or build from source:
 
