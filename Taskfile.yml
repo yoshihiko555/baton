@@ -1,0 +1,43 @@
+version: "3"
+
+env:
+  GOCACHE: /tmp/go-build
+
+vars:
+  BINARY: baton
+  LOCAL_BIN_DIR: "{{.HOME}}/.local/bin"
+
+tasks:
+  default:
+    desc: 利用可能なタスク一覧を表示
+    cmds:
+      - task --list
+
+  build:
+    desc: baton バイナリをビルド
+    cmds:
+      - go build -o "{{.BINARY}}" .
+
+  test:
+    desc: テストを実行
+    cmds:
+      - go test ./... -v
+
+  install-local:
+    desc: ./baton を ~/.local/bin/baton に反映
+    deps: [build]
+    cmds:
+      - mkdir -p "{{.LOCAL_BIN_DIR}}"
+      - cp "./{{.BINARY}}" "{{.LOCAL_BIN_DIR}}/{{.BINARY}}"
+      - chmod +x "{{.LOCAL_BIN_DIR}}/{{.BINARY}}"
+
+  verify-local:
+    desc: ローカル配置済み baton のバージョン確認
+    cmds:
+      - "{{.LOCAL_BIN_DIR}}/{{.BINARY}} --version"
+
+  sync-local:
+    desc: build + install-local + ハッシュ比較
+    deps: [build, install-local]
+    cmds:
+      - shasum "./{{.BINARY}}" "{{.LOCAL_BIN_DIR}}/{{.BINARY}}"
