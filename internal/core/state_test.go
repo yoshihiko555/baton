@@ -740,3 +740,87 @@ func TestRefineGeminiWaitingPriority(t *testing.T) {
 		t.Errorf("state = %v, want Waiting (approval prompt takes priority over idle status bar)", got)
 	}
 }
+
+func TestRefineClaudeMultiSessionReassignsWaitingToPromptPane(t *testing.T) {
+	// 同一 CWD の Claude 2 セッションで Waiting が別ペインに割り当たっていても、
+	// 承認プロンプトがあるペインへ Waiting が再配置されることを確認する。
+	manager := NewStateManager(nil)
+	manager.projects = []Project{
+		{
+			Name: "proj",
+			Path: "/project",
+			Sessions: []*Session{
+				{PID: 100, Tool: ToolClaude, State: Waiting, PaneID: "%1", WorkingDir: "/project"},
+				{PID: 200, Tool: ToolClaude, State: Idle, PaneID: "%2", WorkingDir: "/project"},
+			},
+		},
+	}
+	manager.summary = calcSummary(manager.projects)
+
+	term := &paneTextTerminal{
+		texts: map[string]string{
+			"%1": "ready\n",
+			"%2": "Allow tool call? (y/n)\n",
+		},
+	}
+
+	manager.RefineToolUseState(term)
+	projects := manager.Projects()
+	if len(projects) != 1 || len(projects[0].Sessions) != 2 {
+		t.Fatalf("unexpected projects/sessions: %v", projects)
+	}
+
+	states := map[string]SessionState{}
+	for _, sess := range projects[0].Sessions {
+		states[sess.PaneID] = sess.State
+	}
+
+	if got := states["%1"]; got != Idle {
+		t.Errorf("pane %%1 state = %v, want Idle", got)
+	}
+	if got := states["%2"]; got != Waiting {
+		t.Errorf("pane %%2 state = %v, want Waiting", got)
+	}
+}
+
+func TestRefineClaudeMultiSessionPromotesPromptPaneToWaiting(t *testing.T) {
+	// 同一 CWD の Claude で Waiting が未割り当てでも、
+	// 承認プロンプトのあるペインは Waiting に昇格することを確認する。
+	manager := NewStateManager(nil)
+	manager.projects = []Project{
+		{
+			Name: "proj",
+			Path: "/project",
+			Sessions: []*Session{
+				{PID: 100, Tool: ToolClaude, State: Thinking, PaneID: "%1", WorkingDir: "/project"},
+				{PID: 200, Tool: ToolClaude, State: Idle, PaneID: "%2", WorkingDir: "/project"},
+			},
+		},
+	}
+	manager.summary = calcSummary(manager.projects)
+
+	term := &paneTextTerminal{
+		texts: map[string]string{
+			"%1": "thinking...\n",
+			"%2": "Do you want to continue? [y/N]\n",
+		},
+	}
+
+	manager.RefineToolUseState(term)
+	projects := manager.Projects()
+	if len(projects) != 1 || len(projects[0].Sessions) != 2 {
+		t.Fatalf("unexpected projects/sessions: %v", projects)
+	}
+
+	states := map[string]SessionState{}
+	for _, sess := range projects[0].Sessions {
+		states[sess.PaneID] = sess.State
+	}
+
+	if got := states["%1"]; got != Thinking {
+		t.Errorf("pane %%1 state = %v, want Thinking", got)
+	}
+	if got := states["%2"]; got != Waiting {
+		t.Errorf("pane %%2 state = %v, want Waiting", got)
+	}
+}

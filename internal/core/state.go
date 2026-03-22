@@ -48,7 +48,7 @@ type StateManager struct {
 	summary        Summary         // 最新集計キャッシュ
 	panes          []terminal.Pane // 最新ペイン一覧（Ambiguous セッション解決用）
 	prevPIDSet     map[int]bool    // 前回スキャンの PID セット（差分検出用）
-	mu             sync.RWMutex   // 読み書き保護
+	mu             sync.RWMutex    // 読み書き保護
 }
 
 // NewStateManager は StateManager を初期化して返す。
@@ -324,6 +324,7 @@ var codexApprovalPattern = regexp.MustCompile(`(?m)^\s*[›>]?\s*1\.\s+Yes.*\n\s
 var geminiIdlePattern = regexp.MustCompile(`(?m)workspace\s+\(.+\)\s+.*sandbox`)
 
 // RefineToolUseState はペインテキストから状態を精緻化する。
+// - Claude (同一 CWD に複数セッション): 承認プロンプトを持つペインへ Waiting を再配置
 // - Claude ToolUse → Waiting（承認待ち検出）
 // - Codex Idle → Waiting（承認待ち検出）
 // - Gemini Thinking → Waiting（承認待ち）または Idle（入力プロンプト検出）
@@ -334,6 +335,27 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 	if term == nil {
 		return
 	}
+
+	// 同一 CWD の Claude 複数セッションで、Waiting が別ペインに紐づくケースを補正する。
+	paneTextCache := make(map[string]string)
+	paneTextError := make(map[string]bool)
+	getPaneText := func(paneID string) (string, bool) {
+		if text, ok := paneTextCache[paneID]; ok {
+			return text, true
+		}
+		if paneTextError[paneID] {
+			return "", false
+		}
+		text, err := term.GetPaneText(paneID)
+		if err != nil {
+			paneTextError[paneID] = true
+			return "", false
+		}
+		paneTextCache[paneID] = text
+		return text, true
+	}
+
+	realignClaudeWaitingStates(s.projects, getPaneText)
 
 	for i := range s.projects {
 		for j, sess := range s.projects[i].Sessions {
@@ -351,8 +373,8 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 			default:
 				continue
 			}
-			text, err := term.GetPaneText(sess.PaneID)
-			if err != nil {
+			text, ok := getPaneText(sess.PaneID)
+			if !ok {
 				continue
 			}
 
@@ -381,6 +403,83 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 
 	// 状態が変更された可能性があるので Summary を再計算する
 	s.summary = calcSummary(s.projects)
+}
+
+// realignClaudeWaitingStates は、同一プロジェクト内で同一 CWD の Claude セッション群に対し、
+// 承認プロンプトを検出したペインへ Waiting 状態を再配置する。
+//
+// 背景:
+// Claude は CWD 単位で JSONL を解決しているため、同一 CWD に複数セッションがある場合、
+// Waiting/Idle/Thinking の割り当てがペインとずれることがある。
+//
+// ルール:
+// - 同一 CWD で 2 セッション以上の Claude のみ対象
+// - 承認プロンプトを検出したセッションを Waiting に昇格
+// - 既存 Waiting が別セッションにある場合は状態をスワップして整合を取る
+func realignClaudeWaitingStates(projects []Project, getPaneText func(string) (string, bool)) {
+	for i := range projects {
+		groups := make(map[string][]*Session)
+		for j := range projects[i].Sessions {
+			sess := projects[i].Sessions[j]
+			if sess == nil || sess.Tool != ToolClaude || sess.PaneID == "" {
+				continue
+			}
+			key := strings.TrimSpace(sess.WorkingDir)
+			if key == "" {
+				// CWD 不明時はグルーピングせずスキップ（同一キー衝突を避ける）。
+				continue
+			}
+			groups[key] = append(groups[key], sess)
+		}
+
+		for _, sessions := range groups {
+			if len(sessions) < 2 {
+				continue
+			}
+
+			detectedWaiting := make(map[*Session]bool, len(sessions))
+			for _, sess := range sessions {
+				text, ok := getPaneText(sess.PaneID)
+				if !ok {
+					continue
+				}
+				if containsApprovalPrompt(text) {
+					detectedWaiting[sess] = true
+				}
+			}
+			if len(detectedWaiting) == 0 {
+				continue
+			}
+
+			var promote []*Session // 承認プロンプトあり、かつ Waiting ではない
+			var demote []*Session  // 承認プロンプトなし、かつ Waiting
+
+			for _, sess := range sessions {
+				wantWaiting := detectedWaiting[sess]
+				if wantWaiting && sess.State != Waiting {
+					promote = append(promote, sess)
+				}
+				if !wantWaiting && sess.State == Waiting {
+					demote = append(demote, sess)
+				}
+			}
+
+			// 1対1で入れ替え、昇格元の状態を降格先へ移す。
+			swapCount := min(len(promote), len(demote))
+			for k := 0; k < swapCount; k++ {
+				p := promote[k]
+				d := demote[k]
+				previous := p.State
+				p.State = Waiting
+				d.State = previous
+			}
+
+			// 余剰の昇格対象は Waiting にする（新規に承認待ちを検出したケース）。
+			for k := swapCount; k < len(promote); k++ {
+				promote[k].State = Waiting
+			}
+		}
+	}
 }
 
 func containsApprovalPrompt(text string) bool {

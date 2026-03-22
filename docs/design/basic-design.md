@@ -516,7 +516,10 @@ ResolveState(cwd, claudeProcesses []DetectedProcess):
 
 同一 CWD で複数の Claude セッションが動作する場合、JSONL とプロセスの厳密な 1:1 紐付けは現時点では不可能である（Claude Code が PID を JSONL に記録しないため）。
 
-**問題の本質**: TTY→PID（どのペインにどのプロセスがいるか）は確実に特定できるが、PID→JSONL（どのプロセスがどの JSONL に書いているか）は特定できない。このため、JSONL から判定した状態（Waiting 等）を特定のペインに紐付けることができない。
+**問題の本質**: TTY→PID（どのペインにどのプロセスがいるか）は確実に特定できるが、PID→JSONL（どのプロセスがどの JSONL に書いているか）は特定できない。
+
+ただし実装では、`RefineToolUseState` で `tmux capture-pane` の画面テキストを用いた補正を行う。  
+同一 CWD の複数 Claude セッションに対して承認プロンプトを検出したペインを `Waiting` に再配置し、`Waiting` の取り違えを軽減する（ベストエフォート）。
 
 **対処方針: 2 段階のモデル**
 
@@ -533,7 +536,7 @@ ResolveState(cwd, claudeProcesses []DetectedProcess):
 
 | 項目 | 単一 Claude | 複数 Claude（同一 CWD） |
 |------|-----------|----------------------|
-| 状態表示 | ペインごとに正確 | プロジェクト全体で正確（ペイン対応は不確定） |
+| 状態表示 | ペインごとに正確 | `Waiting` はペイン補正で高精度、他状態はペイン対応が入れ替わる可能性あり |
 | 補助情報 | ペインごとに正確 | ペイン対応が入れ替わる可能性あり |
 | ペインジャンプ | 正確 | **プロジェクト内の全 Claude ペインを候補として提示**（後述） |
 | 集計（Active/Waiting） | 正確 | ベストエフォート（Waiting 中の JSONL が mtime 停滞で候補落ちする可能性あり） |
