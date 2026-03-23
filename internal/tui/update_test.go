@@ -1024,8 +1024,8 @@ func TestSimpleApproveOnWaitingClaude(t *testing.T) {
 	if _, ok := result.(ApprovalResultMsg); !ok {
 		t.Fatalf("expected ApprovalResultMsg, got %T", result)
 	}
-	if len(term.sentKeys) != 1 || term.sentKeys[0] != "y" {
-		t.Errorf("sentKeys = %v, want [y]", term.sentKeys)
+	if len(term.sentKeys) != 1 || term.sentKeys[0] != "Enter" {
+		t.Errorf("sentKeys = %v, want [Enter]", term.sentKeys)
 	}
 }
 
@@ -1044,8 +1044,8 @@ func TestSimpleDenyOnWaitingClaude(t *testing.T) {
 	if _, ok := result.(ApprovalResultMsg); !ok {
 		t.Fatalf("expected ApprovalResultMsg, got %T", result)
 	}
-	if len(term.sentKeys) != 1 || term.sentKeys[0] != "n" {
-		t.Errorf("sentKeys = %v, want [n]", term.sentKeys)
+	if len(term.sentKeys) != 3 || term.sentKeys[0] != "Down" || term.sentKeys[1] != "Down" || term.sentKeys[2] != "Enter" {
+		t.Errorf("sentKeys = %v, want [Down Down Enter]", term.sentKeys)
 	}
 }
 
@@ -1139,12 +1139,12 @@ func TestPromptApproveInputMode(t *testing.T) {
 		t.Fatalf("expected ApprovalResultMsg, got %T", result)
 	}
 
-	// Tab + テキスト + Enter が送信されるはず
+	// Enter（承認）+ テキスト + Enter が送信されるはず
 	if len(term.sentKeys) == 0 {
 		t.Fatal("expected sentKeys to be non-empty")
 	}
-	if term.sentKeys[0] != "Tab" {
-		t.Errorf("first sentKey = %q, want Tab", term.sentKeys[0])
+	if term.sentKeys[0] != "Enter" {
+		t.Errorf("first sentKey = %q, want Enter", term.sentKeys[0])
 	}
 }
 
@@ -1381,6 +1381,228 @@ func TestPromptInputOnNonWaitingShowsWarning(t *testing.T) {
 	}
 	if len(term.sentKeys) > 0 {
 		t.Errorf("sentKeys = %v, want no keys sent for non-Waiting session", term.sentKeys)
+	}
+}
+
+// --- failingMockTerminal: first SendKeys call returns an error ---
+
+type failingMockTerminal struct {
+	calls    int
+	sentKeys []string
+}
+
+func (f *failingMockTerminal) ListPanes() ([]terminal.Pane, error) { return nil, nil }
+func (f *failingMockTerminal) FocusPane(paneID string) error        { return nil }
+func (f *failingMockTerminal) GetPaneText(paneID string) (string, error) {
+	return "", nil
+}
+func (f *failingMockTerminal) IsAvailable() bool { return true }
+func (f *failingMockTerminal) Name() string       { return "failing-mock" }
+func (f *failingMockTerminal) SendKeys(paneID string, keys ...string) error {
+	f.calls++
+	f.sentKeys = append(f.sentKeys, keys...)
+	if f.calls == 1 {
+		return fmt.Errorf("terminal unavailable")
+	}
+	return nil
+}
+
+// TestPromptApproveFullKeySequence verifies A -> type "fix tests" -> Enter
+// sends ["Enter", "fix tests", "Enter"] to the terminal.
+func TestPromptApproveFullKeySequence(t *testing.T) {
+	m, term := waitingClaudeModel()
+
+	// Enter input mode with A
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	m = updated.(Model)
+
+	if m.inputMode != inputApprove {
+		t.Fatalf("inputMode = %d, want inputApprove", m.inputMode)
+	}
+
+	// Type "fix tests"
+	for _, r := range "fix tests" {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(Model)
+	}
+
+	// Confirm with Enter
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if m.inputMode != inputNone {
+		t.Errorf("inputMode = %d, want inputNone after Enter", m.inputMode)
+	}
+	if cmd == nil {
+		t.Fatal("expected cmd after Enter in inputApprove mode")
+	}
+
+	result := cmd()
+	if _, ok := result.(ApprovalResultMsg); !ok {
+		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+
+	// Expect ["Enter", "fix tests", "Enter"]
+	want := []string{"Enter", "fix tests", "Enter"}
+	if len(term.sentKeys) != len(want) {
+		t.Fatalf("sentKeys = %v, want %v", term.sentKeys, want)
+	}
+	for i, k := range want {
+		if term.sentKeys[i] != k {
+			t.Errorf("sentKeys[%d] = %q, want %q", i, term.sentKeys[i], k)
+		}
+	}
+}
+
+// TestPromptDenyFullKeySequence verifies D -> type "bad idea" -> Enter
+// sends ["Escape", "bad idea", "Enter"] to the terminal.
+func TestPromptDenyFullKeySequence(t *testing.T) {
+	m, term := waitingClaudeModel()
+
+	// Enter input mode with D
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	m = updated.(Model)
+
+	if m.inputMode != inputDeny {
+		t.Fatalf("inputMode = %d, want inputDeny", m.inputMode)
+	}
+
+	// Type "bad idea"
+	for _, r := range "bad idea" {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(Model)
+	}
+
+	// Confirm with Enter
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if m.inputMode != inputNone {
+		t.Errorf("inputMode = %d, want inputNone after Enter", m.inputMode)
+	}
+	if cmd == nil {
+		t.Fatal("expected cmd after Enter in inputDeny mode")
+	}
+
+	result := cmd()
+	if _, ok := result.(ApprovalResultMsg); !ok {
+		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+
+	// Expect ["Escape", "bad idea", "Enter"]
+	want := []string{"Escape", "bad idea", "Enter"}
+	if len(term.sentKeys) != len(want) {
+		t.Fatalf("sentKeys = %v, want %v", term.sentKeys, want)
+	}
+	for i, k := range want {
+		if term.sentKeys[i] != k {
+			t.Errorf("sentKeys[%d] = %q, want %q", i, term.sentKeys[i], k)
+		}
+	}
+}
+
+// TestPromptApproveEmptyText verifies A -> Enter (no text) sends only ["Enter"].
+func TestPromptApproveEmptyText(t *testing.T) {
+	m, term := waitingClaudeModel()
+
+	// Enter input mode with A
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	m = updated.(Model)
+
+	// Confirm immediately (no text typed)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd == nil {
+		t.Fatal("expected cmd after Enter in inputApprove mode")
+	}
+
+	result := cmd()
+	if _, ok := result.(ApprovalResultMsg); !ok {
+		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+
+	// Expect only ["Enter"] — no second SendKeys with empty text
+	if len(term.sentKeys) != 1 {
+		t.Fatalf("sentKeys = %v, want [Enter] only", term.sentKeys)
+	}
+	if term.sentKeys[0] != "Enter" {
+		t.Errorf("sentKeys[0] = %q, want Enter", term.sentKeys[0])
+	}
+}
+
+// TestPromptDenyEmptyText verifies D -> Enter (no text) sends only ["Escape"].
+func TestPromptDenyEmptyText(t *testing.T) {
+	m, term := waitingClaudeModel()
+
+	// Enter input mode with D
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	m = updated.(Model)
+
+	// Confirm immediately (no text typed)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd == nil {
+		t.Fatal("expected cmd after Enter in inputDeny mode")
+	}
+
+	result := cmd()
+	if _, ok := result.(ApprovalResultMsg); !ok {
+		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+
+	// Expect only ["Escape"] — no second SendKeys with empty text
+	if len(term.sentKeys) != 1 {
+		t.Fatalf("sentKeys = %v, want [Escape] only", term.sentKeys)
+	}
+	if term.sentKeys[0] != "Escape" {
+		t.Errorf("sentKeys[0] = %q, want Escape", term.sentKeys[0])
+	}
+}
+
+// TestPromptApproveFirstSendKeysError verifies that when the first SendKeys fails,
+// ApprovalResultMsg.Err is non-nil and no further keys are sent.
+func TestPromptApproveFirstSendKeysError(t *testing.T) {
+	failTerm := &failingMockTerminal{}
+
+	reader := &mockStateReader{}
+	updater := &mockStateUpdater{}
+	scanner := &mockScanner{}
+	cfg := config.Default()
+
+	m := NewModel(scanner, updater, reader, failTerm, cfg, false)
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Waiting, Tool: core.ToolClaude, PaneID: "%1"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+	m.activePane = 1
+
+	// Simple approve (a key) — triggers handleSimpleApprove which calls SendKeys once
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	_ = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected cmd for approve")
+	}
+
+	result := cmd()
+	msg, ok := result.(ApprovalResultMsg)
+	if !ok {
+		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+
+	if msg.Err == nil {
+		t.Error("expected Err to be non-nil when first SendKeys fails")
+	}
+
+	// Only the first (failing) SendKeys call should have been made
+	if len(failTerm.sentKeys) != 1 {
+		t.Errorf("sentKeys = %v (len %d), want exactly 1 key from the failed call", failTerm.sentKeys, len(failTerm.sentKeys))
 	}
 }
 

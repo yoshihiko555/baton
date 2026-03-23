@@ -261,8 +261,8 @@ func (m Model) updateSubMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleSimpleApprove は単純承認（y）を送信する。
-// Claude Code の承認プロンプトは y 単押しで即承認されるため Enter は不要。
+// handleSimpleApprove は単純承認（Enter）を送信する。
+// Claude Code の承認プロンプトはリスト選択 UI で "Yes" がデフォルト選択済み。
 func (m Model) handleSimpleApprove() (tea.Model, tea.Cmd) {
 	if !m.canApprove() {
 		return m, nil
@@ -270,13 +270,13 @@ func (m Model) handleSimpleApprove() (tea.Model, tea.Cmd) {
 	paneID := m.selectedSession().session.PaneID
 	term := m.terminal
 	return m, func() tea.Msg {
-		err := term.SendKeys(paneID, "y")
+		err := term.SendKeys(paneID, "Enter")
 		return ApprovalResultMsg{Err: err, Label: "Approved"}
 	}
 }
 
-// handleSimpleDeny は単純拒否（n）を送信する。
-// Claude Code の承認プロンプトは n 単押しで即拒否されるため Enter は不要。
+// handleSimpleDeny は単純拒否（Down Down Enter）を送信する。
+// Claude Code の承認プロンプトで 3番目の "No" を選択して確定する。
 func (m Model) handleSimpleDeny() (tea.Model, tea.Cmd) {
 	if !m.canApprove() {
 		return m, nil
@@ -284,7 +284,7 @@ func (m Model) handleSimpleDeny() (tea.Model, tea.Cmd) {
 	paneID := m.selectedSession().session.PaneID
 	term := m.terminal
 	return m, func() tea.Msg {
-		err := term.SendKeys(paneID, "n")
+		err := term.SendKeys(paneID, "Down", "Down", "Enter")
 		return ApprovalResultMsg{Err: err, Label: "Denied"}
 	}
 }
@@ -335,21 +335,30 @@ func (m Model) updateTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		term := m.terminal
 
 		return m, func() tea.Msg {
-			var keys []string
 			var label string
+			var triggerKey string
 			if mode == inputApprove {
-				keys = append(keys, "Tab")
+				triggerKey = "Enter"
 				label = "Approved"
 			} else {
-				keys = append(keys, "Escape")
+				triggerKey = "Escape"
 				label = "Denied"
 			}
 			if text != "" {
-				keys = append(keys, text)
 				label += ": " + text
 			}
-			keys = append(keys, "Enter")
-			err := term.SendKeys(paneID, keys...)
+
+			// 承認/拒否を先に確定し、Claude Code がメインプロンプトに
+			// 戻るのを待ってからテキストを新しいメッセージとして送信する
+			err := term.SendKeys(paneID, triggerKey)
+			if err != nil {
+				return ApprovalResultMsg{Err: err, Label: label}
+			}
+			time.Sleep(1 * time.Second)
+
+			if text != "" {
+				err = term.SendKeys(paneID, text, "Enter")
+			}
 			return ApprovalResultMsg{Err: err, Label: label}
 		}
 	}
