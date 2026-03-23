@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,6 +38,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.flashMessage = msg.Label
 		}
+		return m, func() tea.Msg {
+			<-time.After(flashDuration)
+			return FlashClearMsg{}
+		}
+	case FlashClearMsg:
+		m.flashMessage = ""
 		return m, nil
 	case JumpDoneMsg:
 		if msg.Err != nil {
@@ -89,8 +96,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TickMsg:
 		return m, doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader, m.terminal)
 	case ScanResultMsg:
-		m.err = nil          // スキャン成功で前回エラーをクリア
-		m.flashMessage = ""  // フラッシュメッセージもクリア
+		m.err = nil // スキャン成功で前回エラーをクリア
 		m.latestProjects = msg.Projects
 		m.latestSummary = msg.Summary
 		m.latestPanes = msg.Panes
@@ -318,7 +324,10 @@ func (m Model) updateTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Waiting 状態でなければ送信せずフラッシュで通知
 		if sel.session.State != core.Waiting || sel.session.Tool != core.ToolClaude {
 			m.flashMessage = "Not in Waiting state - message not sent"
-			return m, nil
+			return m, func() tea.Msg {
+				<-time.After(flashDuration)
+				return FlashClearMsg{}
+			}
 		}
 		paneID := sel.session.PaneID
 		term := m.terminal

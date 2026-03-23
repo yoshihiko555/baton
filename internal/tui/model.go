@@ -30,6 +30,12 @@ type ApprovalResultMsg struct {
 	Label string // 操作の表示名（例: "Approved", "Denied: fix tests"）
 }
 
+// FlashClearMsg はフラッシュメッセージの消去タイマー発火時に送られる。
+type FlashClearMsg struct{}
+
+// flashDuration はフラッシュメッセージの表示時間。
+const flashDuration = 5 * time.Second
+
 // TickMsg は定期リフレッシュタイマー発火時に送られる。
 type TickMsg struct{}
 
