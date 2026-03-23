@@ -90,15 +90,33 @@ func (m Model) View() string {
 		inputBar = labelStyle.Render(label+": ") + m.textInput.View()
 	}
 
-	// 中身を組み立て
-	var inner string
-	if m.inputMode != inputNone {
-		inner = lipgloss.JoinVertical(lipgloss.Left, headerLine, "", panes, inputBar, statusBar)
-	} else if m.showSubMenu {
-		inner = lipgloss.JoinVertical(lipgloss.Left, headerLine, "", panes, m.renderSubMenu(), statusBar, actionBar)
-	} else {
-		inner = lipgloss.JoinVertical(lipgloss.Left, headerLine, "", panes, statusBar, actionBar)
+	// セッションフィルタ表示
+	var filterBar string
+	if m.filtering {
+		labelStyle := lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true)
+		filterBar = labelStyle.Render("Filter: ") + m.filterInput.View()
+	} else if strings.TrimSpace(m.filterQuery) != "" {
+		labelStyle := lipgloss.NewStyle().Foreground(m.theme.Brand).Bold(true)
+		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
+		filterBar = labelStyle.Render("Filter: ") + dimStyle.Render(m.filterQuery)
 	}
+
+	// 中身を組み立て
+	parts := []string{headerLine, "", panes}
+	if m.inputMode != inputNone {
+		parts = append(parts, inputBar)
+	}
+	if m.showSubMenu {
+		parts = append(parts, m.renderSubMenu())
+	}
+	if filterBar != "" {
+		parts = append(parts, filterBar)
+	}
+	parts = append(parts, statusBar)
+	if m.inputMode == inputNone {
+		parts = append(parts, actionBar)
+	}
+	inner := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	if m.flashMessage != "" {
 		flashStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#15F5BA")).Bold(true)
@@ -144,7 +162,6 @@ func (m Model) renderHeader(totalWidth int) string {
 	infoParts = append(infoParts, waitColor.Render(fmt.Sprintf("%d waiting", s.Waiting)))
 	infoParts = append(infoParts, dim.Render(fmt.Sprintf("%d idle", idle)))
 	right := strings.Join(infoParts, dim.Render("  "))
-
 
 	gap := max(0, totalWidth-lipgloss.Width(left)-lipgloss.Width(right))
 	return left + strings.Repeat(" ", gap) + right
@@ -355,6 +372,7 @@ func (m Model) renderActionBar(totalWidth int) string {
 		key.Render("j/k") + dim.Render(" move"),
 		key.Render("tab") + dim.Render(" pane"),
 		key.Render("enter") + dim.Render(" jump"),
+		key.Render("/") + dim.Render(" filter"),
 	}
 	if m.canApprove() {
 		actions = append(actions,
@@ -367,6 +385,9 @@ func (m Model) renderActionBar(totalWidth int) string {
 			key.Render("A")+dim.Render(" approve+msg"),
 			key.Render("D")+dim.Render(" deny+msg"),
 		)
+	}
+	if m.filterQuery != "" {
+		actions = append(actions, key.Render("esc")+dim.Render(" clear"))
 	}
 	actions = append(actions, key.Render("q")+dim.Render(" quit"))
 

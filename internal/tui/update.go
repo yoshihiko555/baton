@@ -17,14 +17,15 @@ var (
 	tabKey   = key.NewBinding(key.WithKeys("tab"))
 	enterKey = key.NewBinding(key.WithKeys("enter"))
 	escKey   = key.NewBinding(key.WithKeys("esc"))
+	slashKey = key.NewBinding(key.WithKeys("/"))
 
 	upKeys   = key.NewBinding(key.WithKeys("k", "up"))
 	downKeys = key.NewBinding(key.WithKeys("j", "down"))
 
-	approveKey     = key.NewBinding(key.WithKeys("a"))
-	denyKey        = key.NewBinding(key.WithKeys("d"))
-	promptApprove  = key.NewBinding(key.WithKeys("A"))
-	promptDeny     = key.NewBinding(key.WithKeys("D"))
+	approveKey    = key.NewBinding(key.WithKeys("a"))
+	denyKey       = key.NewBinding(key.WithKeys("d"))
+	promptApprove = key.NewBinding(key.WithKeys("A"))
+	promptDeny    = key.NewBinding(key.WithKeys("D"))
 )
 
 // approvalSendDelay は承認/拒否確定後に追加入力を送るまでの待機時間。
@@ -75,6 +76,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.inputMode != inputNone {
 			return m.updateTextInput(msg)
 		}
+		if m.filtering {
+			return m.updateFilterInput(msg)
+		}
 		if m.showSubMenu {
 			return m.updateSubMenu(msg)
 		}
@@ -83,6 +87,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case key.Matches(msg, tabKey):
 			m.activePane = 1 - m.activePane
+			return m, nil
+		case key.Matches(msg, slashKey):
+			return m.enterFilterMode()
+		case key.Matches(msg, escKey):
+			if m.filterQuery != "" {
+				return m, m.clearFilter()
+			}
 			return m, nil
 		case key.Matches(msg, enterKey):
 			return m.handleEnter()
@@ -194,7 +205,7 @@ func (m *Model) rebuildEntries() {
 		currentPID = sel.session.PID
 	}
 
-	m.entries = buildEntries(m.latestProjects)
+	m.entries = buildEntriesWithFilter(m.latestProjects, parseSessionFilter(m.filterQuery))
 
 	// カーソル復元: 同じ PID のエントリを探す
 	m.cursor = -1
@@ -217,6 +228,28 @@ func (m *Model) rebuildEntries() {
 	if m.cursor < 0 {
 		m.cursor = 0
 	}
+}
+
+func (m Model) enterFilterMode() (tea.Model, tea.Cmd) {
+	m.filtering = true
+	m.filterInput.SetValue(m.filterQuery)
+	m.filterInput.Focus()
+	return m, nil
+}
+
+func (m *Model) applyFilterQuery(query string) tea.Cmd {
+	m.filterQuery = query
+	m.rebuildEntries()
+	return m.maybeUpdatePreview()
+}
+
+func (m *Model) clearFilter() tea.Cmd {
+	m.filtering = false
+	m.filterQuery = ""
+	m.filterInput.Reset()
+	m.filterInput.Blur()
+	m.rebuildEntries()
+	return m.maybeUpdatePreview()
 }
 
 // maybeUpdatePreview は選択セッションが変わった場合にプレビューを更新する。
@@ -381,6 +414,29 @@ func (m Model) updateTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.textInput, cmd = m.textInput.Update(msg)
 	return m, cmd
+}
+
+// updateFilterInput はセッションフィルタ入力モード中のキー処理を行う。
+func (m Model) updateFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, escKey):
+		return m, m.clearFilter()
+	case key.Matches(msg, enterKey):
+		m.filtering = false
+		m.filterInput.Blur()
+		return m.handleEnter()
+	}
+
+	var inputCmd tea.Cmd
+	m.filterInput, inputCmd = m.filterInput.Update(msg)
+	filterCmd := m.applyFilterQuery(m.filterInput.Value())
+	if inputCmd != nil && filterCmd != nil {
+		return m, tea.Batch(inputCmd, filterCmd)
+	}
+	if inputCmd != nil {
+		return m, inputCmd
+	}
+	return m, filterCmd
 }
 
 // --- 以下は v1 互換のために残す型（テストが参照） ---
