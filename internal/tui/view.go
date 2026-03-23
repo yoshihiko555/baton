@@ -10,12 +10,6 @@ import (
 )
 
 var (
-	activeBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.ThickBorder()).
-				BorderForeground(lipgloss.Color("#836FFF")) // soft electric blue
-	inactiveBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#3D2A7A")) // muted midnight
 	statusBarStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#888888")).
 			Padding(0, 1)
@@ -23,30 +17,6 @@ var (
 			Foreground(lipgloss.Color("#888888")).
 			Padding(0, 1)
 )
-
-// グループヘッダーの色
-var groupHeaderColors = map[string]lipgloss.Color{
-	"WAITING": lipgloss.Color("#FF2DAA"), // hot pink
-	"ERROR":   lipgloss.Color("#FF4444"), // red (keep)
-	"WORKING": lipgloss.Color("#15F5BA"), // neon mint
-	"IDLE":    lipgloss.Color("#836FFF"), // soft electric blue
-}
-
-// セッション状態の色
-var stateColors = map[core.SessionState]lipgloss.Color{
-	core.Idle:     lipgloss.Color("#836FFF"),
-	core.Thinking: lipgloss.Color("#15F5BA"),
-	core.ToolUse:  lipgloss.Color("#15F5BA"),
-	core.Waiting:  lipgloss.Color("#FF2DAA"),
-	core.Error:    lipgloss.Color("#FF4444"),
-}
-
-// ツールタイプの色
-var toolColors = map[core.ToolType]lipgloss.Color{
-	core.ToolClaude: lipgloss.Color("#F0F3FF"),
-	core.ToolCodex:  lipgloss.Color("#15F5BA"),
-	core.ToolGemini: lipgloss.Color("#836FFF"),
-}
 
 // 外側マージン
 const outerPadH = 2 // 左右パディング
@@ -80,6 +50,13 @@ func (m Model) View() string {
 	leftWidth := max(20, innerWidth*2/5-2)
 	rightWidth := max(20, innerWidth-leftWidth-4)
 
+	activeBorderStyle := lipgloss.NewStyle().
+		Border(lipgloss.ThickBorder()).
+		BorderForeground(m.theme.ActiveBorder)
+	inactiveBorderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(m.theme.InactiveBorder)
+
 	// 左ペイン: セッションリスト
 	leftContent := m.renderSessionList(leftWidth, paneHeight)
 	leftStyle := inactiveBorderStyle.Width(leftWidth).Height(paneHeight)
@@ -111,12 +88,12 @@ func (m Model) View() string {
 	}
 
 	if m.jumping {
-		jumpLine := stateStyle(core.Thinking).Render("Switching workspace...")
+		jumpLine := stateStyle(core.Thinking, m.theme).Render("Switching workspace...")
 		inner = lipgloss.JoinVertical(lipgloss.Left, jumpLine, inner)
 	}
 
 	if m.err != nil {
-		errLine := stateStyle(core.Error).Render(fmt.Sprintf("error: %v", m.err))
+		errLine := stateStyle(core.Error, m.theme).Render(fmt.Sprintf("error: %v", m.err))
 		inner = lipgloss.JoinVertical(lipgloss.Left, errLine, inner)
 	}
 
@@ -130,13 +107,13 @@ func (m Model) View() string {
 // renderHeader はアプリ名 + セッション概要のヘッダー行を描画する。
 func (m Model) renderHeader(totalWidth int) string {
 	brand := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#836FFF")).
+		Foreground(m.theme.Brand).
 		Bold(true)
 	subtitle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#888888"))
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	activeColor := lipgloss.NewStyle().Foreground(lipgloss.Color("#15F5BA"))
-	waitColor := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF2DAA"))
+	activeColor := lipgloss.NewStyle().Foreground(m.theme.States[core.Thinking])
+	waitColor := lipgloss.NewStyle().Foreground(m.theme.States[core.Waiting])
 
 	left := brand.Render("baton") + subtitle.Render("  AI Session Monitor")
 
@@ -194,10 +171,10 @@ func (m Model) renderSessionList(width, height int) string {
 		}
 
 		if e.isHeader {
-			lines = append(lines, renderGroupHeader(e, width))
+			lines = append(lines, renderGroupHeader(e, width, m.theme))
 		} else {
 			isSelected := i == m.cursor
-			lines = append(lines, renderSessionEntry(&e, width, isSelected)...)
+			lines = append(lines, renderSessionEntry(&e, width, isSelected, m.theme)...)
 		}
 
 		currentLine += h
@@ -215,8 +192,8 @@ func entryHeight(e sessionEntry) int {
 }
 
 // renderGroupHeader はグループヘッダー行を描画する。
-func renderGroupHeader(e sessionEntry, width int) string {
-	color, ok := groupHeaderColors[e.header]
+func renderGroupHeader(e sessionEntry, width int, theme Theme) string {
+	color, ok := theme.GroupHeaders[e.header]
 	if !ok {
 		color = lipgloss.Color("#888888")
 	}
@@ -235,7 +212,7 @@ func renderGroupHeader(e sessionEntry, width int) string {
 }
 
 // renderSessionEntry はセッション行を描画する。
-func renderSessionEntry(e *sessionEntry, width int, isSelected bool) []string {
+func renderSessionEntry(e *sessionEntry, width int, isSelected bool, theme Theme) []string {
 	if e.session == nil {
 		return []string{"  ?"}
 	}
@@ -244,11 +221,11 @@ func renderSessionEntry(e *sessionEntry, width int, isSelected bool) []string {
 	name := sessionDisplayName(e)
 
 	// 状態インジケーター
-	stateColor := stateColors[s.State]
+	stateColor := theme.States[s.State]
 	indicator := lipgloss.NewStyle().Foreground(stateColor).Render("●")
 
 	// ツール名
-	toolColor, ok := toolColors[s.Tool]
+	toolColor, ok := theme.Tools[s.Tool]
 	if !ok {
 		toolColor = lipgloss.Color("#AAAAAA")
 	}
@@ -258,7 +235,7 @@ func renderSessionEntry(e *sessionEntry, width int, isSelected bool) []string {
 	cursor := "  "
 	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E8E4E0"))
 	if isSelected {
-		cursor = lipgloss.NewStyle().Foreground(lipgloss.Color("#836FFF")).Render("▎ ")
+		cursor = lipgloss.NewStyle().Foreground(theme.Brand).Render("▎ ")
 		nameStyle = nameStyle.Bold(true)
 	}
 
@@ -284,7 +261,7 @@ func renderSessionEntry(e *sessionEntry, width int, isSelected bool) []string {
 // renderPreview は右ペインのプレビューを描画する。
 func (m Model) renderPreview(width, height int) string {
 	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#836FFF")).
+		Foreground(m.theme.Brand).
 		Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 
@@ -379,13 +356,13 @@ func (m Model) renderSubMenu() string {
 	lines = append(lines, "  esc: cancel")
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#836FFF")).
+		BorderForeground(m.theme.ActiveBorder).
 		Padding(0, 1)
 	return style.Render(strings.Join(lines, "\n"))
 }
 
-func stateStyle(state core.SessionState) lipgloss.Style {
-	color, ok := stateColors[state]
+func stateStyle(state core.SessionState, theme Theme) lipgloss.Style {
+	color, ok := theme.States[state]
 	if !ok {
 		color = lipgloss.Color("#666666")
 	}

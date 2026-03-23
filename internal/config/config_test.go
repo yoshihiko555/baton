@@ -5,7 +5,14 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
+
+// unmarshalConfig is a test helper that unmarshals YAML bytes into Config.
+func unmarshalConfig(data []byte, cfg *Config) error {
+	return yaml.Unmarshal(data, cfg)
+}
 
 func TestDefault(t *testing.T) {
 	// デフォルト値が意図した固定値になっていることを確認する。
@@ -155,6 +162,56 @@ func TestLoadMissingYAML(t *testing.T) {
 	}
 	if got.LogLevel != "info" {
 		t.Fatalf("unexpected LogLevel: got %q", got.LogLevel)
+	}
+}
+
+func TestThemeConfigUnmarshalYAMLStringShorthand(t *testing.T) {
+	// theme: deep-sea-glow (scalar) should set Preset field.
+	content := `theme: deep-sea-glow`
+	var cfg Config
+	if err := unmarshalConfig([]byte(content), &cfg); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if cfg.Theme.Preset != "deep-sea-glow" {
+		t.Errorf("Theme.Preset = %q, want %q", cfg.Theme.Preset, "deep-sea-glow")
+	}
+}
+
+func TestThemeConfigUnmarshalYAMLMapping(t *testing.T) {
+	// theme: as mapping should unmarshal individual fields.
+	content := `
+theme:
+  preset: synthwave-peach
+  active_border: "#FF0000"
+  brand: "#00FF00"
+  states:
+    idle: "#AAAAAA"
+  tools:
+    claude: "#BBBBBB"
+  group_headers:
+    IDLE: "#CCCCCC"
+`
+	var cfg Config
+	if err := unmarshalConfig([]byte(content), &cfg); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if cfg.Theme.Preset != "synthwave-peach" {
+		t.Errorf("Theme.Preset = %q, want synthwave-peach", cfg.Theme.Preset)
+	}
+	if cfg.Theme.ActiveBorder != "#FF0000" {
+		t.Errorf("Theme.ActiveBorder = %q, want #FF0000", cfg.Theme.ActiveBorder)
+	}
+	if cfg.Theme.Brand != "#00FF00" {
+		t.Errorf("Theme.Brand = %q, want #00FF00", cfg.Theme.Brand)
+	}
+	if cfg.Theme.States["idle"] != "#AAAAAA" {
+		t.Errorf("Theme.States[idle] = %q, want #AAAAAA", cfg.Theme.States["idle"])
+	}
+	if cfg.Theme.Tools["claude"] != "#BBBBBB" {
+		t.Errorf("Theme.Tools[claude] = %q, want #BBBBBB", cfg.Theme.Tools["claude"])
+	}
+	if cfg.Theme.GroupHeaders["IDLE"] != "#CCCCCC" {
+		t.Errorf("Theme.GroupHeaders[IDLE] = %q, want #CCCCCC", cfg.Theme.GroupHeaders["IDLE"])
 	}
 }
 
