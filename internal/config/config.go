@@ -17,6 +17,29 @@ type StatusbarConfig struct {
 	ToolIcons map[string]string `yaml:"tool_icons"`
 }
 
+// ThemeConfig はテーマ/カラー設定を表す。
+// プリセット名（文字列）またはカスタムカラー定義を指定できる。
+type ThemeConfig struct {
+	Preset         string            `yaml:"preset"`
+	ActiveBorder   string            `yaml:"active_border"`
+	InactiveBorder string            `yaml:"inactive_border"`
+	Brand          string            `yaml:"brand"`
+	States         map[string]string `yaml:"states"`
+	Tools          map[string]string `yaml:"tools"`
+	GroupHeaders   map[string]string `yaml:"group_headers"`
+}
+
+// UnmarshalYAML はスカラー文字列をプリセット名として扱う。
+func (t *ThemeConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		t.Preset = value.Value
+		return nil
+	}
+	// mapping の場合は通常のアンマーシャルを行う
+	type rawThemeConfig ThemeConfig
+	return value.Decode((*rawThemeConfig)(t))
+}
+
 // Config は YAML から読み込む baton の実行時設定を表す。
 type Config struct {
 	ScanInterval      time.Duration   `yaml:"scan_interval"`
@@ -26,6 +49,7 @@ type Config struct {
 	Terminal          string          `yaml:"terminal"`
 	LogLevel          string          `yaml:"log_level"`
 	Statusbar         StatusbarConfig `yaml:"statusbar"`
+	Theme             ThemeConfig     `yaml:"theme"`
 }
 
 // Default はデフォルト設定値を返す。
@@ -107,6 +131,47 @@ func mergeConfig(base *Config, override Config) {
 	}
 	if len(override.Statusbar.ToolIcons) > 0 {
 		base.Statusbar.ToolIcons = override.Statusbar.ToolIcons
+	}
+	mergeThemeConfig(&base.Theme, override.Theme)
+}
+
+// mergeThemeConfig は非ゼロ値のみで base の Theme を上書きする。
+func mergeThemeConfig(base *ThemeConfig, override ThemeConfig) {
+	if override.Preset != "" {
+		base.Preset = override.Preset
+	}
+	if override.ActiveBorder != "" {
+		base.ActiveBorder = override.ActiveBorder
+	}
+	if override.InactiveBorder != "" {
+		base.InactiveBorder = override.InactiveBorder
+	}
+	if override.Brand != "" {
+		base.Brand = override.Brand
+	}
+	if len(override.States) > 0 {
+		if base.States == nil {
+			base.States = make(map[string]string)
+		}
+		for k, v := range override.States {
+			base.States[k] = v
+		}
+	}
+	if len(override.Tools) > 0 {
+		if base.Tools == nil {
+			base.Tools = make(map[string]string)
+		}
+		for k, v := range override.Tools {
+			base.Tools[k] = v
+		}
+	}
+	if len(override.GroupHeaders) > 0 {
+		if base.GroupHeaders == nil {
+			base.GroupHeaders = make(map[string]string)
+		}
+		for k, v := range override.GroupHeaders {
+			base.GroupHeaders[k] = v
+		}
 	}
 }
 

@@ -86,6 +86,7 @@ type Model struct {
 	stateReader  core.StateReader
 	terminal     terminal.Terminal
 	config       config.Config
+	theme        Theme
 
 	latestProjects []core.Project
 	latestSummary  core.Summary
@@ -132,6 +133,7 @@ func NewModel(
 		stateReader:  stateReader,
 		terminal:     term,
 		config:       cfg,
+		theme:        ResolveTheme(cfg.Theme),
 		exitOnJump:   exitOnJump,
 		textInput:    ti,
 	}

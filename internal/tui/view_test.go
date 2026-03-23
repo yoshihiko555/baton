@@ -65,9 +65,10 @@ func TestViewShowsErrorWhenSet(t *testing.T) {
 }
 
 func TestStateStyleKnownStates(t *testing.T) {
+	theme := deepSeaGlow()
 	states := []core.SessionState{core.Idle, core.Thinking, core.ToolUse, core.Waiting, core.Error}
 	for _, s := range states {
-		style := stateStyle(s)
+		style := stateStyle(s, theme)
 		rendered := style.Render("test")
 		if rendered == "" {
 			t.Errorf("stateStyle(%v) rendered empty", s)
@@ -76,8 +77,9 @@ func TestStateStyleKnownStates(t *testing.T) {
 }
 
 func TestStateStyleUnknownState(t *testing.T) {
+	theme := deepSeaGlow()
 	unknown := core.SessionState(999)
-	style := stateStyle(unknown)
+	style := stateStyle(unknown, theme)
 	rendered := style.Render("test")
 	if rendered == "" {
 		t.Error("stateStyle for unknown state should still render")
