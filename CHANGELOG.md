@@ -1,0 +1,50 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+### Added
+
+- `main` 基準のリリース運用を定義した `docs/release-process.md` を追加
+- タグ push から GitHub Release を自動作成する workflow を追加
+- GitHub Release のカテゴリ設定と PR テンプレートを追加
+- TUI セッションフィルタ機能を追加（`/` で開始、名前/パス/ツール + 状態トークンで絞り込み）
+
+### Changed
+
+- README / `docs/README.ja.md` のキー操作・機能一覧を現行実装（承認操作・セッションフィルタ）に更新
+
+## [0.1.1] - 2026-03-23
+
+### Added
+
+- TUI から Claude Code の承認/拒否を実行できるようにした
+- 設定ファイルから TUI のカラーパレットを変更できるようにした
+- 承認操作まわりの E2E テスト基盤を追加した
+
+### Fixed
+
+- Claude Code のリスト選択 UI に対する承認/拒否キーシーケンスを修正した
+- フラッシュメッセージの表示タイミングとエラークリアの挙動を安定化した
+- WezTerm の `SendKeys` 変換と E2E 用 terminal mock の不整合を修正した
+
+## [0.1.0] - 2026-03-22
+
+### Added
+
+- tmux 上の Claude Code / Codex / Gemini セッションを監視する `baton` の初回リリース
+- 状態別グルーピング、プレビュー、ペインジャンプを備えた TUI ダッシュボード
+- 承認待ち検出、workspace ベースのグルーピング、Codex / Gemini の状態検出
+- GitHub Actions による CI と GitHub Releases 向けアセット生成
+
+### Changed
+
+- 既定のターミナルバックエンドを WezTerm から tmux 中心の構成へ整理した
+
+[Unreleased]: https://github.com/yoshihiko555/baton/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/yoshihiko555/baton/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/yoshihiko555/baton/releases/tag/v0.1.0
