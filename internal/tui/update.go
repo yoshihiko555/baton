@@ -30,10 +30,19 @@ var (
 // approvalSendDelay は承認/拒否確定後に追加入力を送るまでの待機時間。
 const approvalSendDelay = 1 * time.Second
 
+func flashClearCmd(generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		<-time.After(flashDuration)
+		return FlashClearMsg{Generation: generation}
+	}
+}
+
 // Update は tea.Model のメッセージ処理を行う。
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ApprovalResultMsg:
+		m.flashGen++
+		currentGen := m.flashGen
 		if msg.Err != nil {
 			m.err = msg.Err
 			m.flashMessage = ""
@@ -41,12 +50,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.flashMessage = msg.Label
 		}
-		return m, func() tea.Msg {
-			<-time.After(flashDuration)
-			return FlashClearMsg{}
-		}
+		return m, flashClearCmd(currentGen)
 	case FlashClearMsg:
-		m.flashMessage = ""
+		if msg.Generation == m.flashGen {
+			m.flashMessage = ""
+		}
 		return m, nil
 	case JumpDoneMsg:
 		if msg.Err != nil {
@@ -99,7 +107,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TickMsg:
 		return m, doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader, m.terminal)
 	case ScanResultMsg:
-		m.err = nil // スキャン成功で前回エラーをクリア
+		// スキャン成功時は scanErr のみクリアし、操作系エラーは保持する。
+		if m.err != nil && m.scanErr != nil && m.err == m.scanErr {
+			m.err = nil
+		}
+		m.scanErr = nil
 		m.latestProjects = msg.Projects
 		m.latestSummary = msg.Summary
 		m.latestPanes = msg.Panes
@@ -116,6 +128,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case ErrMsg:
+		m.scanErr = msg
 		m.err = msg
 		return m, tickCmd(m.config.ScanInterval)
 	}
@@ -329,10 +342,8 @@ func (m Model) updateTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Waiting 状態でなければ送信せずフラッシュで通知
 		if sel.session.State != core.Waiting || sel.session.Tool != core.ToolClaude {
 			m.flashMessage = "Not in Waiting state - message not sent"
-			return m, func() tea.Msg {
-				<-time.After(flashDuration)
-				return FlashClearMsg{}
-			}
+			m.flashGen++
+			return m, flashClearCmd(m.flashGen)
 		}
 		paneID := sel.session.PaneID
 		term := m.terminal

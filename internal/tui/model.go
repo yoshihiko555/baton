@@ -31,7 +31,9 @@ type ApprovalResultMsg struct {
 }
 
 // FlashClearMsg はフラッシュメッセージの消去タイマー発火時に送られる。
-type FlashClearMsg struct{}
+type FlashClearMsg struct {
+	Generation uint64
+}
 
 // flashDuration はフラッシュメッセージの表示時間。
 const flashDuration = 5 * time.Second
@@ -93,6 +95,7 @@ type Model struct {
 	width      int
 	height     int
 	err        error
+	scanErr    error // スキャン由来のエラー（ScanResultMsg でのみクリア対象）
 
 	previewText     string
 	previewPaneID   string // 現在プレビュー中の PaneID
@@ -109,6 +112,7 @@ type Model struct {
 	inputMode    inputMode
 	textInput    textinput.Model
 	flashMessage string // 操作結果の一時表示メッセージ
+	flashGen     uint64 // フラッシュ消去タイマーの世代番号
 }
 
 // NewModel はデフォルト設定で TUI モデルを初期化する。

@@ -206,6 +206,44 @@ func TestUpdateErrMsg(t *testing.T) {
 	}
 }
 
+func TestScanResultClearsOnlyScanErr(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	scanErr := ErrMsg(fmt.Errorf("scan failed"))
+	updated, _ := m.Update(scanErr)
+	m = updated.(Model)
+
+	if m.err == nil {
+		t.Fatal("err should be set by ErrMsg")
+	}
+
+	updated, _ = m.Update(ScanResultMsg{})
+	m = updated.(Model)
+
+	if m.err != nil {
+		t.Errorf("err = %v, want nil after successful scan for scan error", m.err)
+	}
+}
+
+func TestScanResultDoesNotClearActionErr(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	actionErr := fmt.Errorf("approval failed")
+	updated, _ := m.Update(ApprovalResultMsg{Err: actionErr, Label: "Approved"})
+	m = updated.(Model)
+
+	if m.err == nil {
+		t.Fatal("err should be set by ApprovalResultMsg failure")
+	}
+
+	updated, _ = m.Update(ScanResultMsg{})
+	m = updated.(Model)
+
+	if m.err == nil || m.err.Error() != actionErr.Error() {
+		t.Errorf("err = %v, want action error to be preserved", m.err)
+	}
+}
+
 func TestUpdateWindowSizeMsg(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
@@ -1281,8 +1319,9 @@ func TestCanInputFalseOnNonClaude(t *testing.T) {
 func TestFlashClearMsg(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 	m.flashMessage = "some flash"
+	m.flashGen = 1
 
-	updated, cmd := m.Update(FlashClearMsg{})
+	updated, cmd := m.Update(FlashClearMsg{Generation: 1})
 	m = updated.(Model)
 
 	if m.flashMessage != "" {
@@ -1290,6 +1329,22 @@ func TestFlashClearMsg(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Error("expected nil cmd after FlashClearMsg")
+	}
+}
+
+func TestFlashClearMsgStaleGenerationIgnored(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	m.flashMessage = "latest flash"
+	m.flashGen = 2
+
+	updated, cmd := m.Update(FlashClearMsg{Generation: 1})
+	m = updated.(Model)
+
+	if m.flashMessage != "latest flash" {
+		t.Errorf("flashMessage = %q, want unchanged for stale FlashClearMsg", m.flashMessage)
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd after stale FlashClearMsg")
 	}
 }
 
