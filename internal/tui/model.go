@@ -25,7 +25,10 @@ const (
 )
 
 // ApprovalResultMsg は承認/拒否操作の完了を通知する。
-type ApprovalResultMsg struct{ Err error }
+type ApprovalResultMsg struct {
+	Err   error
+	Label string // 操作の表示名（例: "Approved", "Denied: fix tests"）
+}
 
 // TickMsg は定期リフレッシュタイマー発火時に送られる。
 type TickMsg struct{}
@@ -97,8 +100,9 @@ type Model struct {
 	exitOnJump bool
 
 	// 承認/拒否操作
-	inputMode  inputMode
-	textInput  textinput.Model
+	inputMode    inputMode
+	textInput    textinput.Model
+	flashMessage string // 操作結果の一時表示メッセージ
 }
 
 // NewModel はデフォルト設定で TUI モデルを初期化する。

@@ -32,8 +32,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ApprovalResultMsg:
 		if msg.Err != nil {
 			m.err = msg.Err
+			m.flashMessage = ""
 		} else {
 			m.err = nil
+			m.flashMessage = msg.Label
 		}
 		return m, nil
 	case JumpDoneMsg:
@@ -87,7 +89,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TickMsg:
 		return m, doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader, m.terminal)
 	case ScanResultMsg:
-		m.err = nil // スキャン成功で前回エラーをクリア
+		m.err = nil          // スキャン成功で前回エラーをクリア
+		m.flashMessage = ""  // フラッシュメッセージもクリア
 		m.latestProjects = msg.Projects
 		m.latestSummary = msg.Summary
 		m.latestPanes = msg.Panes
@@ -261,7 +264,7 @@ func (m Model) handleSimpleApprove() (tea.Model, tea.Cmd) {
 	term := m.terminal
 	return m, func() tea.Msg {
 		err := term.SendKeys(paneID, "y", "Enter")
-		return ApprovalResultMsg{Err: err}
+		return ApprovalResultMsg{Err: err, Label: "Approved"}
 	}
 }
 
@@ -274,7 +277,7 @@ func (m Model) handleSimpleDeny() (tea.Model, tea.Cmd) {
 	term := m.terminal
 	return m, func() tea.Msg {
 		err := term.SendKeys(paneID, "n", "Enter")
-		return ApprovalResultMsg{Err: err}
+		return ApprovalResultMsg{Err: err, Label: "Denied"}
 	}
 }
 
@@ -320,17 +323,21 @@ func (m Model) updateTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		return m, func() tea.Msg {
 			var keys []string
+			var label string
 			if mode == inputApprove {
 				keys = append(keys, "Tab")
+				label = "Approved"
 			} else {
 				keys = append(keys, "Escape")
+				label = "Denied"
 			}
 			if text != "" {
 				keys = append(keys, text)
+				label += ": " + text
 			}
 			keys = append(keys, "Enter")
 			err := term.SendKeys(paneID, keys...)
-			return ApprovalResultMsg{Err: err}
+			return ApprovalResultMsg{Err: err, Label: label}
 		}
 	}
 

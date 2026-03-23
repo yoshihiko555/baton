@@ -123,6 +123,12 @@ func (m Model) View() string {
 		inner = lipgloss.JoinVertical(lipgloss.Left, headerLine, "", panes, statusBar, actionBar)
 	}
 
+	if m.flashMessage != "" {
+		flashStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#15F5BA")).Bold(true)
+		flashLine := flashStyle.Render(">> " + m.flashMessage)
+		inner = lipgloss.JoinVertical(lipgloss.Left, flashLine, inner)
+	}
+
 	if m.jumping {
 		jumpLine := stateStyle(core.Thinking).Render("Switching workspace...")
 		inner = lipgloss.JoinVertical(lipgloss.Left, jumpLine, inner)
