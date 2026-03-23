@@ -32,6 +32,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ApprovalResultMsg:
 		if msg.Err != nil {
 			m.err = msg.Err
+		} else {
+			m.err = nil
 		}
 		return m, nil
 	case JumpDoneMsg:
@@ -85,6 +87,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TickMsg:
 		return m, doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader, m.terminal)
 	case ScanResultMsg:
+		m.err = nil // スキャン成功で前回エラーをクリア
 		m.latestProjects = msg.Projects
 		m.latestSummary = msg.Summary
 		m.latestPanes = msg.Panes
