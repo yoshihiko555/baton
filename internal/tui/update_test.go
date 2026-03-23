@@ -56,6 +56,7 @@ type mockTerminal struct {
 	available bool
 	focused   string
 	paneText  string
+	sentKeys  []string
 }
 
 func (m *mockTerminal) ListPanes() ([]terminal.Pane, error) {
@@ -73,6 +74,11 @@ func (m *mockTerminal) GetPaneText(paneID string) (string, error) {
 
 func (m *mockTerminal) IsAvailable() bool {
 	return m.available
+}
+
+func (m *mockTerminal) SendKeys(paneID string, keys ...string) error {
+	m.sentKeys = append(m.sentKeys, keys...)
+	return nil
 }
 
 func (m *mockTerminal) Name() string {
@@ -979,5 +985,231 @@ func TestCursorMovesAcrossGroups(t *testing.T) {
 	}
 	if sel.state != core.Idle {
 		t.Errorf("cursor state = %v, want core.Idle", sel.state)
+	}
+}
+
+// --- 承認/拒否テスト ---
+
+// waitingClaudeModel は Waiting 状態の Claude Code セッションを持つモデルを返す。
+// activePane=1（右ペイン）に設定済み。
+func waitingClaudeModel() (Model, *mockTerminal) {
+	m, _, _, _, term := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Waiting, Tool: core.ToolClaude, PaneID: "%1"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+	m.activePane = 1 // 右ペインをアクティブに
+	return m, term
+}
+
+func TestSimpleApproveOnWaitingClaude(t *testing.T) {
+	m, term := waitingClaudeModel()
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
+	updated, cmd := m.Update(msg)
+	_ = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected cmd for approve")
+	}
+
+	// コマンドを実行して SendKeys を確認
+	result := cmd()
+	if _, ok := result.(ApprovalResultMsg); !ok {
+		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+	if len(term.sentKeys) < 2 || term.sentKeys[0] != "y" || term.sentKeys[1] != "Enter" {
+		t.Errorf("sentKeys = %v, want [y Enter]", term.sentKeys)
+	}
+}
+
+func TestSimpleDenyOnWaitingClaude(t *testing.T) {
+	m, term := waitingClaudeModel()
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
+	updated, cmd := m.Update(msg)
+	_ = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected cmd for deny")
+	}
+
+	result := cmd()
+	if _, ok := result.(ApprovalResultMsg); !ok {
+		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+	if len(term.sentKeys) < 2 || term.sentKeys[0] != "n" || term.sentKeys[1] != "Enter" {
+		t.Errorf("sentKeys = %v, want [n Enter]", term.sentKeys)
+	}
+}
+
+func TestApproveIgnoredWhenNotActivePane(t *testing.T) {
+	m, _ := waitingClaudeModel()
+	m.activePane = 0 // 左ペイン
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
+	_, cmd := m.Update(msg)
+
+	if cmd != nil {
+		t.Error("expected nil cmd when left pane is active")
+	}
+}
+
+func TestApproveIgnoredOnNonWaitingState(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Thinking, Tool: core.ToolClaude, PaneID: "%1"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+	m.activePane = 1
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
+	_, cmd := m.Update(msg)
+
+	if cmd != nil {
+		t.Error("expected nil cmd for non-Waiting session")
+	}
+}
+
+func TestApproveIgnoredOnNonClaudeTool(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Waiting, Tool: core.ToolCodex, PaneID: "%1"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+	m.activePane = 1
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
+	_, cmd := m.Update(msg)
+
+	if cmd != nil {
+		t.Error("expected nil cmd for non-Claude tool")
+	}
+}
+
+func TestPromptApproveInputMode(t *testing.T) {
+	m, term := waitingClaudeModel()
+
+	// Shift+A でテキスト入力モードに入る
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}}
+	updated, _ := m.Update(msg)
+	m = updated.(Model)
+
+	if m.inputMode != inputApprove {
+		t.Fatalf("inputMode = %d, want inputApprove", m.inputMode)
+	}
+
+	// テキストを入力（文字を1つずつ送信）
+	for _, r := range "fix tests" {
+		charMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+		updated, _ = m.Update(charMsg)
+		m = updated.(Model)
+	}
+
+	// Enter で確定
+	enterMsg := tea.KeyMsg{Type: tea.KeyEnter}
+	updated, cmd := m.Update(enterMsg)
+	m = updated.(Model)
+
+	if m.inputMode != inputNone {
+		t.Errorf("inputMode = %d, want inputNone after Enter", m.inputMode)
+	}
+	if cmd == nil {
+		t.Fatal("expected cmd for prompt approve")
+	}
+
+	result := cmd()
+	if _, ok := result.(ApprovalResultMsg); !ok {
+		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+
+	// Tab + テキスト + Enter が送信されるはず
+	if len(term.sentKeys) == 0 {
+		t.Fatal("expected sentKeys to be non-empty")
+	}
+	if term.sentKeys[0] != "Tab" {
+		t.Errorf("first sentKey = %q, want Tab", term.sentKeys[0])
+	}
+}
+
+func TestPromptDenyInputMode(t *testing.T) {
+	m, term := waitingClaudeModel()
+
+	// Shift+D でテキスト入力モードに入る
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}
+	updated, _ := m.Update(msg)
+	m = updated.(Model)
+
+	if m.inputMode != inputDeny {
+		t.Fatalf("inputMode = %d, want inputDeny", m.inputMode)
+	}
+
+	// テキストを入力
+	for _, r := range "bad idea" {
+		charMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+		updated, _ = m.Update(charMsg)
+		m = updated.(Model)
+	}
+
+	// Enter で確定
+	enterMsg := tea.KeyMsg{Type: tea.KeyEnter}
+	updated, cmd := m.Update(enterMsg)
+	m = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected cmd for prompt deny")
+	}
+
+	result := cmd()
+	if _, ok := result.(ApprovalResultMsg); !ok {
+		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+
+	if len(term.sentKeys) == 0 {
+		t.Fatal("expected sentKeys to be non-empty")
+	}
+	if term.sentKeys[0] != "Escape" {
+		t.Errorf("first sentKey = %q, want Escape", term.sentKeys[0])
+	}
+}
+
+func TestInputModeEscapeCancels(t *testing.T) {
+	m, _ := waitingClaudeModel()
+
+	// A でテキスト入力モードに入る
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}}
+	updated, _ := m.Update(msg)
+	m = updated.(Model)
+
+	if m.inputMode != inputApprove {
+		t.Fatalf("inputMode = %d, want inputApprove", m.inputMode)
+	}
+
+	// Esc でキャンセル
+	escMsg := tea.KeyMsg{Type: tea.KeyEsc}
+	updated, cmd := m.Update(escMsg)
+	m = updated.(Model)
+
+	if m.inputMode != inputNone {
+		t.Errorf("inputMode = %d, want inputNone after Esc", m.inputMode)
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd after Esc cancel")
 	}
 }

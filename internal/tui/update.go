@@ -19,11 +19,21 @@ var (
 
 	upKeys   = key.NewBinding(key.WithKeys("k", "up"))
 	downKeys = key.NewBinding(key.WithKeys("j", "down"))
+
+	approveKey     = key.NewBinding(key.WithKeys("a"))
+	denyKey        = key.NewBinding(key.WithKeys("d"))
+	promptApprove  = key.NewBinding(key.WithKeys("A"))
+	promptDeny     = key.NewBinding(key.WithKeys("D"))
 )
 
 // Update は tea.Model のメッセージ処理を行う。
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case ApprovalResultMsg:
+		if msg.Err != nil {
+			m.err = msg.Err
+		}
+		return m, nil
 	case JumpDoneMsg:
 		if msg.Err != nil {
 			m.err = msg.Err
@@ -38,6 +48,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.jumping {
 			return m, nil
+		}
+		// テキスト入力モード中
+		if m.inputMode != inputNone {
+			return m.updateTextInput(msg)
 		}
 		if m.showSubMenu {
 			return m.updateSubMenu(msg)
@@ -54,6 +68,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.moveCursor(-1)
 		case key.Matches(msg, downKeys):
 			return m.moveCursor(1)
+		case key.Matches(msg, approveKey):
+			return m.handleSimpleApprove()
+		case key.Matches(msg, denyKey):
+			return m.handleSimpleDeny()
+		case key.Matches(msg, promptApprove):
+			return m.enterInputMode(inputApprove)
+		case key.Matches(msg, promptDeny):
+			return m.enterInputMode(inputDeny)
 		}
 		return m, nil
 	case tea.WindowSizeMsg:
@@ -225,6 +247,94 @@ func (m Model) updateSubMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// handleSimpleApprove は単純承認（y + Enter）を送信する。
+func (m Model) handleSimpleApprove() (tea.Model, tea.Cmd) {
+	if !m.canApprove() {
+		return m, nil
+	}
+	paneID := m.selectedSession().session.PaneID
+	term := m.terminal
+	return m, func() tea.Msg {
+		err := term.SendKeys(paneID, "y", "Enter")
+		return ApprovalResultMsg{Err: err}
+	}
+}
+
+// handleSimpleDeny は単純拒否（n + Enter）を送信する。
+func (m Model) handleSimpleDeny() (tea.Model, tea.Cmd) {
+	if !m.canApprove() {
+		return m, nil
+	}
+	paneID := m.selectedSession().session.PaneID
+	term := m.terminal
+	return m, func() tea.Msg {
+		err := term.SendKeys(paneID, "n", "Enter")
+		return ApprovalResultMsg{Err: err}
+	}
+}
+
+// enterInputMode はプロンプト付き承認/拒否のテキスト入力モードに入る。
+func (m Model) enterInputMode(mode inputMode) (tea.Model, tea.Cmd) {
+	if !m.canApprove() {
+		return m, nil
+	}
+	m.inputMode = mode
+	m.textInput.Reset()
+	if mode == inputApprove {
+		m.textInput.Placeholder = "approval prompt..."
+	} else {
+		m.textInput.Placeholder = "rejection feedback..."
+	}
+	m.textInput.Focus()
+	return m, nil
+}
+
+// updateTextInput はテキスト入力モード中のキー処理を行う。
+func (m Model) updateTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, escKey):
+		m.inputMode = inputNone
+		m.textInput.Blur()
+		return m, nil
+	case key.Matches(msg, enterKey):
+		text := m.textInput.Value()
+		m.textInput.Blur()
+		mode := m.inputMode
+		m.inputMode = inputNone
+
+		sel := m.selectedSession()
+		if sel == nil || sel.session == nil || sel.session.PaneID == "" {
+			return m, nil
+		}
+		// 状態が変わっていたら送信しない
+		if sel.session.State != core.Waiting || sel.session.Tool != core.ToolClaude {
+			return m, nil
+		}
+		paneID := sel.session.PaneID
+		term := m.terminal
+
+		return m, func() tea.Msg {
+			var keys []string
+			if mode == inputApprove {
+				keys = append(keys, "Tab")
+			} else {
+				keys = append(keys, "Escape")
+			}
+			if text != "" {
+				keys = append(keys, text)
+			}
+			keys = append(keys, "Enter")
+			err := term.SendKeys(paneID, keys...)
+			return ApprovalResultMsg{Err: err}
+		}
+	}
+
+	// その他のキーは textinput に委譲
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
 }
 
 // --- 以下は v1 互換のために残す型（テストが参照） ---

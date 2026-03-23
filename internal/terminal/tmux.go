@@ -154,6 +154,20 @@ func (t *TmuxTerminal) GetPaneText(paneID string) (string, error) {
 	return strings.Join(lines[start:], "\n"), nil
 }
 
+// SendKeys は指定ペインにキーシーケンスを送信する。
+func (t *TmuxTerminal) SendKeys(paneID string, keys ...string) error {
+	if t == nil || t.execFn == nil {
+		return fmt.Errorf("tmux exec function is not configured")
+	}
+
+	args := []string{"send-keys", "-t", paneID}
+	args = append(args, keys...)
+	if _, err := t.execFn(args...); err != nil {
+		return fmt.Errorf("send-keys: %w", err)
+	}
+	return nil
+}
+
 // IsAvailable は tmux CLI が利用可能かを返す。
 func (t *TmuxTerminal) IsAvailable() bool {
 	_, err := exec.LookPath("tmux")

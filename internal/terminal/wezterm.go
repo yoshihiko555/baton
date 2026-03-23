@@ -145,6 +145,20 @@ func (w *WezTerminal) GetPaneText(paneID string) (string, error) {
 	return strings.Join(lines[start:], "\n"), nil
 }
 
+// SendKeys は指定ペインにテキストを送信する。
+func (w *WezTerminal) SendKeys(paneID string, keys ...string) error {
+	if w == nil || w.execFn == nil {
+		return fmt.Errorf("wezterm exec function is not configured")
+	}
+
+	text := strings.Join(keys, "")
+	_, err := w.execFn("cli", "send-text", "--pane-id", paneID, "--no-paste", text)
+	if err != nil {
+		return fmt.Errorf("send-text: %w", err)
+	}
+	return nil
+}
+
 // IsAvailable は PATH 上に wezterm 実行ファイルがあるかを返す。
 func (w *WezTerminal) IsAvailable() bool {
 	_, err := exec.LookPath("wezterm")

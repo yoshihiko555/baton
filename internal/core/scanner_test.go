@@ -17,8 +17,9 @@ func (m *mockTerminal) FocusPane(paneID string) error       { return nil }
 func (m *mockTerminal) GetPaneText(paneID string) (string, error) {
 	return "", nil
 }
-func (m *mockTerminal) IsAvailable() bool { return true }
-func (m *mockTerminal) Name() string      { return "mock" }
+func (m *mockTerminal) SendKeys(paneID string, keys ...string) error { return nil }
+func (m *mockTerminal) IsAvailable() bool                            { return true }
+func (m *mockTerminal) Name() string                                 { return "mock" }
 
 // newTrackingScanner returns a ProcessScanner whose execFn records normalized TTY names called.
 func newTrackingScanner(called map[string]bool) *ProcessScanner {
