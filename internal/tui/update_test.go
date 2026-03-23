@@ -1447,12 +1447,12 @@ type failingMockTerminal struct {
 }
 
 func (f *failingMockTerminal) ListPanes() ([]terminal.Pane, error) { return nil, nil }
-func (f *failingMockTerminal) FocusPane(paneID string) error        { return nil }
+func (f *failingMockTerminal) FocusPane(paneID string) error       { return nil }
 func (f *failingMockTerminal) GetPaneText(paneID string) (string, error) {
 	return "", nil
 }
 func (f *failingMockTerminal) IsAvailable() bool { return true }
-func (f *failingMockTerminal) Name() string       { return "failing-mock" }
+func (f *failingMockTerminal) Name() string      { return "failing-mock" }
 func (f *failingMockTerminal) SendKeys(paneID string, keys ...string) error {
 	f.calls++
 	f.sentKeys = append(f.sentKeys, keys...)
@@ -1703,4 +1703,296 @@ func TestPromptInputAvailableOnIdleClaude(t *testing.T) {
 	if m.inputMode != inputDeny {
 		t.Errorf("inputMode = %d after D on Idle Claude, want inputDeny", m.inputMode)
 	}
+}
+
+func TestFilterModeStartsWithSlash(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+
+	if !m.filtering {
+		t.Fatal("expected filtering=true after / key")
+	}
+	if !m.filterInput.Focused() {
+		t.Error("expected filter input to be focused")
+	}
+	if m.filterQuery != "" {
+		t.Errorf("filterQuery = %q, want empty", m.filterQuery)
+	}
+}
+
+func TestFilterMatchesSessionNameAndWorkingDir(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/work/alpha",
+			Name: "alpha-service",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Idle, Tool: core.ToolClaude, PaneID: "%1", WorkingDir: "/work/alpha"},
+			},
+		},
+		{
+			Path: "/tmp/beta",
+			Name: "beta-tool",
+			Sessions: []*core.Session{
+				{PID: 200, State: core.Idle, Tool: core.ToolCodex, PaneID: "%2", WorkingDir: "/tmp/sandbox/beta-task"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("beta-tool")})
+	m = updated.(Model)
+
+	if got := visibleSessionCount(m.entries); got != 1 {
+		t.Fatalf("visible sessions = %d, want 1 by name filter", got)
+	}
+	if sel := m.selectedSession(); sel == nil || sel.session == nil || sel.session.PID != 200 {
+		t.Fatalf("selected PID = %v, want 200", selectedPID(m))
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("sandbox/beta-task")})
+	m = updated.(Model)
+
+	if got := visibleSessionCount(m.entries); got != 1 {
+		t.Fatalf("visible sessions = %d, want 1 by working dir filter", got)
+	}
+	if sel := m.selectedSession(); sel == nil || sel.session == nil || sel.session.PID != 200 {
+		t.Fatalf("selected PID = %v, want 200", selectedPID(m))
+	}
+}
+
+func TestFilterStateTokensIncludeAndExclude(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Waiting, Tool: core.ToolClaude, PaneID: "%1"},
+				{PID: 200, State: core.Idle, Tool: core.ToolClaude, PaneID: "%2"},
+				{PID: 300, State: core.Thinking, Tool: core.ToolCodex, PaneID: "%3"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("waiting")})
+	m = updated.(Model)
+
+	if got := visibleSessionCount(m.entries); got != 1 {
+		t.Fatalf("visible sessions = %d, want 1 for waiting filter", got)
+	}
+	if sel := m.selectedSession(); sel == nil || sel.session == nil || sel.session.State != core.Waiting {
+		t.Fatalf("selected state = %v, want waiting", selectedState(m))
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("!idle")})
+	m = updated.(Model)
+
+	if got := visibleSessionCount(m.entries); got != 2 {
+		t.Fatalf("visible sessions = %d, want 2 for !idle filter", got)
+	}
+	for _, e := range m.entries {
+		if !e.isHeader && e.session != nil && e.session.State == core.Idle {
+			t.Fatal("idle session must be excluded by !idle filter")
+		}
+	}
+}
+
+func TestFilterEscClearsQueryAndRestoresAllSessions(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Waiting, Tool: core.ToolClaude, PaneID: "%1"},
+				{PID: 200, State: core.Idle, Tool: core.ToolCodex, PaneID: "%2"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("waiting")})
+	m = updated.(Model)
+
+	if got := visibleSessionCount(m.entries); got != 1 {
+		t.Fatalf("visible sessions = %d, want 1 before clearing", got)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+
+	if m.filtering {
+		t.Fatal("expected filtering=false after Esc")
+	}
+	if m.filterQuery != "" {
+		t.Fatalf("filterQuery = %q, want empty after Esc", m.filterQuery)
+	}
+	if got := visibleSessionCount(m.entries); got != 2 {
+		t.Fatalf("visible sessions = %d, want 2 after clearing filter", got)
+	}
+}
+
+func TestFilterEnterJumpsToFilteredSession(t *testing.T) {
+	m, _, _, _, term := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "alpha",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Idle, Tool: core.ToolClaude, PaneID: "%1"},
+			},
+		},
+		{
+			Path: "/project-b",
+			Name: "beta",
+			Sessions: []*core.Session{
+				{PID: 200, State: core.Idle, Tool: core.ToolCodex, PaneID: "%2"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("beta")})
+	m = updated.(Model)
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if m.filtering {
+		t.Fatal("expected filter input mode to exit on Enter")
+	}
+	if !m.jumping {
+		t.Fatal("expected jumping=true after Enter in filter mode")
+	}
+	if cmd == nil {
+		t.Fatal("expected jump command after Enter in filter mode")
+	}
+
+	msg := cmd()
+	done, ok := msg.(JumpDoneMsg)
+	if !ok {
+		t.Fatalf("expected JumpDoneMsg, got %T", msg)
+	}
+	if done.Err != nil {
+		t.Fatalf("unexpected jump error: %v", done.Err)
+	}
+	if term.focused != "%2" {
+		t.Fatalf("focused pane = %q, want %%2", term.focused)
+	}
+
+	updated, _ = m.Update(done)
+	m = updated.(Model)
+	if m.jumping {
+		t.Fatal("expected jumping=false after JumpDoneMsg")
+	}
+}
+
+func TestFilterMatchesToolName(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "alpha",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Idle, Tool: core.ToolClaude, PaneID: "%1"},
+				{PID: 200, State: core.Idle, Tool: core.ToolCodex, PaneID: "%2"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("codex")})
+	m = updated.(Model)
+
+	if got := visibleSessionCount(m.entries); got != 1 {
+		t.Fatalf("visible sessions = %d, want 1 by tool filter", got)
+	}
+	sel := m.selectedSession()
+	if sel == nil || sel.session == nil {
+		t.Fatal("expected selected session after tool filter")
+	}
+	if sel.session.Tool != core.ToolCodex {
+		t.Fatalf("selected tool = %v, want codex", sel.session.Tool)
+	}
+}
+
+func TestFilterWorkingStateAlias(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "alpha",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Thinking, Tool: core.ToolClaude, PaneID: "%1"},
+				{PID: 200, State: core.ToolUse, Tool: core.ToolCodex, PaneID: "%2"},
+				{PID: 300, State: core.Idle, Tool: core.ToolGemini, PaneID: "%3"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("working")})
+	m = updated.(Model)
+
+	if got := visibleSessionCount(m.entries); got != 2 {
+		t.Fatalf("visible sessions = %d, want 2 for working filter", got)
+	}
+	for _, e := range m.entries {
+		if e.isHeader || e.session == nil {
+			continue
+		}
+		if e.session.State != core.Thinking && e.session.State != core.ToolUse {
+			t.Fatalf("unexpected state %v for working filter", e.session.State)
+		}
+	}
+}
+
+func visibleSessionCount(entries []sessionEntry) int {
+	count := 0
+	for _, e := range entries {
+		if !e.isHeader {
+			count++
+		}
+	}
+	return count
+}
+
+func selectedPID(m Model) int {
+	sel := m.selectedSession()
+	if sel == nil || sel.session == nil {
+		return 0
+	}
+	return sel.session.PID
+}
+
+func selectedState(m Model) core.SessionState {
+	sel := m.selectedSession()
+	if sel == nil || sel.session == nil {
+		return core.SessionState(-1)
+	}
+	return sel.session.State
 }

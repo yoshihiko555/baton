@@ -367,3 +367,37 @@ func TestActionBarShowsPromptHints(t *testing.T) {
 		t.Error("action bar should contain 'approve+msg' hint when canInput() is true")
 	}
 }
+
+func TestViewShowsFilterQuery(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.filterQuery = "waiting"
+
+	view := m.View()
+	if !strings.Contains(view, "Filter:") {
+		t.Error("view should contain filter label")
+	}
+	if !strings.Contains(view, "waiting") {
+		t.Error("view should contain current filter query")
+	}
+}
+
+func TestViewShowsFilterInputWhileEditing(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.filtering = true
+	m.filterInput.SetValue("!idle")
+	m.filterInput.Focus()
+
+	view := m.View()
+	if !strings.Contains(view, "Filter:") {
+		t.Error("view should contain filter label while editing")
+	}
+	if !strings.Contains(view, "!idle") {
+		t.Error("view should contain filter input value while editing")
+	}
+}

@@ -76,10 +76,17 @@ type sessionEntry struct {
 	project  *core.Project
 }
 
+// sessionFilter はセッション一覧のフィルタ条件を表す。
+type sessionFilter struct {
+	textTokens    []string
+	includeStates []string
+	excludeStates []string
+}
+
 // Model は TUI 全体を表す Bubble Tea のルートモデル。
 type Model struct {
 	entries []sessionEntry // グループ化されたセッションリスト
-	cursor  int           // 現在のカーソル位置（エントリ index）
+	cursor  int            // 現在のカーソル位置（エントリ index）
 
 	scanner      core.Scanner
 	stateUpdater core.StateUpdater
@@ -98,13 +105,17 @@ type Model struct {
 	err        error
 	scanErr    error // スキャン由来のエラー（ScanResultMsg でのみクリア対象）
 
-	previewText     string
-	previewPaneID   string // 現在プレビュー中の PaneID
-	previewLoading  bool
+	previewText    string
+	previewPaneID  string // 現在プレビュー中の PaneID
+	previewLoading bool
 
 	showSubMenu   bool
 	subMenuItems  []SubMenuItem
 	subMenuCursor int
+
+	filtering   bool
+	filterQuery string
+	filterInput textinput.Model
 
 	jumping    bool
 	exitOnJump bool
@@ -127,6 +138,9 @@ func NewModel(
 ) Model {
 	ti := textinput.New()
 	ti.CharLimit = 500
+	fti := textinput.New()
+	fti.CharLimit = 300
+	fti.Placeholder = "name/path/tool/status..."
 	return Model{
 		scanner:      scanner,
 		stateUpdater: stateUpdater,
@@ -136,6 +150,7 @@ func NewModel(
 		theme:        ResolveTheme(cfg.Theme),
 		exitOnJump:   exitOnJump,
 		textInput:    ti,
+		filterInput:  fti,
 	}
 }
 
@@ -225,6 +240,11 @@ func (m Model) selectedSession() *sessionEntry {
 
 // buildEntries はプロジェクト一覧からグループ化されたエントリリストを構築する。
 func buildEntries(projects []core.Project) []sessionEntry {
+	return buildEntriesWithFilter(projects, sessionFilter{})
+}
+
+// buildEntriesWithFilter はフィルタ適用後のグループ化エントリを構築する。
+func buildEntriesWithFilter(projects []core.Project, filter sessionFilter) []sessionEntry {
 	// 全セッションをフラットに集める
 	type sessionWithProject struct {
 		session *core.Session
@@ -234,7 +254,7 @@ func buildEntries(projects []core.Project) []sessionEntry {
 	for i := range projects {
 		p := &projects[i]
 		for _, s := range p.Sessions {
-			if s != nil {
+			if s != nil && sessionMatchesFilter(s, p, filter) {
 				all = append(all, sessionWithProject{session: s, project: p})
 			}
 		}
@@ -298,6 +318,111 @@ func buildEntries(projects []core.Project) []sessionEntry {
 	}
 
 	return entries
+}
+
+func parseSessionFilter(query string) sessionFilter {
+	filter := sessionFilter{}
+	for _, raw := range strings.Fields(strings.ToLower(strings.TrimSpace(query))) {
+		negate := strings.HasPrefix(raw, "!")
+		token := strings.TrimPrefix(raw, "!")
+		if token == "" {
+			continue
+		}
+		normalized := normalizeStateToken(token)
+		if normalized != "" {
+			if negate {
+				filter.excludeStates = append(filter.excludeStates, normalized)
+			} else {
+				filter.includeStates = append(filter.includeStates, normalized)
+			}
+			continue
+		}
+		filter.textTokens = append(filter.textTokens, token)
+	}
+	return filter
+}
+
+func normalizeStateToken(token string) string {
+	switch token {
+	case "idle":
+		return "idle"
+	case "thinking":
+		return "thinking"
+	case "tool_use", "tooluse", "tool":
+		return "tool_use"
+	case "working":
+		return "working"
+	case "waiting":
+		return "waiting"
+	case "error":
+		return "error"
+	default:
+		return ""
+	}
+}
+
+func stateMatchesToken(state core.SessionState, token string) bool {
+	switch token {
+	case "idle":
+		return state == core.Idle
+	case "thinking":
+		return state == core.Thinking
+	case "tool_use":
+		return state == core.ToolUse
+	case "working":
+		return state == core.Thinking || state == core.ToolUse
+	case "waiting":
+		return state == core.Waiting
+	case "error":
+		return state == core.Error
+	default:
+		return false
+	}
+}
+
+func sessionMatchesFilter(session *core.Session, project *core.Project, filter sessionFilter) bool {
+	if session == nil {
+		return false
+	}
+
+	if len(filter.includeStates) > 0 {
+		matched := false
+		for _, stateToken := range filter.includeStates {
+			if stateMatchesToken(session.State, stateToken) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	for _, stateToken := range filter.excludeStates {
+		if stateMatchesToken(session.State, stateToken) {
+			return false
+		}
+	}
+
+	if len(filter.textTokens) == 0 {
+		return true
+	}
+
+	entry := sessionEntry{session: session, project: project}
+	searchTargets := []string{
+		sessionDisplayName(&entry),
+		session.Tool.String(),
+		session.WorkingDir,
+	}
+	if project != nil {
+		searchTargets = append(searchTargets, project.Path, project.Name)
+	}
+	haystack := strings.ToLower(strings.Join(searchTargets, " "))
+	for _, token := range filter.textTokens {
+		if !strings.Contains(haystack, token) {
+			return false
+		}
+	}
+	return true
 }
 
 // sessionDisplayName はセッション行の表示名を返す。

@@ -22,6 +22,8 @@ Key design decisions:
 - State-grouped session list with terminal preview pane
 - Pane jump: select a session and switch to its tmux pane
 - Multi-tool support: Claude Code, Codex CLI, Gemini CLI
+- Incremental session filtering in TUI (`/`, text match, state filters like `waiting`, `!idle`)
+- In-TUI approval actions for Claude Code (`a`/`d`/`A`/`D`)
 - Approval prompt detection via `tmux capture-pane` screen scraping
 - Codex idle/working detection via child process inspection
 - Status bar JSON export for tmux status line integration
@@ -41,10 +43,15 @@ go install github.com/yoshihiko555/baton@latest
 Install a fixed release version:
 
 ```bash
-go install github.com/yoshihiko555/baton@v0.1.0
+go install github.com/yoshihiko555/baton@v0.1.1
 ```
 
 Or download prebuilt binaries from GitHub Releases (`baton_<tag>_<os>_<arch>.tar.gz` / `.zip`).
+
+Release notes:
+
+- [CHANGELOG.md](CHANGELOG.md)
+- [Release process](docs/release-process.md)
 
 If `baton` is not found after installation, ensure your Go bin directory is in `PATH`.
 
@@ -99,8 +106,24 @@ bind b display-popup -E -w 80% -h 80% "baton"
 | `k` / `Up` | Move cursor up |
 | `Enter` | Jump to selected pane |
 | `Tab` | Switch focus between session list and preview |
-| `Esc` | Close submenu (for ambiguous sessions) |
+| `/` | Start session filter input |
+| `a` / `d` | Approve / deny (Waiting Claude on preview pane) |
+| `A` / `D` | Approve+message / deny+message (Claude on preview pane) |
+| `Esc` | Close submenu or clear active filter |
 | `q` / `Ctrl+C` | Quit |
+
+### Session filter
+
+- Press `/` to enter filter mode and type to filter incrementally
+- Match targets: session name, working directory/path, tool name
+- State tokens: `waiting`, `idle`, `thinking`, `tool_use`, `working`, `error`
+- Prefix `!` to exclude a state (example: `!idle`)
+
+Examples:
+
+- `waiting` → show Waiting sessions only
+- `!idle` → show all sessions except Idle
+- `codex !idle` → show non-idle Codex sessions
 
 ### State groups
 
