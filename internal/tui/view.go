@@ -381,10 +381,14 @@ func (m Model) renderActionBar(totalWidth int) string {
 	}
 	if m.canApprove() {
 		actions = append(actions,
-			key.Render("a") + dim.Render(" approve"),
-			key.Render("d") + dim.Render(" deny"),
-			key.Render("A") + dim.Render(" approve+msg"),
-			key.Render("D") + dim.Render(" deny+msg"),
+			key.Render("a")+dim.Render(" approve"),
+			key.Render("d")+dim.Render(" deny"),
+		)
+	}
+	if m.canInput() {
+		actions = append(actions,
+			key.Render("A")+dim.Render(" approve+msg"),
+			key.Render("D")+dim.Render(" deny+msg"),
 		)
 	}
 	actions = append(actions, key.Render("q")+dim.Render(" quit"))

@@ -282,8 +282,9 @@ func (m Model) handleSimpleDeny() (tea.Model, tea.Cmd) {
 }
 
 // enterInputMode はプロンプト付き承認/拒否のテキスト入力モードに入る。
+// Waiting 状態でなくても入力は可能（送信時に Waiting チェック）。
 func (m Model) enterInputMode(mode inputMode) (tea.Model, tea.Cmd) {
-	if !m.canApprove() {
+	if !m.canInput() {
 		return m, nil
 	}
 	m.inputMode = mode
@@ -314,8 +315,9 @@ func (m Model) updateTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if sel == nil || sel.session == nil || sel.session.PaneID == "" {
 			return m, nil
 		}
-		// 状態が変わっていたら送信しない
+		// Waiting 状態でなければ送信せずフラッシュで通知
 		if sel.session.State != core.Waiting || sel.session.Tool != core.ToolClaude {
+			m.flashMessage = "Not in Waiting state - message not sent"
 			return m, nil
 		}
 		paneID := sel.session.PaneID

@@ -173,7 +173,7 @@ func fetchPreviewCmd(term terminal.Terminal, paneID string) tea.Cmd {
 	}
 }
 
-// canApprove は選択中のセッションが承認/拒否操作可能かを返す。
+// canApprove は選択中のセッションが承認/拒否の送信可能かを返す。
 // 条件: 右ペインがアクティブ、Waiting 状態、Claude Code セッション。
 func (m Model) canApprove() bool {
 	if m.activePane != 1 {
@@ -184,6 +184,19 @@ func (m Model) canApprove() bool {
 		return false
 	}
 	return sel.session.State == core.Waiting && sel.session.Tool == core.ToolClaude && sel.session.PaneID != ""
+}
+
+// canInput は選択中のセッションがプロンプト入力モードに入れるかを返す。
+// 条件: 右ペインがアクティブ、Claude Code セッション（Waiting でなくても可）。
+func (m Model) canInput() bool {
+	if m.activePane != 1 {
+		return false
+	}
+	sel := m.selectedSession()
+	if sel == nil || sel.session == nil {
+		return false
+	}
+	return sel.session.Tool == core.ToolClaude && sel.session.PaneID != ""
 }
 
 // selectedSession はカーソル位置のセッションを返す。
