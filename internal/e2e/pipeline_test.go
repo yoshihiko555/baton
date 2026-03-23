@@ -25,6 +25,9 @@ type mockTerminal struct {
 
 func (m *mockTerminal) ListPanes() ([]terminal.Pane, error) { return m.panes, nil }
 func (m *mockTerminal) FocusPane(paneID string) error       { return nil }
+func (m *mockTerminal) SendKeys(paneID string, keys ...string) error {
+	return nil
+}
 func (m *mockTerminal) GetPaneText(paneID string) (string, error) {
 	if m.paneText != nil {
 		if text, ok := m.paneText[paneID]; ok {

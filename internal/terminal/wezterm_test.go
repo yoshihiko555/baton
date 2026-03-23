@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -235,5 +236,80 @@ func TestNormalizeCWD(t *testing.T) {
 				t.Errorf("normalizeCWD(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWezTermSendKeys(t *testing.T) {
+	tests := []struct {
+		name     string
+		keys     []string
+		wantText string
+	}{
+		{
+			name:     "literal text",
+			keys:     []string{"hello", " world"},
+			wantText: "hello world",
+		},
+		{
+			name:     "special keys",
+			keys:     []string{"Down", "Down", "Enter"},
+			wantText: "\x1b[B\x1b[B\r",
+		},
+		{
+			name:     "mixed text and key",
+			keys:     []string{"fix tests", "Enter"},
+			wantText: "fix tests\r",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var capturedArgs []string
+			wez := &WezTerminal{
+				execFn: func(args ...string) ([]byte, error) {
+					capturedArgs = append([]string{}, args...)
+					return []byte(""), nil
+				},
+			}
+
+			// Act
+			err := wez.SendKeys("42", tt.keys...)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SendKeys returned unexpected error: %v", err)
+			}
+			wantArgs := []string{"cli", "send-text", "--pane-id", "42", "--no-paste", tt.wantText}
+			if !reflect.DeepEqual(capturedArgs, wantArgs) {
+				t.Fatalf("unexpected args: got=%v want=%v", capturedArgs, wantArgs)
+			}
+		})
+	}
+}
+
+func TestWezTermSendKeysError(t *testing.T) {
+	// Arrange
+	var capturedArgs []string
+	wez := &WezTerminal{
+		execFn: func(args ...string) ([]byte, error) {
+			capturedArgs = append([]string{}, args...)
+			return nil, errors.New("send-text failed")
+		},
+	}
+
+	// Act
+	err := wez.SendKeys("42", "Down", "Enter")
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error from exec failure")
+	}
+	if !strings.Contains(err.Error(), "send-text") {
+		t.Errorf("expected error to contain 'send-text', got: %v", err)
+	}
+	wantArgs := []string{"cli", "send-text", "--pane-id", "42", "--no-paste", "\x1b[B\r"}
+	if !reflect.DeepEqual(capturedArgs, wantArgs) {
+		t.Fatalf("unexpected args: got=%v want=%v", capturedArgs, wantArgs)
 	}
 }

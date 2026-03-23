@@ -79,12 +79,31 @@ func (m Model) View() string {
 	statusBar := m.renderStatusBar(innerWidth)
 	actionBar := m.renderActionBar(innerWidth)
 
+	// テキスト入力バー（プロンプト付き承認/拒否）
+	var inputBar string
+	if m.inputMode != inputNone {
+		label := "Approve prompt"
+		if m.inputMode == inputDeny {
+			label = "Reject feedback"
+		}
+		labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF2DAA")).Bold(true)
+		inputBar = labelStyle.Render(label+": ") + m.textInput.View()
+	}
+
 	// 中身を組み立て
 	var inner string
-	if m.showSubMenu {
+	if m.inputMode != inputNone {
+		inner = lipgloss.JoinVertical(lipgloss.Left, headerLine, "", panes, inputBar, statusBar)
+	} else if m.showSubMenu {
 		inner = lipgloss.JoinVertical(lipgloss.Left, headerLine, "", panes, m.renderSubMenu(), statusBar, actionBar)
 	} else {
 		inner = lipgloss.JoinVertical(lipgloss.Left, headerLine, "", panes, statusBar, actionBar)
+	}
+
+	if m.flashMessage != "" {
+		flashStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#15F5BA")).Bold(true)
+		flashLine := flashStyle.Render(">> " + m.flashMessage)
+		inner = lipgloss.JoinVertical(lipgloss.Left, flashLine, inner)
 	}
 
 	if m.jumping {
@@ -336,8 +355,20 @@ func (m Model) renderActionBar(totalWidth int) string {
 		key.Render("j/k") + dim.Render(" move"),
 		key.Render("tab") + dim.Render(" pane"),
 		key.Render("enter") + dim.Render(" jump"),
-		key.Render("q") + dim.Render(" quit"),
 	}
+	if m.canApprove() {
+		actions = append(actions,
+			key.Render("a")+dim.Render(" approve"),
+			key.Render("d")+dim.Render(" deny"),
+		)
+	}
+	if m.canInput() {
+		actions = append(actions,
+			key.Render("A")+dim.Render(" approve+msg"),
+			key.Render("D")+dim.Render(" deny+msg"),
+		)
+	}
+	actions = append(actions, key.Render("q")+dim.Render(" quit"))
 
 	bar := " " + strings.Join(actions, dim.Render(" . "))
 	return actionBarStyle.Width(max(1, totalWidth)).Render(bar)

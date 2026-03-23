@@ -51,6 +51,7 @@ type tuiMockTerminal struct {
 
 func (t *tuiMockTerminal) ListPanes() ([]terminal.Pane, error)           { return nil, nil }
 func (t *tuiMockTerminal) FocusPane(paneID string) error                 { t.focusedPane = paneID; return nil }
+func (t *tuiMockTerminal) SendKeys(paneID string, keys ...string) error  { return nil }
 func (t *tuiMockTerminal) GetPaneText(paneID string) (string, error)     { return t.paneText, nil }
 func (t *tuiMockTerminal) IsAvailable() bool                             { return true }
 func (t *tuiMockTerminal) Name() string                                  { return "mock" }

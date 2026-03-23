@@ -10,6 +10,8 @@ type Terminal interface {
 	FocusPane(paneID string) error
 	// GetPaneText は指定ペインの画面テキスト末尾を返す。
 	GetPaneText(paneID string) (string, error)
+	// SendKeys は指定ペインにキーシーケンスを送信する。
+	SendKeys(paneID string, keys ...string) error
 	// IsAvailable はターミナルが利用可能かを返す。
 	IsAvailable() bool
 	// Name はターミナル識別子（例: "wezterm", "tmux"）を返す。

@@ -588,8 +588,9 @@ func (m *paneTextTerminal) GetPaneText(paneID string) (string, error) {
 	}
 	return "", fmt.Errorf("pane not found: %s", paneID)
 }
-func (m *paneTextTerminal) IsAvailable() bool { return true }
-func (m *paneTextTerminal) Name() string      { return "mock" }
+func (m *paneTextTerminal) SendKeys(paneID string, keys ...string) error { return nil }
+func (m *paneTextTerminal) IsAvailable() bool                            { return true }
+func (m *paneTextTerminal) Name() string                                 { return "mock" }
 
 func TestRefineGeminiThinkingToWaiting(t *testing.T) {
 	// Gemini の Thinking 状態がペインテキストの承認パターンで Waiting に変わることを確認する。

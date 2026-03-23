@@ -7,12 +7,36 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/yoshihiko555/baton/internal/config"
 	"github.com/yoshihiko555/baton/internal/core"
 	"github.com/yoshihiko555/baton/internal/terminal"
 )
+
+// inputMode はテキスト入力モードの種別を表す。
+type inputMode int
+
+const (
+	inputNone    inputMode = iota // 通常モード
+	inputApprove                  // プロンプト付き承認（A）
+	inputDeny                     // プロンプト付き拒否（D）
+)
+
+// ApprovalResultMsg は承認/拒否操作の完了を通知する。
+type ApprovalResultMsg struct {
+	Err   error
+	Label string // 操作の表示名（例: "Approved", "Denied: fix tests"）
+}
+
+// FlashClearMsg はフラッシュメッセージの消去タイマー発火時に送られる。
+type FlashClearMsg struct {
+	Generation uint64
+}
+
+// flashDuration はフラッシュメッセージの表示時間。
+const flashDuration = 5 * time.Second
 
 // TickMsg は定期リフレッシュタイマー発火時に送られる。
 type TickMsg struct{}
@@ -72,6 +96,7 @@ type Model struct {
 	width      int
 	height     int
 	err        error
+	scanErr    error // スキャン由来のエラー（ScanResultMsg でのみクリア対象）
 
 	previewText     string
 	previewPaneID   string // 現在プレビュー中の PaneID
@@ -83,6 +108,12 @@ type Model struct {
 
 	jumping    bool
 	exitOnJump bool
+
+	// 承認/拒否操作
+	inputMode    inputMode
+	textInput    textinput.Model
+	flashMessage string // 操作結果の一時表示メッセージ
+	flashGen     uint64 // フラッシュ消去タイマーの世代番号
 }
 
 // NewModel はデフォルト設定で TUI モデルを初期化する。
@@ -94,6 +125,8 @@ func NewModel(
 	cfg config.Config,
 	exitOnJump bool,
 ) Model {
+	ti := textinput.New()
+	ti.CharLimit = 500
 	return Model{
 		scanner:      scanner,
 		stateUpdater: stateUpdater,
@@ -102,6 +135,7 @@ func NewModel(
 		config:       cfg,
 		theme:        ResolveTheme(cfg.Theme),
 		exitOnJump:   exitOnJump,
+		textInput:    ti,
 	}
 }
 
@@ -149,6 +183,32 @@ func fetchPreviewCmd(term terminal.Terminal, paneID string) tea.Cmd {
 		text, err := term.GetPaneText(paneID)
 		return PreviewResultMsg{Text: text, Err: err}
 	}
+}
+
+// canApprove は選択中のセッションが承認/拒否の送信可能かを返す。
+// 条件: 右ペインがアクティブ、Waiting 状態、Claude Code セッション。
+func (m Model) canApprove() bool {
+	if m.activePane != 1 {
+		return false
+	}
+	sel := m.selectedSession()
+	if sel == nil || sel.session == nil {
+		return false
+	}
+	return sel.session.State == core.Waiting && sel.session.Tool == core.ToolClaude && sel.session.PaneID != ""
+}
+
+// canInput は選択中のセッションがプロンプト入力モードに入れるかを返す。
+// 条件: 右ペインがアクティブ、Claude Code セッション（Waiting でなくても可）。
+func (m Model) canInput() bool {
+	if m.activePane != 1 {
+		return false
+	}
+	sel := m.selectedSession()
+	if sel == nil || sel.session == nil {
+		return false
+	}
+	return sel.session.Tool == core.ToolClaude && sel.session.PaneID != ""
 }
 
 // selectedSession はカーソル位置のセッションを返す。

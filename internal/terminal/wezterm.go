@@ -145,6 +145,48 @@ func (w *WezTerminal) GetPaneText(paneID string) (string, error) {
 	return strings.Join(lines[start:], "\n"), nil
 }
 
+// SendKeys は指定ペインにテキストを送信する。
+func (w *WezTerminal) SendKeys(paneID string, keys ...string) error {
+	if w == nil || w.execFn == nil {
+		return fmt.Errorf("wezterm exec function is not configured")
+	}
+
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(weztermKeySequence(k))
+	}
+
+	text := b.String()
+	_, err := w.execFn("cli", "send-text", "--pane-id", paneID, "--no-paste", text)
+	if err != nil {
+		return fmt.Errorf("send-text: %w", err)
+	}
+	return nil
+}
+
+// weztermKeySequence は共通キー名を WezTerm の送信文字列へ変換する。
+// `wezterm cli` には send-key がないため、制御文字/ANSI シーケンスで送る。
+func weztermKeySequence(key string) string {
+	switch key {
+	case "Enter", "Return":
+		return "\r"
+	case "Tab":
+		return "\t"
+	case "Escape", "Esc":
+		return "\x1b"
+	case "Up":
+		return "\x1b[A"
+	case "Down":
+		return "\x1b[B"
+	case "Right":
+		return "\x1b[C"
+	case "Left":
+		return "\x1b[D"
+	default:
+		return key
+	}
+}
+
 // IsAvailable は PATH 上に wezterm 実行ファイルがあるかを返す。
 func (w *WezTerminal) IsAvailable() bool {
 	_, err := exec.LookPath("wezterm")

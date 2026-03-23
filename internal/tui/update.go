@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,11 +20,42 @@ var (
 
 	upKeys   = key.NewBinding(key.WithKeys("k", "up"))
 	downKeys = key.NewBinding(key.WithKeys("j", "down"))
+
+	approveKey     = key.NewBinding(key.WithKeys("a"))
+	denyKey        = key.NewBinding(key.WithKeys("d"))
+	promptApprove  = key.NewBinding(key.WithKeys("A"))
+	promptDeny     = key.NewBinding(key.WithKeys("D"))
 )
+
+// approvalSendDelay は承認/拒否確定後に追加入力を送るまでの待機時間。
+const approvalSendDelay = 1 * time.Second
+
+func flashClearCmd(generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		<-time.After(flashDuration)
+		return FlashClearMsg{Generation: generation}
+	}
+}
 
 // Update は tea.Model のメッセージ処理を行う。
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case ApprovalResultMsg:
+		m.flashGen++
+		currentGen := m.flashGen
+		if msg.Err != nil {
+			m.err = msg.Err
+			m.flashMessage = ""
+		} else {
+			m.err = nil
+			m.flashMessage = msg.Label
+		}
+		return m, flashClearCmd(currentGen)
+	case FlashClearMsg:
+		if msg.Generation == m.flashGen {
+			m.flashMessage = ""
+		}
+		return m, nil
 	case JumpDoneMsg:
 		if msg.Err != nil {
 			m.err = msg.Err
@@ -38,6 +70,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.jumping {
 			return m, nil
+		}
+		// テキスト入力モード中
+		if m.inputMode != inputNone {
+			return m.updateTextInput(msg)
 		}
 		if m.showSubMenu {
 			return m.updateSubMenu(msg)
@@ -54,6 +90,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.moveCursor(-1)
 		case key.Matches(msg, downKeys):
 			return m.moveCursor(1)
+		case key.Matches(msg, approveKey):
+			return m.handleSimpleApprove()
+		case key.Matches(msg, denyKey):
+			return m.handleSimpleDeny()
+		case key.Matches(msg, promptApprove):
+			return m.enterInputMode(inputApprove)
+		case key.Matches(msg, promptDeny):
+			return m.enterInputMode(inputDeny)
 		}
 		return m, nil
 	case tea.WindowSizeMsg:
@@ -63,6 +107,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TickMsg:
 		return m, doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader, m.terminal)
 	case ScanResultMsg:
+		// スキャン成功時は scanErr のみクリアし、操作系エラーは保持する。
+		if m.err != nil && m.scanErr != nil && m.err == m.scanErr {
+			m.err = nil
+		}
+		m.scanErr = nil
 		m.latestProjects = msg.Projects
 		m.latestSummary = msg.Summary
 		m.latestPanes = msg.Panes
@@ -79,6 +128,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case ErrMsg:
+		m.scanErr = msg
 		m.err = msg
 		return m, tickCmd(m.config.ScanInterval)
 	}
@@ -225,6 +275,112 @@ func (m Model) updateSubMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// handleSimpleApprove は単純承認（Enter）を送信する。
+// Claude Code の承認プロンプトはリスト選択 UI で "Yes" がデフォルト選択済み。
+func (m Model) handleSimpleApprove() (tea.Model, tea.Cmd) {
+	if !m.canApprove() {
+		return m, nil
+	}
+	paneID := m.selectedSession().session.PaneID
+	term := m.terminal
+	return m, func() tea.Msg {
+		err := term.SendKeys(paneID, "Enter")
+		return ApprovalResultMsg{Err: err, Label: "Approved"}
+	}
+}
+
+// handleSimpleDeny は単純拒否（Down Down Enter）を送信する。
+// Claude Code の承認プロンプトで 3番目の "No" を選択して確定する。
+func (m Model) handleSimpleDeny() (tea.Model, tea.Cmd) {
+	if !m.canApprove() {
+		return m, nil
+	}
+	paneID := m.selectedSession().session.PaneID
+	term := m.terminal
+	return m, func() tea.Msg {
+		err := term.SendKeys(paneID, "Down", "Down", "Enter")
+		return ApprovalResultMsg{Err: err, Label: "Denied"}
+	}
+}
+
+// enterInputMode はプロンプト付き承認/拒否のテキスト入力モードに入る。
+// Waiting 状態でなくても入力は可能（送信時に Waiting チェック）。
+func (m Model) enterInputMode(mode inputMode) (tea.Model, tea.Cmd) {
+	if !m.canInput() {
+		return m, nil
+	}
+	m.inputMode = mode
+	m.textInput.Reset()
+	if mode == inputApprove {
+		m.textInput.Placeholder = "approval prompt..."
+	} else {
+		m.textInput.Placeholder = "rejection feedback..."
+	}
+	m.textInput.Focus()
+	return m, nil
+}
+
+// updateTextInput はテキスト入力モード中のキー処理を行う。
+func (m Model) updateTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, escKey):
+		m.inputMode = inputNone
+		m.textInput.Blur()
+		return m, nil
+	case key.Matches(msg, enterKey):
+		text := m.textInput.Value()
+		m.textInput.Blur()
+		mode := m.inputMode
+		m.inputMode = inputNone
+
+		sel := m.selectedSession()
+		if sel == nil || sel.session == nil || sel.session.PaneID == "" {
+			return m, nil
+		}
+		// Waiting 状態でなければ送信せずフラッシュで通知
+		if sel.session.State != core.Waiting || sel.session.Tool != core.ToolClaude {
+			m.flashMessage = "Not in Waiting state - message not sent"
+			m.flashGen++
+			return m, flashClearCmd(m.flashGen)
+		}
+		paneID := sel.session.PaneID
+		term := m.terminal
+
+		return m, func() tea.Msg {
+			var label string
+			var triggerKey string
+			if mode == inputApprove {
+				triggerKey = "Enter"
+				label = "Approved"
+			} else {
+				triggerKey = "Escape"
+				label = "Denied"
+			}
+			if text != "" {
+				label += ": " + text
+			}
+
+			// 承認/拒否を先に確定し、Claude Code がメインプロンプトに
+			// 戻るのを待ってからテキストを新しいメッセージとして送信する
+			err := term.SendKeys(paneID, triggerKey)
+			if err != nil {
+				return ApprovalResultMsg{Err: err, Label: label}
+			}
+			time.Sleep(approvalSendDelay)
+
+			if text != "" {
+				err = term.SendKeys(paneID, text, "Enter")
+			}
+			return ApprovalResultMsg{Err: err, Label: label}
+		}
+	}
+
+	// その他のキーは textinput に委譲
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
 }
 
 // --- 以下は v1 互換のために残す型（テストが参照） ---
