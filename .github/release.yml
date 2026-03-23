@@ -24,3 +24,6 @@ changelog:
         - test
         - ci
         - dependencies
+    - title: Other Changes
+      labels:
+        - "*"

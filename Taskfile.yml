@@ -62,7 +62,10 @@ tasks:
               esac
             else
               v="${latest#v}"
-              IFS='.' read -r major minor patch <<< "$v"
+              major="${v%%.*}"
+              rest="${v#*.}"
+              minor="${rest%%.*}"
+              patch="${rest#*.}"
               case "{{.BUMP}}" in
                 major) echo "v$((major+1)).0.0" ;;
                 minor) echo "v${major}.$((minor+1)).0" ;;
@@ -123,7 +126,8 @@ tasks:
       - cmd: |
           current=$(git branch --show-current)
           if [ "$current" != "{{.MAIN_BRANCH}}" ]; then
-            echo "  ⚠ 現在 $current ブランチです。リリース時に {{.MAIN_BRANCH}} へ切り替えます。"
+            echo "  ⚠ 現在 $current ブランチです。release は {{.MAIN_BRANCH}} ブランチ上で実行してください。"
+            exit 1
           else
             echo "  ✓ {{.MAIN_BRANCH}} ブランチです"
           fi
