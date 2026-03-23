@@ -385,8 +385,15 @@ func sessionMatchesFilter(session *core.Session, project *core.Project, filter s
 		return false
 	}
 
-	for _, stateToken := range filter.includeStates {
-		if !stateMatchesToken(session.State, stateToken) {
+	if len(filter.includeStates) > 0 {
+		matched := false
+		for _, stateToken := range filter.includeStates {
+			if stateMatchesToken(session.State, stateToken) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
 			return false
 		}
 	}
