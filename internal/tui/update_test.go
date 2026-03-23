@@ -1213,3 +1213,217 @@ func TestInputModeEscapeCancels(t *testing.T) {
 		t.Error("expected nil cmd after Esc cancel")
 	}
 }
+
+// --- canInput tests ---
+
+// TestCanInputOnClaudeSession verifies canInput returns true for a Claude session (even non-Waiting) on right pane.
+func TestCanInputOnClaudeSession(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Idle, Tool: core.ToolClaude, PaneID: "%1"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+	m.activePane = 1
+
+	if !m.canInput() {
+		t.Error("canInput() = false, want true for Claude session on right pane")
+	}
+}
+
+// TestCanInputFalseOnLeftPane verifies canInput returns false when left pane is active.
+func TestCanInputFalseOnLeftPane(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Waiting, Tool: core.ToolClaude, PaneID: "%1"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+	m.activePane = 0 // left pane
+
+	if m.canInput() {
+		t.Error("canInput() = true, want false when left pane is active")
+	}
+}
+
+// TestCanInputFalseOnNonClaude verifies canInput returns false for Codex and Gemini sessions.
+func TestCanInputFalseOnNonClaude(t *testing.T) {
+	for _, tool := range []core.ToolType{core.ToolCodex, core.ToolGemini} {
+		m, _, _, _, _ := newTestModel()
+		projects := []core.Project{
+			{
+				Path: "/project-a",
+				Sessions: []*core.Session{
+					{PID: 100, State: core.Waiting, Tool: tool, PaneID: "%1"},
+				},
+			},
+		}
+		m = feedProjects(m, projects)
+		m.activePane = 1
+
+		if m.canInput() {
+			t.Errorf("canInput() = true for tool=%v, want false", tool)
+		}
+	}
+}
+
+// --- flash message tests ---
+
+// TestFlashClearMsg verifies FlashClearMsg clears flashMessage.
+func TestFlashClearMsg(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	m.flashMessage = "some flash"
+
+	updated, cmd := m.Update(FlashClearMsg{})
+	m = updated.(Model)
+
+	if m.flashMessage != "" {
+		t.Errorf("flashMessage = %q, want empty after FlashClearMsg", m.flashMessage)
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd after FlashClearMsg")
+	}
+}
+
+// TestApprovalResultSetsFlash verifies successful ApprovalResultMsg sets flashMessage to Label.
+func TestApprovalResultSetsFlash(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	updated, cmd := m.Update(ApprovalResultMsg{Err: nil, Label: "Approved"})
+	m = updated.(Model)
+
+	if m.flashMessage != "Approved" {
+		t.Errorf("flashMessage = %q, want 'Approved'", m.flashMessage)
+	}
+	if m.err != nil {
+		t.Errorf("err = %v, want nil on success", m.err)
+	}
+	if cmd == nil {
+		t.Error("expected flash-clear timer cmd")
+	}
+}
+
+// TestApprovalResultErrorClearsFlash verifies failed ApprovalResultMsg sets err and clears flashMessage.
+func TestApprovalResultErrorClearsFlash(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	m.flashMessage = "previous flash"
+
+	testErr := fmt.Errorf("terminal error")
+	updated, cmd := m.Update(ApprovalResultMsg{Err: testErr, Label: "Approved"})
+	m = updated.(Model)
+
+	if m.err == nil {
+		t.Error("err should be set on failure")
+	}
+	if m.flashMessage != "" {
+		t.Errorf("flashMessage = %q, want empty on error", m.flashMessage)
+	}
+	if cmd == nil {
+		t.Error("expected flash-clear timer cmd even on error")
+	}
+}
+
+// --- prompt input mode tests ---
+
+// TestPromptInputOnNonWaitingShowsWarning verifies that entering text and pressing Enter
+// on a non-Waiting session sets a warning flash instead of sending keys.
+func TestPromptInputOnNonWaitingShowsWarning(t *testing.T) {
+	m, _, _, _, term := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Idle, Tool: core.ToolClaude, PaneID: "%1"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+	m.activePane = 1
+
+	// Arrange: enter input mode with A key (Idle Claude — canInput true, canApprove false)
+	aMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}}
+	updated, _ := m.Update(aMsg)
+	m = updated.(Model)
+
+	if m.inputMode != inputApprove {
+		t.Fatalf("inputMode = %d, want inputApprove", m.inputMode)
+	}
+
+	// Act: type some text
+	for _, r := range "hello" {
+		charMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+		updated, _ = m.Update(charMsg)
+		m = updated.(Model)
+	}
+
+	// Act: press Enter — should NOT send keys, should set warning flash
+	enterMsg := tea.KeyMsg{Type: tea.KeyEnter}
+	updated, cmd := m.Update(enterMsg)
+	m = updated.(Model)
+
+	// Assert
+	if m.inputMode != inputNone {
+		t.Errorf("inputMode = %d, want inputNone after Enter", m.inputMode)
+	}
+	if !strings.Contains(m.flashMessage, "Not in Waiting state") {
+		t.Errorf("flashMessage = %q, want to contain 'Not in Waiting state'", m.flashMessage)
+	}
+	if cmd == nil {
+		t.Error("expected flash-clear timer cmd")
+	}
+	if len(term.sentKeys) > 0 {
+		t.Errorf("sentKeys = %v, want no keys sent for non-Waiting session", term.sentKeys)
+	}
+}
+
+// TestPromptInputAvailableOnIdleClaude verifies A/D keys enter input mode on Idle Claude session (right pane).
+func TestPromptInputAvailableOnIdleClaude(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Idle, Tool: core.ToolClaude, PaneID: "%1"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+	m.activePane = 1
+
+	// Arrange & Act: A key should enter inputApprove mode
+	aMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}}
+	updated, _ := m.Update(aMsg)
+	m = updated.(Model)
+
+	// Assert
+	if m.inputMode != inputApprove {
+		t.Errorf("inputMode = %d after A on Idle Claude, want inputApprove", m.inputMode)
+	}
+
+	// Reset: press Esc
+	escMsg := tea.KeyMsg{Type: tea.KeyEsc}
+	updated, _ = m.Update(escMsg)
+	m = updated.(Model)
+
+	if m.inputMode != inputNone {
+		t.Fatalf("inputMode = %d, want inputNone after Esc", m.inputMode)
+	}
+
+	// Arrange & Act: D key should enter inputDeny mode
+	dMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}
+	updated, _ = m.Update(dMsg)
+	m = updated.(Model)
+
+	// Assert
+	if m.inputMode != inputDeny {
+		t.Errorf("inputMode = %d after D on Idle Claude, want inputDeny", m.inputMode)
+	}
+}

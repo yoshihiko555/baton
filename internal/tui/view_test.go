@@ -300,3 +300,68 @@ func TestActionBarContainsKeybindings(t *testing.T) {
 		}
 	}
 }
+
+// TestViewShowsFlashMessage verifies View() contains flash text when flashMessage is set.
+func TestViewShowsFlashMessage(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+
+	m.flashMessage = "Approved"
+
+	view := m.View()
+	if !strings.Contains(view, "Approved") {
+		t.Error("View() should contain flash message text 'Approved'")
+	}
+}
+
+// TestActionBarShowsApproveHints verifies action bar shows "approve" when canApprove() is true.
+func TestActionBarShowsApproveHints(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+
+	// Arrange: Waiting Claude session with right pane active so canApprove() returns true
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Waiting, Tool: core.ToolClaude, PaneID: "%1"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+	m.activePane = 1
+
+	view := m.View()
+	if !strings.Contains(view, "approve") {
+		t.Error("action bar should contain 'approve' hint when canApprove() is true")
+	}
+}
+
+// TestActionBarShowsPromptHints verifies action bar shows "approve+msg" when canInput() is true but not canApprove().
+func TestActionBarShowsPromptHints(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+
+	// Arrange: Idle Claude session — canInput() = true, canApprove() = false
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Idle, Tool: core.ToolClaude, PaneID: "%1"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+	m.activePane = 1
+
+	view := m.View()
+	if !strings.Contains(view, "approve+msg") {
+		t.Error("action bar should contain 'approve+msg' hint when canInput() is true")
+	}
+}

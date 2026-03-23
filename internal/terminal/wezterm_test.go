@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -235,5 +236,48 @@ func TestNormalizeCWD(t *testing.T) {
 				t.Errorf("normalizeCWD(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWezTermSendKeys(t *testing.T) {
+	// Arrange
+	var capturedArgs []string
+	wez := &WezTerminal{
+		execFn: func(args ...string) ([]byte, error) {
+			capturedArgs = append([]string{}, args...)
+			return []byte(""), nil
+		},
+	}
+
+	// Act
+	err := wez.SendKeys("42", "hello", " world")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SendKeys returned unexpected error: %v", err)
+	}
+	wantArgs := []string{"cli", "send-text", "--pane-id", "42", "--no-paste", "hello world"}
+	if !reflect.DeepEqual(capturedArgs, wantArgs) {
+		t.Fatalf("unexpected args: got=%v want=%v", capturedArgs, wantArgs)
+	}
+}
+
+func TestWezTermSendKeysError(t *testing.T) {
+	// Arrange
+	wez := &WezTerminal{
+		execFn: func(args ...string) ([]byte, error) {
+			return nil, errors.New("send-text failed")
+		},
+	}
+
+	// Act
+	err := wez.SendKeys("42", "hello")
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error from exec failure")
+	}
+	if !strings.Contains(err.Error(), "send-text") {
+		t.Errorf("expected error to contain 'send-text', got: %v", err)
 	}
 }

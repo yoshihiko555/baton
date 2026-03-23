@@ -264,7 +264,7 @@ func TestTmuxGetPaneText80LineLimit(t *testing.T) {
 	// Arrange: generate 100 lines "line 1" ... "line 100"
 	var sb strings.Builder
 	for i := 1; i <= 100; i++ {
-		sb.WriteString(fmt.Sprintf("line %d\n", i))
+		fmt.Fprintf(&sb, "line %d\n", i)
 	}
 	input := sb.String()
 
@@ -416,6 +416,42 @@ func TestHookSessionPattern(t *testing.T) {
 				t.Errorf("hookSessionPattern.MatchString(%q) = %v, want %v", tc.input, got, tc.match)
 			}
 		})
+	}
+}
+
+func TestTmuxSendKeys(t *testing.T) {
+	// Arrange
+	var capturedArgs []string
+	tmx := &TmuxTerminal{
+		execFn: func(args ...string) ([]byte, error) {
+			capturedArgs = append([]string{}, args...)
+			return []byte(""), nil
+		},
+	}
+
+	// Act
+	err := tmx.SendKeys("%3", "q", "Enter")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SendKeys returned unexpected error: %v", err)
+	}
+	wantArgs := []string{"send-keys", "-t", "%3", "q", "Enter"}
+	if !reflect.DeepEqual(capturedArgs, wantArgs) {
+		t.Fatalf("unexpected args: got=%v want=%v", capturedArgs, wantArgs)
+	}
+}
+
+func TestTmuxSendKeysNilExec(t *testing.T) {
+	// Arrange
+	tmx := &TmuxTerminal{execFn: nil}
+
+	// Act
+	err := tmx.SendKeys("%3", "q")
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for nil execFn")
 	}
 }
 
