@@ -27,6 +27,9 @@ var (
 	promptDeny     = key.NewBinding(key.WithKeys("D"))
 )
 
+// approvalSendDelay は承認/拒否確定後に追加入力を送るまでの待機時間。
+const approvalSendDelay = 1 * time.Second
+
 // Update は tea.Model のメッセージ処理を行う。
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -354,7 +357,7 @@ func (m Model) updateTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				return ApprovalResultMsg{Err: err, Label: label}
 			}
-			time.Sleep(1 * time.Second)
+			time.Sleep(approvalSendDelay)
 
 			if text != "" {
 				err = term.SendKeys(paneID, text, "Enter")
