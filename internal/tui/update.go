@@ -261,7 +261,8 @@ func (m Model) updateSubMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleSimpleApprove は単純承認（y + Enter）を送信する。
+// handleSimpleApprove は単純承認（y）を送信する。
+// Claude Code の承認プロンプトは y 単押しで即承認されるため Enter は不要。
 func (m Model) handleSimpleApprove() (tea.Model, tea.Cmd) {
 	if !m.canApprove() {
 		return m, nil
@@ -269,12 +270,13 @@ func (m Model) handleSimpleApprove() (tea.Model, tea.Cmd) {
 	paneID := m.selectedSession().session.PaneID
 	term := m.terminal
 	return m, func() tea.Msg {
-		err := term.SendKeys(paneID, "y", "Enter")
+		err := term.SendKeys(paneID, "y")
 		return ApprovalResultMsg{Err: err, Label: "Approved"}
 	}
 }
 
-// handleSimpleDeny は単純拒否（n + Enter）を送信する。
+// handleSimpleDeny は単純拒否（n）を送信する。
+// Claude Code の承認プロンプトは n 単押しで即拒否されるため Enter は不要。
 func (m Model) handleSimpleDeny() (tea.Model, tea.Cmd) {
 	if !m.canApprove() {
 		return m, nil
@@ -282,7 +284,7 @@ func (m Model) handleSimpleDeny() (tea.Model, tea.Cmd) {
 	paneID := m.selectedSession().session.PaneID
 	term := m.terminal
 	return m, func() tea.Msg {
-		err := term.SendKeys(paneID, "n", "Enter")
+		err := term.SendKeys(paneID, "n")
 		return ApprovalResultMsg{Err: err, Label: "Denied"}
 	}
 }

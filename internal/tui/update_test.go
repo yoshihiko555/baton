@@ -1024,8 +1024,8 @@ func TestSimpleApproveOnWaitingClaude(t *testing.T) {
 	if _, ok := result.(ApprovalResultMsg); !ok {
 		t.Fatalf("expected ApprovalResultMsg, got %T", result)
 	}
-	if len(term.sentKeys) < 2 || term.sentKeys[0] != "y" || term.sentKeys[1] != "Enter" {
-		t.Errorf("sentKeys = %v, want [y Enter]", term.sentKeys)
+	if len(term.sentKeys) != 1 || term.sentKeys[0] != "y" {
+		t.Errorf("sentKeys = %v, want [y]", term.sentKeys)
 	}
 }
 
@@ -1044,8 +1044,8 @@ func TestSimpleDenyOnWaitingClaude(t *testing.T) {
 	if _, ok := result.(ApprovalResultMsg); !ok {
 		t.Fatalf("expected ApprovalResultMsg, got %T", result)
 	}
-	if len(term.sentKeys) < 2 || term.sentKeys[0] != "n" || term.sentKeys[1] != "Enter" {
-		t.Errorf("sentKeys = %v, want [n Enter]", term.sentKeys)
+	if len(term.sentKeys) != 1 || term.sentKeys[0] != "n" {
+		t.Errorf("sentKeys = %v, want [n]", term.sentKeys)
 	}
 }
 
