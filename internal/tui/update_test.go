@@ -1907,6 +1907,70 @@ func TestFilterEnterJumpsToFilteredSession(t *testing.T) {
 	}
 }
 
+func TestFilterMatchesToolName(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "alpha",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Idle, Tool: core.ToolClaude, PaneID: "%1"},
+				{PID: 200, State: core.Idle, Tool: core.ToolCodex, PaneID: "%2"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("codex")})
+	m = updated.(Model)
+
+	if got := visibleSessionCount(m.entries); got != 1 {
+		t.Fatalf("visible sessions = %d, want 1 by tool filter", got)
+	}
+	sel := m.selectedSession()
+	if sel == nil || sel.session == nil {
+		t.Fatal("expected selected session after tool filter")
+	}
+	if sel.session.Tool != core.ToolCodex {
+		t.Fatalf("selected tool = %v, want codex", sel.session.Tool)
+	}
+}
+
+func TestFilterWorkingStateAlias(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "alpha",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Thinking, Tool: core.ToolClaude, PaneID: "%1"},
+				{PID: 200, State: core.ToolUse, Tool: core.ToolCodex, PaneID: "%2"},
+				{PID: 300, State: core.Idle, Tool: core.ToolGemini, PaneID: "%3"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("working")})
+	m = updated.(Model)
+
+	if got := visibleSessionCount(m.entries); got != 2 {
+		t.Fatalf("visible sessions = %d, want 2 for working filter", got)
+	}
+	for _, e := range m.entries {
+		if e.isHeader || e.session == nil {
+			continue
+		}
+		if e.session.State != core.Thinking && e.session.State != core.ToolUse {
+			t.Fatalf("unexpected state %v for working filter", e.session.State)
+		}
+	}
+}
+
 func visibleSessionCount(entries []sessionEntry) int {
 	count := 0
 	for _, e := range entries {
