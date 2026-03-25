@@ -28,6 +28,7 @@ const (
 type ApprovalResultMsg struct {
 	Err   error
 	Label string // 操作の表示名（例: "Approved", "Denied: fix tests"）
+	PaneID string // 承認/拒否を送信した対象ペイン
 }
 
 // FlashClearMsg はフラッシュメッセージの消去タイマー発火時に送られる。
@@ -50,8 +51,9 @@ type ScanResultMsg struct {
 
 // PreviewResultMsg はプレビューテキスト取得完了時に送られる。
 type PreviewResultMsg struct {
-	Text string
-	Err  error
+	PaneID string
+	Text   string
+	Err    error
 }
 
 // ErrMsg は非同期コマンドで発生したエラーを運ぶ。
@@ -196,7 +198,18 @@ func doScanCmd(
 func fetchPreviewCmd(term terminal.Terminal, paneID string) tea.Cmd {
 	return func() tea.Msg {
 		text, err := term.GetPaneText(paneID)
-		return PreviewResultMsg{Text: text, Err: err}
+		return PreviewResultMsg{PaneID: paneID, Text: text, Err: err}
+	}
+}
+
+// fetchPreviewDelayedCmd は指定遅延後にプレビューを取得する。
+func fetchPreviewDelayedCmd(term terminal.Terminal, paneID string, delay time.Duration) tea.Cmd {
+	return func() tea.Msg {
+		if delay > 0 {
+			<-time.After(delay)
+		}
+		text, err := term.GetPaneText(paneID)
+		return PreviewResultMsg{PaneID: paneID, Text: text, Err: err}
 	}
 }
 

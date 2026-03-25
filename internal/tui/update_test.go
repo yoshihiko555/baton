@@ -1059,8 +1059,12 @@ func TestSimpleApproveOnWaitingClaude(t *testing.T) {
 
 	// コマンドを実行して SendKeys を確認
 	result := cmd()
-	if _, ok := result.(ApprovalResultMsg); !ok {
+	msgResult, ok := result.(ApprovalResultMsg)
+	if !ok {
 		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+	if msgResult.PaneID != "%1" {
+		t.Errorf("PaneID = %q, want %%1", msgResult.PaneID)
 	}
 	if len(term.sentKeys) != 1 || term.sentKeys[0] != "Enter" {
 		t.Errorf("sentKeys = %v, want [Enter]", term.sentKeys)
@@ -1079,8 +1083,12 @@ func TestSimpleDenyOnWaitingClaude(t *testing.T) {
 	}
 
 	result := cmd()
-	if _, ok := result.(ApprovalResultMsg); !ok {
+	msgResult, ok := result.(ApprovalResultMsg)
+	if !ok {
 		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+	if msgResult.PaneID != "%1" {
+		t.Errorf("PaneID = %q, want %%1", msgResult.PaneID)
 	}
 	if len(term.sentKeys) != 3 || term.sentKeys[0] != "Down" || term.sentKeys[1] != "Down" || term.sentKeys[2] != "Enter" {
 		t.Errorf("sentKeys = %v, want [Down Down Enter]", term.sentKeys)
@@ -1383,6 +1391,65 @@ func TestApprovalResultErrorClearsFlash(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("expected flash-clear timer cmd even on error")
+	}
+}
+
+func TestApprovalResultRefreshesPreviewForSelectedPane(t *testing.T) {
+	m, _ := waitingClaudeModel()
+	m.previewLoading = false
+
+	updated, cmd := m.Update(ApprovalResultMsg{Err: nil, Label: "Approved", PaneID: "%1"})
+	m = updated.(Model)
+
+	if !m.previewLoading {
+		t.Error("previewLoading should be true when refreshing preview after approval")
+	}
+	if m.previewPaneID != "%1" {
+		t.Errorf("previewPaneID = %q, want %%1", m.previewPaneID)
+	}
+	if cmd == nil {
+		t.Fatal("expected batch cmd with flash clear and preview refresh")
+	}
+
+	result := cmd()
+	batchMsg, ok := result.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected tea.BatchMsg, got %T", result)
+	}
+	if len(batchMsg) != 3 {
+		t.Errorf("batch cmd count = %d, want 3", len(batchMsg))
+	}
+}
+
+func TestApprovalResultSkipsPreviewRefreshWhenPaneDiffers(t *testing.T) {
+	m, _ := waitingClaudeModel()
+	m.previewLoading = false
+
+	updated, cmd := m.Update(ApprovalResultMsg{Err: nil, Label: "Approved", PaneID: "%2"})
+	m = updated.(Model)
+
+	if m.previewLoading {
+		t.Error("previewLoading should remain false when selected pane differs")
+	}
+	if cmd == nil {
+		t.Error("expected flash-clear timer cmd")
+	}
+}
+
+func TestPreviewResultMsgIgnoresStalePane(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	m.previewPaneID = "%2"
+	m.previewLoading = true
+	m.previewText = "current"
+
+	updated, _ := m.Update(PreviewResultMsg{PaneID: "%1", Text: "stale", Err: nil})
+	m = updated.(Model)
+
+	if m.previewText != "current" {
+		t.Errorf("previewText = %q, want unchanged 'current'", m.previewText)
+	}
+	if !m.previewLoading {
+		t.Error("previewLoading should remain true when stale result is ignored")
 	}
 }
 
