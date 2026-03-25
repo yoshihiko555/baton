@@ -31,6 +31,9 @@ var (
 // approvalSendDelay は承認/拒否確定後に追加入力を送るまでの待機時間。
 const approvalSendDelay = 1 * time.Second
 
+// approvalPreviewRetryDelay は承認/拒否送信後にプレビュー再取得をリトライする待機時間。
+const approvalPreviewRetryDelay = 700 * time.Millisecond
+
 func flashClearCmd(generation uint64) tea.Cmd {
 	return func() tea.Msg {
 		<-time.After(flashDuration)
@@ -50,6 +53,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.err = nil
 			m.flashMessage = msg.Label
+		}
+		previewCmd := m.forceRefreshPreview(msg.PaneID)
+		if previewCmd != nil {
+			retryPreviewCmd := m.delayedRefreshPreview(msg.PaneID, approvalPreviewRetryDelay)
+			return m, tea.Batch(flashClearCmd(currentGen), previewCmd, retryPreviewCmd)
 		}
 		return m, flashClearCmd(currentGen)
 	case FlashClearMsg:
@@ -131,6 +139,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.maybeUpdatePreview()
 		return m, tea.Batch(tickCmd(m.config.ScanInterval), cmd)
 	case PreviewResultMsg:
+		if msg.PaneID != "" && msg.PaneID != m.previewPaneID {
+			// 選択が変わった後の遅延レスポンスは破棄する。
+			return m, nil
+		}
 		m.previewLoading = false
 		if msg.Err != nil {
 			m.previewText = fmt.Sprintf("Error: %v", msg.Err)
@@ -271,6 +283,39 @@ func (m *Model) maybeUpdatePreview() tea.Cmd {
 	return fetchPreviewCmd(m.terminal, paneID)
 }
 
+// forceRefreshPreview は指定ペインが現在選択中なら、同一 PaneID でも再取得する。
+func (m *Model) forceRefreshPreview(paneID string) tea.Cmd {
+	if paneID == "" {
+		return nil
+	}
+	sel := m.selectedSession()
+	if sel == nil || sel.session == nil {
+		return nil
+	}
+	if sel.session.PaneID != paneID {
+		return nil
+	}
+
+	m.previewPaneID = paneID
+	m.previewLoading = true
+	return fetchPreviewCmd(m.terminal, paneID)
+}
+
+// delayedRefreshPreview は指定ペインが現在選択中なら、遅延後に再取得する。
+func (m *Model) delayedRefreshPreview(paneID string, delay time.Duration) tea.Cmd {
+	if paneID == "" {
+		return nil
+	}
+	sel := m.selectedSession()
+	if sel == nil || sel.session == nil {
+		return nil
+	}
+	if sel.session.PaneID != paneID {
+		return nil
+	}
+	return fetchPreviewDelayedCmd(m.terminal, paneID, delay)
+}
+
 // updateSubMenu はサブメニュー表示中のキー入力を処理する。
 func (m Model) updateSubMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
@@ -320,7 +365,7 @@ func (m Model) handleSimpleApprove() (tea.Model, tea.Cmd) {
 	term := m.terminal
 	return m, func() tea.Msg {
 		err := term.SendKeys(paneID, "Enter")
-		return ApprovalResultMsg{Err: err, Label: "Approved"}
+		return ApprovalResultMsg{Err: err, Label: "Approved", PaneID: paneID}
 	}
 }
 
@@ -334,7 +379,7 @@ func (m Model) handleSimpleDeny() (tea.Model, tea.Cmd) {
 	term := m.terminal
 	return m, func() tea.Msg {
 		err := term.SendKeys(paneID, "Down", "Down", "Enter")
-		return ApprovalResultMsg{Err: err, Label: "Denied"}
+		return ApprovalResultMsg{Err: err, Label: "Denied", PaneID: paneID}
 	}
 }
 
@@ -399,14 +444,14 @@ func (m Model) updateTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// 戻るのを待ってからテキストを新しいメッセージとして送信する
 			err := term.SendKeys(paneID, triggerKey)
 			if err != nil {
-				return ApprovalResultMsg{Err: err, Label: label}
+				return ApprovalResultMsg{Err: err, Label: label, PaneID: paneID}
 			}
 			time.Sleep(approvalSendDelay)
 
 			if text != "" {
 				err = term.SendKeys(paneID, text, "Enter")
 			}
-			return ApprovalResultMsg{Err: err, Label: label}
+			return ApprovalResultMsg{Err: err, Label: label, PaneID: paneID}
 		}
 	}
 

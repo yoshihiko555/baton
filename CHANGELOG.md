@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - README / `docs/README.ja.md` のキー操作・機能一覧を現行実装（承認操作・セッションフィルタ）に更新
+- `a/d/A/D` で承認/拒否した直後にプレビューを再取得するようにし、遅延反映時の取りこぼしを減らした
 
 ## [0.1.1] - 2026-03-23
 
