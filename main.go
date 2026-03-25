@@ -32,7 +32,7 @@ func run() error {
 	// フラグ解析
 	configPath := flag.String("config", "", "path to config file")
 	noTUI := flag.Bool("no-tui", false, "run without TUI")
-	once := flag.Bool("once", false, "write status JSON once and exit")
+	once := flag.Bool("once", false, "write status once and exit")
 	outputFormat := flag.String("format", "json", "output format for --once: json or tmux")
 	exitOnJump := flag.Bool("exit", false, "exit after pane jump")
 	showVersion := flag.Bool("version", false, "print version")
