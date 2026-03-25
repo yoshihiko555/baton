@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -32,6 +33,7 @@ func run() error {
 	configPath := flag.String("config", "", "path to config file")
 	noTUI := flag.Bool("no-tui", false, "run without TUI")
 	once := flag.Bool("once", false, "write status JSON once and exit")
+	outputFormat := flag.String("format", "json", "output format for --once: json or tmux")
 	exitOnJump := flag.Bool("exit", false, "exit after pane jump")
 	showVersion := flag.Bool("version", false, "print version")
 	flag.Parse()
@@ -103,7 +105,16 @@ func run() error {
 		if err := doScan(); err != nil {
 			return err
 		}
-		return writeStatus()
+
+		switch strings.ToLower(strings.TrimSpace(*outputFormat)) {
+		case "", "json":
+			return writeStatus()
+		case "tmux":
+			fmt.Print(core.BuildTMUXStatus(stateManager.Projects()))
+			return nil
+		default:
+			return fmt.Errorf("unsupported --format %q: expected json or tmux", *outputFormat)
+		}
 	}
 
 	// ヘッドレスモード: TUI なしで定期スキャン。

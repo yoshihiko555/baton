@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - タグ push から GitHub Release を自動作成する workflow を追加
 - GitHub Release のカテゴリ設定と PR テンプレートを追加
 - TUI セッションフィルタ機能を追加（`/` で開始、名前/パス/ツール + 状態トークンで絞り込み）
+- `--once --format tmux` で tmux ステータスバー向けの軽量サマリ出力（`🤔/✋/💤`）を追加
 
 ### Changed
 
