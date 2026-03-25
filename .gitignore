@@ -50,9 +50,11 @@ baton
 .cocoindex_code/target_sqlite.db
 
 # documentation
-docs/adr/
 docs/roadmap.md
 .claude/.mcp-proxy.pid
+
+# git
+.worktrees/
 
 # >>> AI Orchestra (.claude) >>>
 .claude/docs/
