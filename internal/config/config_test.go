@@ -39,6 +39,15 @@ func TestDefault(t *testing.T) {
 	if got.Statusbar.ToolIcons["default"] != "●" {
 		t.Fatalf("unexpected Statusbar.ToolIcons[default]: got %q", got.Statusbar.ToolIcons["default"])
 	}
+	if got.Statusbar.StateIcons["working"] != "🤔" {
+		t.Fatalf("unexpected Statusbar.StateIcons[working]: got %q", got.Statusbar.StateIcons["working"])
+	}
+	if got.Statusbar.StateIcons["waiting"] != "✋" {
+		t.Fatalf("unexpected Statusbar.StateIcons[waiting]: got %q", got.Statusbar.StateIcons["waiting"])
+	}
+	if got.Statusbar.StateIcons["idle"] != "~" {
+		t.Fatalf("unexpected Statusbar.StateIcons[idle]: got %q", got.Statusbar.StateIcons["idle"])
+	}
 }
 
 func TestLoadValidYAML(t *testing.T) {
@@ -55,6 +64,8 @@ statusbar:
   format: "{{.Active}} sessions"
   tool_icons:
     default: "◆"
+  state_icons:
+    idle: "○"
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
@@ -93,6 +104,9 @@ statusbar:
 	}
 	if got.Statusbar.ToolIcons["default"] != "◆" {
 		t.Fatalf("unexpected Statusbar.ToolIcons[default]: got %q", got.Statusbar.ToolIcons["default"])
+	}
+	if got.Statusbar.StateIcons["idle"] != "○" {
+		t.Fatalf("unexpected Statusbar.StateIcons[idle]: got %q", got.Statusbar.StateIcons["idle"])
 	}
 }
 
