@@ -1110,7 +1110,7 @@ func TestApproveIgnoredOnGeminiTool(t *testing.T) {
 }
 
 // waitingCodexModel は Waiting 状態の Codex セッションを持つモデルを返す。
-// activePane=1（右ペイン）に設定済み。
+// waitingCodexModel は Waiting 状態の Codex セッションを持つモデルを返す。
 func waitingCodexModel() (Model, *mockTerminal) {
 	m, _, _, _, term := newTestModel()
 	projects := []core.Project{
@@ -1123,7 +1123,6 @@ func waitingCodexModel() (Model, *mockTerminal) {
 		},
 	}
 	m = feedProjects(m, projects)
-	m.activePane = 1 // 右ペインをアクティブに
 	return m, term
 }
 
