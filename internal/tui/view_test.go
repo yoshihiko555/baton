@@ -121,27 +121,15 @@ func TestRenderStatusBarNilSessionSkipped(t *testing.T) {
 	}
 }
 
-func TestViewActivePaneToggle(t *testing.T) {
+func TestViewActivePaneDefault(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = updated.(Model)
 
-	if m.activePane != 0 {
-		t.Errorf("initial activePane = %d, want 0", m.activePane)
-	}
-
-	// Tab で pane 1 に切り替え後も View() がパニックしないことを確認。
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(Model)
-
-	if m.activePane != 1 {
-		t.Errorf("activePane after tab = %d, want 1", m.activePane)
-	}
-
 	view := m.View()
 	if view == "" {
-		t.Error("View() should return non-empty string after pane toggle")
+		t.Error("View() should return non-empty string")
 	}
 }
 
@@ -296,10 +284,13 @@ func TestActionBarContainsKeybindings(t *testing.T) {
 	m = updated.(Model)
 
 	view := m.View()
-	for _, k := range []string{"j/k", "tab", "enter", "q"} {
+	for _, k := range []string{"j/k", "enter", "q"} {
 		if !strings.Contains(view, k) {
 			t.Errorf("action bar should contain keybinding %q", k)
 		}
+	}
+	if strings.Contains(view, "tab") {
+		t.Error("action bar should not contain 'tab' keybinding after Tab key removal")
 	}
 }
 
@@ -335,7 +326,6 @@ func TestActionBarShowsApproveHints(t *testing.T) {
 		},
 	}
 	m = feedProjects(m, projects)
-	m.activePane = 1
 
 	view := m.View()
 	if !strings.Contains(view, "approve") {
@@ -360,7 +350,6 @@ func TestActionBarShowsPromptHints(t *testing.T) {
 		},
 	}
 	m = feedProjects(m, projects)
-	m.activePane = 1
 
 	view := m.View()
 	if !strings.Contains(view, "approve+msg") {

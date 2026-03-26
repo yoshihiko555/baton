@@ -101,8 +101,7 @@ type Model struct {
 	latestSummary  core.Summary
 	latestPanes    []terminal.Pane
 
-	activePane int // 0=sessions, 1=preview
-	width      int
+	width int
 	height     int
 	err        error
 	scanErr    error // スキャン由来のエラー（ScanResultMsg でのみクリア対象）
@@ -151,7 +150,7 @@ func NewModel(
 		config:       cfg,
 		theme:        ResolveTheme(cfg.Theme),
 		exitOnJump:   exitOnJump,
-		textInput:    ti,
+		textInput: ti,
 		filterInput:  fti,
 	}
 }
@@ -214,11 +213,8 @@ func fetchPreviewDelayedCmd(term terminal.Terminal, paneID string, delay time.Du
 }
 
 // canApprove は選択中のセッションが承認/拒否の送信可能かを返す。
-// 条件: 右ペインがアクティブ、Waiting 状態、Claude Code セッション。
+// 条件: Waiting 状態、Claude Code セッション。
 func (m Model) canApprove() bool {
-	if m.activePane != 1 {
-		return false
-	}
 	sel := m.selectedSession()
 	if sel == nil || sel.session == nil {
 		return false
@@ -227,11 +223,8 @@ func (m Model) canApprove() bool {
 }
 
 // canInput は選択中のセッションがプロンプト入力モードに入れるかを返す。
-// 条件: 右ペインがアクティブ、Claude Code セッション（Waiting でなくても可）。
+// 条件: Claude Code セッション（Waiting でなくても可）。
 func (m Model) canInput() bool {
-	if m.activePane != 1 {
-		return false
-	}
 	sel := m.selectedSession()
 	if sel == nil || sel.session == nil {
 		return false
