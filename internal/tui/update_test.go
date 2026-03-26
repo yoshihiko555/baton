@@ -1062,8 +1062,9 @@ func TestSimpleDenyOnWaitingClaude(t *testing.T) {
 	if msgResult.PaneID != "%1" {
 		t.Errorf("PaneID = %q, want %%1", msgResult.PaneID)
 	}
-	if len(term.sentKeys) != 3 || term.sentKeys[0] != "Down" || term.sentKeys[1] != "Down" || term.sentKeys[2] != "Enter" {
-		t.Errorf("sentKeys = %v, want [Down Down Enter]", term.sentKeys)
+	// Claude Code / Codex ともに Escape で "No" を選択
+	if len(term.sentKeys) != 1 || term.sentKeys[0] != "Escape" {
+		t.Errorf("sentKeys = %v, want [Escape]", term.sentKeys)
 	}
 }
 
@@ -1088,13 +1089,13 @@ func TestApproveIgnoredOnNonWaitingState(t *testing.T) {
 	}
 }
 
-func TestApproveIgnoredOnNonClaudeTool(t *testing.T) {
+func TestApproveIgnoredOnGeminiTool(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 	projects := []core.Project{
 		{
 			Path: "/project-a",
 			Sessions: []*core.Session{
-				{PID: 100, State: core.Waiting, Tool: core.ToolCodex, PaneID: "%1"},
+				{PID: 100, State: core.Waiting, Tool: core.ToolGemini, PaneID: "%1"},
 			},
 		},
 	}
@@ -1104,7 +1105,101 @@ func TestApproveIgnoredOnNonClaudeTool(t *testing.T) {
 	_, cmd := m.Update(msg)
 
 	if cmd != nil {
-		t.Error("expected nil cmd for non-Claude tool")
+		t.Error("expected nil cmd for Gemini tool (approve not supported)")
+	}
+}
+
+// waitingCodexModel は Waiting 状態の Codex セッションを持つモデルを返す。
+// activePane=1（右ペイン）に設定済み。
+func waitingCodexModel() (Model, *mockTerminal) {
+	m, _, _, _, term := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{PID: 200, State: core.Waiting, Tool: core.ToolCodex, PaneID: "%2"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+	m.activePane = 1 // 右ペインをアクティブに
+	return m, term
+}
+
+func TestSimpleApproveOnWaitingCodex(t *testing.T) {
+	m, term := waitingCodexModel()
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
+	updated, cmd := m.Update(msg)
+	_ = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected cmd for approve on Codex session")
+	}
+
+	result := cmd()
+	msgResult, ok := result.(ApprovalResultMsg)
+	if !ok {
+		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+	if msgResult.PaneID != "%2" {
+		t.Errorf("PaneID = %q, want %%2", msgResult.PaneID)
+	}
+	// Codex は Yes がデフォルト選択済みなので Enter のみ
+	if len(term.sentKeys) != 1 || term.sentKeys[0] != "Enter" {
+		t.Errorf("sentKeys = %v, want [Enter]", term.sentKeys)
+	}
+}
+
+func TestSimpleDenyOnWaitingCodex(t *testing.T) {
+	m, term := waitingCodexModel()
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
+	updated, cmd := m.Update(msg)
+	_ = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected cmd for deny on Codex session")
+	}
+
+	result := cmd()
+	msgResult, ok := result.(ApprovalResultMsg)
+	if !ok {
+		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+	if msgResult.PaneID != "%2" {
+		t.Errorf("PaneID = %q, want %%2", msgResult.PaneID)
+	}
+	// Codex も Claude と同様に Escape で "No" を選択
+	if len(term.sentKeys) != 1 || term.sentKeys[0] != "Escape" {
+		t.Errorf("sentKeys = %v, want [Escape]", term.sentKeys)
+	}
+}
+
+func TestPromptApproveIgnoredOnCodexSession(t *testing.T) {
+	m, _ := waitingCodexModel()
+
+	// Shift+A は Codex セッションでは入力モードに入らない（canInput=false）
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}}
+	updated, _ := m.Update(msg)
+	m = updated.(Model)
+
+	if m.inputMode != inputNone {
+		t.Errorf("inputMode = %d, want inputNone for Codex session (A key should be ignored)", m.inputMode)
+	}
+}
+
+func TestPromptDenyIgnoredOnCodexSession(t *testing.T) {
+	m, _ := waitingCodexModel()
+
+	// Shift+D は Codex セッションでは入力モードに入らない（canInput=false）
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}
+	updated, _ := m.Update(msg)
+	m = updated.(Model)
+
+	if m.inputMode != inputNone {
+		t.Errorf("inputMode = %d, want inputNone for Codex session (D key should be ignored)", m.inputMode)
 	}
 }
 

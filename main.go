@@ -110,7 +110,7 @@ func run() error {
 		case "", "json":
 			return writeStatus()
 		case "tmux":
-			fmt.Print(core.BuildTMUXStatus(stateManager.Projects()))
+			fmt.Print(core.BuildTMUXStatusWithIcons(stateManager.Projects(), cfg.Statusbar.StateIcons))
 			return nil
 		default:
 			return fmt.Errorf("unsupported --format %q: expected json or tmux", *outputFormat)

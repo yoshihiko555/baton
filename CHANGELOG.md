@@ -14,11 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - GitHub Release のカテゴリ設定と PR テンプレートを追加
 - TUI セッションフィルタ機能を追加（`/` で開始、名前/パス/ツール + 状態トークンで絞り込み）
 - `--once --format tmux` で tmux ステータスバー向けの軽量サマリ出力（`🤔/✋/💤`）を追加
+- `statusbar.state_icons` で tmux ステータスサマリの `working/waiting/idle` アイコンを設定可能にした
 
 ### Changed
 
 - README / `docs/README.ja.md` のキー操作・機能一覧を現行実装（承認操作・セッションフィルタ）に更新
 - `a/d/A/D` で承認/拒否した直後にプレビューを再取得するようにし、遅延反映時の取りこぼしを減らした
+- tmux 向け軽量サマリの `idle` 既定アイコンを `💤` から `~` に変更し、背景色に埋もれにくくした
 
 ## [0.1.1] - 2026-03-23
 

@@ -26,8 +26,8 @@ const (
 
 // ApprovalResultMsg は承認/拒否操作の完了を通知する。
 type ApprovalResultMsg struct {
-	Err   error
-	Label string // 操作の表示名（例: "Approved", "Denied: fix tests"）
+	Err    error
+	Label  string // 操作の表示名（例: "Approved", "Denied: fix tests"）
 	PaneID string // 承認/拒否を送信した対象ペイン
 }
 
@@ -101,10 +101,10 @@ type Model struct {
 	latestSummary  core.Summary
 	latestPanes    []terminal.Pane
 
-	width int
-	height     int
-	err        error
-	scanErr    error // スキャン由来のエラー（ScanResultMsg でのみクリア対象）
+	width   int
+	height  int
+	err     error
+	scanErr error // スキャン由来のエラー（ScanResultMsg でのみクリア対象）
 
 	previewText    string
 	previewPaneID  string // 現在プレビュー中の PaneID
@@ -150,7 +150,7 @@ func NewModel(
 		config:       cfg,
 		theme:        ResolveTheme(cfg.Theme),
 		exitOnJump:   exitOnJump,
-		textInput: ti,
+		textInput:    ti,
 		filterInput:  fti,
 	}
 }
@@ -213,13 +213,13 @@ func fetchPreviewDelayedCmd(term terminal.Terminal, paneID string, delay time.Du
 }
 
 // canApprove は選択中のセッションが承認/拒否の送信可能かを返す。
-// 条件: Waiting 状態、Claude Code セッション。
+// 条件: 右ペインがアクティブ、Waiting 状態、Claude Code または Codex セッション。
 func (m Model) canApprove() bool {
 	sel := m.selectedSession()
 	if sel == nil || sel.session == nil {
 		return false
 	}
-	return sel.session.State == core.Waiting && sel.session.Tool == core.ToolClaude && sel.session.PaneID != ""
+	return sel.session.State == core.Waiting && (sel.session.Tool == core.ToolClaude || sel.session.Tool == core.ToolCodex) && sel.session.PaneID != ""
 }
 
 // canInput は選択中のセッションがプロンプト入力モードに入れるかを返す。

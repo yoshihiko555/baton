@@ -20,7 +20,7 @@ func TestBuildTMUXStatus(t *testing.T) {
 					},
 				},
 			},
-			want: "🤔2 ✋1 💤1",
+			want: "🤔2 ✋1 ~1",
 		},
 		{
 			name: "zero states are hidden",
@@ -65,4 +65,42 @@ func TestBuildTMUXStatus(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildTMUXStatusWithIcons(t *testing.T) {
+	projects := []Project{
+		{
+			Sessions: []*Session{
+				{State: Idle},
+				{State: Thinking},
+				{State: Waiting},
+				{State: ToolUse},
+			},
+		},
+	}
+
+	t.Run("custom icons are used", func(t *testing.T) {
+		icons := map[string]string{
+			"working": "⚙",
+			"waiting": "?",
+			"idle":    "○",
+		}
+
+		got := BuildTMUXStatusWithIcons(projects, icons)
+		if got != "⚙2 ?1 ○1" {
+			t.Fatalf("BuildTMUXStatusWithIcons() = %q, want %q", got, "⚙2 ?1 ○1")
+		}
+	})
+
+	t.Run("working aliases are supported", func(t *testing.T) {
+		icons := map[string]string{
+			"thinking": "W",
+			"idle":     "I",
+		}
+
+		got := BuildTMUXStatusWithIcons(projects, icons)
+		if got != "W2 ✋1 I1" {
+			t.Fatalf("BuildTMUXStatusWithIcons() = %q, want %q", got, "W2 ✋1 I1")
+		}
+	})
 }
