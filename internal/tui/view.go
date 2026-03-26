@@ -57,21 +57,13 @@ func (m Model) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(m.theme.InactiveBorder)
 
-	// 左ペイン: セッションリスト
+	// 左ペイン: セッションリスト（常に非アクティブ表示）
 	leftContent := m.renderSessionList(leftWidth, paneHeight)
-	leftStyle := inactiveBorderStyle.Width(leftWidth).Height(paneHeight)
-	if m.activePane == 0 {
-		leftStyle = activeBorderStyle.Width(leftWidth).Height(paneHeight)
-	}
-	leftPane := leftStyle.Render(leftContent)
+	leftPane := inactiveBorderStyle.Width(leftWidth).Height(paneHeight).Render(leftContent)
 
-	// 右ペイン: プレビュー
+	// 右ペイン: プレビュー（常にアクティブ表示）
 	rightContent := m.renderPreview(rightWidth, paneHeight)
-	rightStyle := inactiveBorderStyle.Width(rightWidth).Height(paneHeight)
-	if m.activePane == 1 {
-		rightStyle = activeBorderStyle.Width(rightWidth).Height(paneHeight)
-	}
-	rightPane := rightStyle.Render(rightContent)
+	rightPane := activeBorderStyle.Width(rightWidth).Height(paneHeight).Render(rightContent)
 
 	panes := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
 
@@ -370,7 +362,6 @@ func (m Model) renderActionBar(totalWidth int) string {
 
 	actions := []string{
 		key.Render("j/k") + dim.Render(" move"),
-		key.Render("tab") + dim.Render(" pane"),
 		key.Render("enter") + dim.Render(" jump"),
 		key.Render("/") + dim.Render(" filter"),
 	}

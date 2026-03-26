@@ -14,7 +14,6 @@ import (
 
 var (
 	quitKeys = key.NewBinding(key.WithKeys("q", "ctrl+c"))
-	tabKey   = key.NewBinding(key.WithKeys("tab"))
 	enterKey = key.NewBinding(key.WithKeys("enter"))
 	escKey   = key.NewBinding(key.WithKeys("esc"))
 	slashKey = key.NewBinding(key.WithKeys("/"))
@@ -93,9 +92,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, quitKeys):
 			return m, tea.Quit
-		case key.Matches(msg, tabKey):
-			m.activePane = 1 - m.activePane
-			return m, nil
 		case key.Matches(msg, slashKey):
 			return m.enterFilterMode()
 		case key.Matches(msg, escKey):
