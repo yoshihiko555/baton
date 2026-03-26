@@ -214,7 +214,7 @@ func fetchPreviewDelayedCmd(term terminal.Terminal, paneID string, delay time.Du
 }
 
 // canApprove は選択中のセッションが承認/拒否の送信可能かを返す。
-// 条件: 右ペインがアクティブ、Waiting 状態、Claude Code セッション。
+// 条件: 右ペインがアクティブ、Waiting 状態、Claude Code または Codex セッション。
 func (m Model) canApprove() bool {
 	if m.activePane != 1 {
 		return false
@@ -223,7 +223,7 @@ func (m Model) canApprove() bool {
 	if sel == nil || sel.session == nil {
 		return false
 	}
-	return sel.session.State == core.Waiting && sel.session.Tool == core.ToolClaude && sel.session.PaneID != ""
+	return sel.session.State == core.Waiting && (sel.session.Tool == core.ToolClaude || sel.session.Tool == core.ToolCodex) && sel.session.PaneID != ""
 }
 
 // canInput は選択中のセッションがプロンプト入力モードに入れるかを返す。
