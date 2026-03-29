@@ -297,22 +297,12 @@ func sortSessionPtrs(sessions []*Session) {
 	})
 }
 
-// approvalPatterns は Claude Code の承認待ちを示すペインテキストのパターン（小文字）。
-// JSONL の ToolUse 判定を補完する用途。containsApprovalPrompt で使用。
-var approvalPatterns = []string{
-	"allow",
-	"(y/n)",
-	"[y/n]",
-	"[n/y]",
-	"yes/no",
-	"approve",
-	"permit",
-	"do you want",
-}
+// claudeApprovalPattern は Claude Code の ToolUse 承認プロンプトを検出する正規表現。
+// 文言ベース: "Allow <tool>?", "Do you want to ...", "(y/n)" 等
+var claudeApprovalPattern = regexp.MustCompile(
+	`(?i)(?:allow\s+\S+.*\?\s*\(?y|do you want to \w+|(?:^|\s)allow (?:once|always)|yes[,.]?\s*allow|\(y/n\)|\[y/n\]|\[n/y\]|\byes/no\b)`,
+)
 
-// codexApprovalPattern は Codex CLI の承認プロンプトの構造を検出する正規表現。
-// Codex は番号付き選択肢（"1. Yes, ..." / "2. Yes, ..." / "3. No, ..."）を表示する。
-// 文言ではなく構造で判定するため、Codex のUI変更に強い。
 // codexApprovalPattern は Codex CLI の承認プロンプトの構造を検出する正規表現。
 // 番号付き選択肢（"1. Yes..." + "2. Yes..." or "2. No..."）の連続で判定する。
 // 単独の "1. Yes" ではなく後続行も確認することで誤検知を防ぐ。
@@ -324,8 +314,8 @@ var codexApprovalPattern = regexp.MustCompile(`(?m)^\s*[›>]?\s*1\.\s+Yes.*\n\s
 var geminiIdlePattern = regexp.MustCompile(`(?m)workspace\s+\(.+\)\s+.*sandbox`)
 
 // RefineToolUseState はペインテキストから状態を精緻化する。
-// - Claude (同一 CWD に複数セッション): 承認プロンプトを持つペインへ Waiting を再配置
-// - Claude ToolUse → Waiting（承認待ち検出）
+// - Claude: 全状態でペインテキストをチェック。classifyClaudePane が権威的ソース。
+//   判定できた場合はその状態を採用。判定不能かつ JSONL=Waiting → ToolUse に降格。
 // - Codex Idle → Waiting（承認待ち検出）
 // - Gemini Thinking → Waiting（承認待ち）または Idle（入力プロンプト検出）
 func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
@@ -336,7 +326,6 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 		return
 	}
 
-	// 同一 CWD の Claude 複数セッションで、Waiting が別ペインに紐づくケースを補正する。
 	paneTextCache := make(map[string]string)
 	paneTextError := make(map[string]bool)
 	getPaneText := func(paneID string) (string, bool) {
@@ -355,17 +344,14 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 		return text, true
 	}
 
-	realignClaudeWaitingStates(s.projects, getPaneText)
-
 	for i := range s.projects {
 		for j, sess := range s.projects[i].Sessions {
 			if sess == nil {
 				continue
 			}
-			// ToolUse（Claude）、Idle（Codex）、Thinking（Gemini）の状態精緻化
 			switch {
-			case sess.State == ToolUse:
-				// Claude: JSONL で ToolUse → ペインテキストで承認待ちか確認
+			case sess.Tool == ToolClaude && sess.PaneID != "":
+				// Claude: 全状態でペインテキストをチェック
 			case sess.State == Idle && sess.Tool == ToolCodex:
 				// Codex: 子プロセスなし(Idle) → 承認待ちかもしれない
 			case sess.State == Thinking && sess.Tool == ToolGemini:
@@ -388,14 +374,18 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 				continue
 			}
 
-			isWaiting := false
 			if sess.Tool == ToolClaude {
-				isWaiting = containsApprovalPrompt(text)
-			} else {
-				// Codex: 番号付き選択肢の構造パターンで検出
-				isWaiting = codexApprovalPattern.MatchString(text)
+				if newState, ok := classifyClaudePane(text); ok {
+					s.projects[i].Sessions[j].State = newState
+				} else if sess.State == Waiting {
+					// ペインテキストから判定不能だが JSONL が Waiting → ToolUse に降格
+					s.projects[i].Sessions[j].State = ToolUse
+				}
+				continue
 			}
-			if isWaiting {
+
+			// Codex: 番号付き選択肢の構造パターンで検出
+			if codexApprovalPattern.MatchString(text) {
 				s.projects[i].Sessions[j].State = Waiting
 			}
 		}
@@ -405,91 +395,75 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 	s.summary = calcSummary(s.projects)
 }
 
-// realignClaudeWaitingStates は、同一プロジェクト内で同一 CWD の Claude セッション群に対し、
-// 承認プロンプトを検出したペインへ Waiting 状態を再配置する。
-//
-// 背景:
-// Claude は CWD 単位で JSONL を解決しているため、同一 CWD に複数セッションがある場合、
-// Waiting/Idle/Thinking の割り当てがペインとずれることがある。
-//
-// ルール:
-// - 同一 CWD で 2 セッション以上の Claude のみ対象
-// - 承認プロンプトを検出したセッションを Waiting に昇格
-// - 既存 Waiting が別セッションにある場合は状態をスワップして整合を取る
-func realignClaudeWaitingStates(projects []Project, getPaneText func(string) (string, bool)) {
-	for i := range projects {
-		groups := make(map[string][]*Session)
-		for j := range projects[i].Sessions {
-			sess := projects[i].Sessions[j]
-			if sess == nil || sess.Tool != ToolClaude || sess.PaneID == "" {
-				continue
-			}
-			key := strings.TrimSpace(sess.WorkingDir)
-			if key == "" {
-				// CWD 不明時はグルーピングせずスキップ（同一キー衝突を避ける）。
-				continue
-			}
-			groups[key] = append(groups[key], sess)
-		}
-
-		for _, sessions := range groups {
-			if len(sessions) < 2 {
-				continue
-			}
-
-			detectedWaiting := make(map[*Session]bool, len(sessions))
-			for _, sess := range sessions {
-				text, ok := getPaneText(sess.PaneID)
-				if !ok {
-					continue
-				}
-				if containsApprovalPrompt(text) {
-					detectedWaiting[sess] = true
-				}
-			}
-			if len(detectedWaiting) == 0 {
-				continue
-			}
-
-			var promote []*Session // 承認プロンプトあり、かつ Waiting ではない
-			var demote []*Session  // 承認プロンプトなし、かつ Waiting
-
-			for _, sess := range sessions {
-				wantWaiting := detectedWaiting[sess]
-				if wantWaiting && sess.State != Waiting {
-					promote = append(promote, sess)
-				}
-				if !wantWaiting && sess.State == Waiting {
-					demote = append(demote, sess)
-				}
-			}
-
-			// 1対1で入れ替え、昇格元の状態を降格先へ移す。
-			swapCount := min(len(promote), len(demote))
-			for k := 0; k < swapCount; k++ {
-				p := promote[k]
-				d := demote[k]
-				previous := p.State
-				p.State = Waiting
-				d.State = previous
-			}
-
-			// 余剰の昇格対象は Waiting にする（新規に承認待ちを検出したケース）。
-			for k := swapCount; k < len(promote); k++ {
-				promote[k].State = Waiting
-			}
-		}
-	}
+func containsApprovalPrompt(text string) bool {
+	return claudeApprovalPattern.MatchString(text)
 }
 
-func containsApprovalPrompt(text string) bool {
-	lower := strings.ToLower(text)
-	for _, pattern := range approvalPatterns {
-		if strings.Contains(lower, pattern) {
-			return true
+// allDash は s がすべて '─'（U+2500）文字で構成され、4文字以上であるか返す。
+func allDash(s string) bool {
+	if len(s) < 4 {
+		return false
+	}
+	for _, r := range s {
+		if r != '─' {
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+// classifyClaudePane はペインテキストから Claude Code の状態を判定する。
+// 末尾から逆順スキャンし、入力プロンプト位置を基準に状態を決定する。
+// 判定できない場合は ok=false を返し、呼び出し元は JSONL 状態を維持する。
+func classifyClaudePane(text string) (state SessionState, ok bool) {
+	lines := strings.Split(text, "\n")
+
+	// Step 1: WAITING チェック（最優先）— テキスト全体を検索
+	// 選択肢 UI: ❯ + 1. + Yes を含む行
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, "❯") && strings.Contains(trimmed, "1.") && strings.Contains(trimmed, "Yes") {
+			return Waiting, true
+		}
+	}
+	// 承認プロンプト: claudeApprovalPattern にマッチ
+	if containsApprovalPrompt(text) {
+		return Waiting, true
+	}
+
+	// Step 2: 入力プロンプト行を末尾から逆順スキャンして探す
+	// 入力プロンプト行 = ❯ を含む行で、直前行が区切り線（─ が4文字以上連続）
+	promptIdx := -1
+	for i := len(lines) - 1; i >= 1; i-- {
+		stripped := strings.TrimRight(lines[i], " \t\r\n\u00a0")
+		if strings.Contains(stripped, "❯") {
+			prevStripped := strings.TrimSpace(lines[i-1])
+			if allDash(prevStripped) {
+				promptIdx = i
+				break
+			}
+		}
+	}
+
+	// Step 3: 入力プロンプト行が見つからない → 判定不能
+	if promptIdx < 0 {
+		return 0, false
+	}
+
+	// Step 4: WORKING チェック — 入力プロンプト行より上（最大20行）を検索
+	start := promptIdx - 20
+	if start < 0 {
+		start = 0
+	}
+	for i := start; i < promptIdx; i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "· ") || strings.HasPrefix(trimmed, "✢ ") || strings.HasPrefix(trimmed, "✶ ") || strings.Contains(trimmed, "Running…") {
+			return Thinking, true
+		}
+	}
+
+	// Step 5: Working シグナルなし + 入力プロンプト行あり → Idle
+	return Idle, true
 }
 
 // projectNeedsAttention はプロジェクト内に Waiting または Error のセッションがあるか返す。

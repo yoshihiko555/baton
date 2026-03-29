@@ -95,7 +95,7 @@ go vet ./...
 - デフォルトターミナル: tmux（config.yaml の `terminal` で "wezterm" に変更可能）
 - データフロー: Ticker → doScan → ScanResultMsg → Update()（ポーリング方式、2秒間隔）
 - state.go は集約のみ、JSON 書き出しは exporter.go に分離
-- 同一 CWD の複数セッション: ResolveMultiple 方式で ModTime 上位 N 件から状態分布を取得
+- 同一 CWD の複数セッション: ResolveMultiple 方式で ModTime 上位 N 件から状態分布を取得（JSONL → PID の1対1対応は不可）
 - slug 生成: CWD の "/" と "." を "-" に変換（Claude Code のディレクトリ命名規則に準拠）
 - Pane.ID は string 型（tmux: "%5" 形式、WezTerm: "42" 形式）
 - Scanner 最適化: tmux の `CurrentCommand` で AI ペインのみ `ps` 実行（不要な呼び出しを削減）。`node` も通過させる（Gemini 検出用）
@@ -105,6 +105,15 @@ go vet ./...
   - tmux: switch-client → select-window → select-pane（同期的、sleep 不要）
   - WezTerm: 同一 WS → `wezterm cli activate-pane`、別 WS → トリガーファイル経由
   - デフォルト: ジャンプ後 TUI に戻る。`--exit` フラグで従来の自動終了動作を選択可能
-- ToolUse 承認待ち検出: `tmux capture-pane` / `wezterm cli get-text` でペインテキストを取得し承認プロンプトを検出すると Waiting に変換
+- Claude Code 状態検出（3層ハイブリッド）:
+  - Layer 1: JSONL パース（初期状態 + メタデータ）。`ReadLastEntry` は 64KB〜512KB を段階的に読み取り
+  - Layer 2: プロセス監視（Codex 子プロセス検査）
+  - Layer 3: ペインテキスト精緻化（`classifyClaudePane` — 権威的ソース）
+- Claude Code ペインテキスト判定（`classifyClaudePane`）: 末尾から逆順スキャンで入力プロンプト行（❯ + 区切り線）を特定し、構造に基づいて判定
+  - Waiting: 選択肢 UI（`❯ 1. Yes` + `2.`）または承認プロンプト（`Allow <tool>?`）
+  - Working: 入力プロンプト行より上に `✢`/`·`/`✶` または `Running…`
+  - Idle: 入力プロンプト行あり + Working シグナルなし
+  - 判定不能時は JSONL 状態を維持（Waiting の場合は ToolUse に降格）
+- 自動承認モード: TUI で `t` キーによるセッション単位トグル。Waiting 検出 → 即座に Enter 送信（多重送信防止付き）
 - Hook セッション除外: tmux の `claude-*-<digits>` パターン（unattached）を自動除外
 - --no-tui モード: 起動メッセージと初回スキャン結果を標準出力に表示

@@ -210,7 +210,7 @@ func (m Model) renderSessionList(width, height int) string {
 			lines = append(lines, renderGroupHeader(e, width, m.theme))
 		} else {
 			isSelected := i == m.cursor
-			lines = append(lines, renderSessionEntry(&e, width, isSelected, m.theme)...)
+			lines = append(lines, renderSessionEntry(&e, width, isSelected, m.theme, m.autoApprove)...)
 		}
 
 		currentLine += h
@@ -248,13 +248,16 @@ func renderGroupHeader(e sessionEntry, width int, theme Theme) string {
 }
 
 // renderSessionEntry はセッション行を描画する。
-func renderSessionEntry(e *sessionEntry, width int, isSelected bool, theme Theme) []string {
+func renderSessionEntry(e *sessionEntry, width int, isSelected bool, theme Theme, autoApprove map[string]bool) []string {
 	if e.session == nil {
 		return []string{"  ?"}
 	}
 
 	s := e.session
 	name := sessionDisplayName(e)
+	if autoApprove[s.PaneID] {
+		name += " [AUTO]"
+	}
 
 	// 状態インジケーター
 	stateColor := theme.States[s.State]
@@ -385,6 +388,12 @@ func (m Model) renderActionBar(totalWidth int) string {
 			key.Render("A")+dim.Render(" approve+msg"),
 			key.Render("D")+dim.Render(" deny+msg"),
 		)
+		sel := m.selectedSession()
+		if sel != nil && sel.session != nil && m.autoApprove[sel.session.PaneID] {
+			actions = append(actions, key.Render("t")+dim.Render(" auto:ON"))
+		} else {
+			actions = append(actions, key.Render("t")+dim.Render(" auto"))
+		}
 	}
 	if m.filterQuery != "" {
 		actions = append(actions, key.Render("esc")+dim.Render(" clear"))

@@ -14,11 +14,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - GitHub Release のカテゴリ設定と PR テンプレートを追加
 - TUI セッションフィルタ機能を追加（`/` で開始、名前/パス/ツール + 状態トークンで絞り込み）
 - `--once --format tmux` で tmux ステータスバー向けの軽量サマリ出力（`🤔/✋/💤`）を追加
+- セッション単位の自動承認モード（`t` キーでトグル、`[AUTO]` バッジ表示）
+- Claude Code 状態判定の行単位逆順スキャン方式（`classifyClaudePane`）
 
 ### Changed
 
 - README / `docs/README.ja.md` のキー操作・機能一覧を現行実装（承認操作・セッションフィルタ）に更新
 - `a/d/A/D` で承認/拒否した直後にプレビューを再取得するようにし、遅延反映時の取りこぼしを減らした
+- Claude Code の承認プロンプト検出を正規表現ベースから構造ベース（選択肢 UI パターン）に変更
+- 承認パターンの厳密化（`"allow"` 部分一致を廃止、`Allow <tool>? (y)` 等の具体的パターンに限定）
+- `ReadLastEntry` の読み取りバッファを 4KB → 64KB〜512KB に拡大（大きな JSONL エントリへの対応）
+- `--no-tui` モードのスキャンループに `RefineToolUseState` を追加（ヘッドレスモードでの状態精緻化）
+
+### Removed
+
+- `realignClaudeWaitingStates` を削除（ペインテキスト優先の判定により不要に）
 
 ## [0.1.1] - 2026-03-23
 

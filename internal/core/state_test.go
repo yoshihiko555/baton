@@ -742,9 +742,247 @@ func TestRefineGeminiWaitingPriority(t *testing.T) {
 	}
 }
 
-func TestRefineClaudeMultiSessionReassignsWaitingToPromptPane(t *testing.T) {
-	// 同一 CWD の Claude 2 セッションで Waiting が別ペインに割り当たっていても、
-	// 承認プロンプトがあるペインへ Waiting が再配置されることを確認する。
+
+func TestContainsApprovalPrompt(t *testing.T) {
+	// containsApprovalPrompt が claudeApprovalPattern の正規表現で正しく動作することを確認する。
+	tests := []struct {
+		name      string
+		input     string
+		wantMatch bool
+	}{
+		// --- マッチすべきケース ---
+		{
+			name:      "standard ToolUse approval",
+			input:     "Allow Bash? (y)",
+			wantMatch: true,
+		},
+		{
+			name:      "MCP tool approval",
+			input:     "Allow mcp__tool_name? (y)",
+			wantMatch: true,
+		},
+		{
+			name:      "file read approval",
+			input:     "Allow Read? (y)",
+			wantMatch: true,
+		},
+		{
+			name:      "do you want to allow this action",
+			input:     "Do you want to allow this action?",
+			wantMatch: true,
+		},
+		{
+			name:      "do you want to run this command",
+			input:     "Do you want to run this command?",
+			wantMatch: true,
+		},
+		{
+			name:      "allow once list option",
+			input:     "Allow once",
+			wantMatch: true,
+		},
+		{
+			name:      "allow always list option",
+			input:     "allow always",
+			wantMatch: true,
+		},
+		{
+			name:      "yes allow confirmation",
+			input:     "Yes, allow",
+			wantMatch: true,
+		},
+		{
+			name:      "y/n generic marker",
+			input:     "(y/n)",
+			wantMatch: true,
+		},
+		{
+			name:      "bracket y/n marker",
+			input:     "[y/n]",
+			wantMatch: true,
+		},
+		{
+			name:      "bracket n/y marker",
+			input:     "[n/y]",
+			wantMatch: true,
+		},
+		{
+			name:      "yes/no generic marker",
+			input:     "yes/no",
+			wantMatch: true,
+		},
+		// --- マッチすべきでないケース ---
+		{
+			name:      "variable name allowance",
+			input:     "allowance = 100",
+			wantMatch: false,
+		},
+		{
+			name:      "different word disallow",
+			input:     "disallow",
+			wantMatch: false,
+		},
+		{
+			name:      "field name approved_at",
+			input:     "approved_at = time.Now()",
+			wantMatch: false,
+		},
+		{
+			name:      "allow in sentence",
+			input:     "The file is allowed",
+			wantMatch: false,
+		},
+		{
+			name:      "unrelated text permission denied",
+			input:     "permission denied",
+			wantMatch: false,
+		},
+		{
+			name:      "empty string",
+			input:     "",
+			wantMatch: false,
+		},
+		{
+			name:      "normal multiline output",
+			input:     "This is normal output\nwith multiple lines",
+			wantMatch: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := containsApprovalPrompt(tc.input)
+			if got != tc.wantMatch {
+				t.Errorf("containsApprovalPrompt(%q) = %v, want %v", tc.input, got, tc.wantMatch)
+			}
+		})
+	}
+}
+
+func TestRefineClaudeThinkingToWaiting(t *testing.T) {
+	// Claude Thinking state is promoted to Waiting when pane text contains approval prompt.
+	manager := NewStateManager(nil)
+	manager.projects = []Project{
+		{
+			Name: "proj",
+			Path: "/project",
+			Sessions: []*Session{
+				{PID: 100, Tool: ToolClaude, State: Thinking, PaneID: "%1", WorkingDir: "/project"},
+			},
+		},
+	}
+	manager.summary = calcSummary(manager.projects)
+
+	term := &paneTextTerminal{
+		texts: map[string]string{
+			"%1": "Allow Bash? (y)\n",
+		},
+	}
+
+	manager.RefineToolUseState(term)
+	projects := manager.Projects()
+	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
+		t.Fatalf("unexpected projects/sessions: %v", projects)
+	}
+	if got := projects[0].Sessions[0].State; got != Waiting {
+		t.Errorf("state = %v, want Waiting (approval prompt in Thinking state)", got)
+	}
+}
+
+func TestRefineClaudeIdleToWaiting(t *testing.T) {
+	// Claude Idle state is promoted to Waiting when pane text contains approval prompt.
+	manager := NewStateManager(nil)
+	manager.projects = []Project{
+		{
+			Name: "proj",
+			Path: "/project",
+			Sessions: []*Session{
+				{PID: 100, Tool: ToolClaude, State: Idle, PaneID: "%1", WorkingDir: "/project"},
+			},
+		},
+	}
+	manager.summary = calcSummary(manager.projects)
+
+	term := &paneTextTerminal{
+		texts: map[string]string{
+			"%1": "Allow Read? (y)\n",
+		},
+	}
+
+	manager.RefineToolUseState(term)
+	projects := manager.Projects()
+	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
+		t.Fatalf("unexpected projects/sessions: %v", projects)
+	}
+	if got := projects[0].Sessions[0].State; got != Waiting {
+		t.Errorf("state = %v, want Waiting (approval prompt in Idle state)", got)
+	}
+}
+
+func TestRefineClaudeWaitingToToolUse(t *testing.T) {
+	// Claude Waiting state (JSONL-assigned) is demoted to ToolUse when pane text has no approval prompt.
+	manager := NewStateManager(nil)
+	manager.projects = []Project{
+		{
+			Name: "proj",
+			Path: "/project",
+			Sessions: []*Session{
+				{PID: 100, Tool: ToolClaude, State: Waiting, PaneID: "%1", WorkingDir: "/project"},
+			},
+		},
+	}
+	manager.summary = calcSummary(manager.projects)
+
+	term := &paneTextTerminal{
+		texts: map[string]string{
+			"%1": "Running some command...\n",
+		},
+	}
+
+	manager.RefineToolUseState(term)
+	projects := manager.Projects()
+	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
+		t.Fatalf("unexpected projects/sessions: %v", projects)
+	}
+	if got := projects[0].Sessions[0].State; got != ToolUse {
+		t.Errorf("state = %v, want ToolUse (no approval prompt, demote from Waiting)", got)
+	}
+}
+
+func TestRefineClaudeToolUseStaysToolUse(t *testing.T) {
+	// Claude ToolUse state remains ToolUse when pane text has no approval prompt.
+	manager := NewStateManager(nil)
+	manager.projects = []Project{
+		{
+			Name: "proj",
+			Path: "/project",
+			Sessions: []*Session{
+				{PID: 100, Tool: ToolClaude, State: ToolUse, PaneID: "%1", WorkingDir: "/project"},
+			},
+		},
+	}
+	manager.summary = calcSummary(manager.projects)
+
+	term := &paneTextTerminal{
+		texts: map[string]string{
+			"%1": "Executing tool...\n",
+		},
+	}
+
+	manager.RefineToolUseState(term)
+	projects := manager.Projects()
+	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
+		t.Fatalf("unexpected projects/sessions: %v", projects)
+	}
+	if got := projects[0].Sessions[0].State; got != ToolUse {
+		t.Errorf("state = %v, want ToolUse (no approval prompt, stays ToolUse)", got)
+	}
+}
+
+func TestRefineClaudeMultiSessionPaneTextAuthority(t *testing.T) {
+	// Two Claude sessions with same CWD: JSONL assigned Waiting+Idle.
+	// Only the session with actual approval prompt becomes Waiting.
+	// The JSONL-Waiting session (no approval prompt) is demoted to ToolUse.
 	manager := NewStateManager(nil)
 	manager.projects = []Project{
 		{
@@ -760,8 +998,8 @@ func TestRefineClaudeMultiSessionReassignsWaitingToPromptPane(t *testing.T) {
 
 	term := &paneTextTerminal{
 		texts: map[string]string{
-			"%1": "ready\n",
-			"%2": "Allow tool call? (y/n)\n",
+			"%1": "Running command...\n",
+			"%2": "Allow Bash? (y)\n",
 		},
 	}
 
@@ -776,17 +1014,141 @@ func TestRefineClaudeMultiSessionReassignsWaitingToPromptPane(t *testing.T) {
 		states[sess.PaneID] = sess.State
 	}
 
-	if got := states["%1"]; got != Idle {
-		t.Errorf("pane %%1 state = %v, want Idle", got)
+	if got := states["%1"]; got != ToolUse {
+		t.Errorf("pane %%1 state = %v, want ToolUse (JSONL Waiting demoted, no approval prompt)", got)
 	}
 	if got := states["%2"]; got != Waiting {
-		t.Errorf("pane %%2 state = %v, want Waiting", got)
+		t.Errorf("pane %%2 state = %v, want Waiting (approval prompt detected)", got)
+	}
+}
+
+func TestRefineClaudeThinkingToIdleByPaneText(t *testing.T) {
+	// Claude の Thinking 状態がペインテキストの Idle プロンプト（❯ + 区切り線）で Idle に降格することを確認。
+	// JSONL が別プロセスの Thinking を誤割り当てしている場合を補正する。
+	manager := NewStateManager(nil)
+	manager.projects = []Project{
+		{
+			Name: "proj",
+			Path: "/project",
+			Sessions: []*Session{
+				{PID: 100, Tool: ToolClaude, State: Thinking, PaneID: "%1", WorkingDir: "/project"},
+			},
+		},
+	}
+	manager.summary = calcSummary(manager.projects)
+
+	term := &paneTextTerminal{
+		texts: map[string]string{
+			"%1": "Previous output...\n────────────────────────────────\n❯ \n────────────────────────────────\n  📁 project │ 🌿 main │ 🔧 PID:100\n",
+		},
+	}
+
+	manager.RefineToolUseState(term)
+	projects := manager.Projects()
+	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
+		t.Fatalf("unexpected projects/sessions: %v", projects)
+	}
+	if got := projects[0].Sessions[0].State; got != Idle {
+		t.Errorf("state = %v, want Idle (Claude idle prompt detected)", got)
+	}
+}
+
+func TestRefineClaudeIdlePatternVariants(t *testing.T) {
+	// classifyClaudePane が (Idle, true) を返すかどうかで idle 判定を検証する。
+	tests := []struct {
+		name      string
+		input     string
+		wantMatch bool
+	}{
+		{
+			name:      "standard idle prompt",
+			input:     "output\n────────────────────────────\n❯ \n────────────────────────────\n  📁 proj\n",
+			wantMatch: true,
+		},
+		{
+			name:      "idle prompt with no trailing space",
+			input:     "output\n──────────\n❯\n──────────\n  📁 proj\n",
+			wantMatch: true,
+		},
+		{
+			name:      "working output no prompt",
+			input:     "✢ Enchanting… (3m 0s)\nSome output...\n",
+			wantMatch: false,
+		},
+		{
+			name:      "approval prompt not idle",
+			input:     "Allow Bash? (y)\n❯ 1. Yes\n  2. No\n",
+			wantMatch: false,
+		},
+		{
+			name:      "short separator still matches",
+			input:     "text\n────\n❯\n────\n  📁 proj\n",
+			wantMatch: true,
+		},
+		{
+			name:      "non-breaking space after prompt",
+			input:     "output\n────────────────────\n❯\u00a0\n────────────────────\n  📁 proj\n",
+			wantMatch: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			state, ok := classifyClaudePane(tc.input)
+			got := ok && state == Idle
+			if got != tc.wantMatch {
+				t.Errorf("classifyClaudePane(%q) idle = %v (state=%v, ok=%v), want %v", tc.input, got, state, ok, tc.wantMatch)
+			}
+		})
+	}
+}
+
+func TestRefineClaudeMultiSessionIdleCorrection(t *testing.T) {
+	// 同一 CWD に 2 つの Claude セッション。JSONL が Thinking+Idle を割り当てたが、
+	// 実際は Thinking のペインが Idle（❯ プロンプト表示）で、Idle のペインが Working。
+	// ペインテキストに基づいて状態が補正されることを確認。
+	manager := NewStateManager(nil)
+	manager.projects = []Project{
+		{
+			Name: "proj",
+			Path: "/project",
+			Sessions: []*Session{
+				{PID: 100, Tool: ToolClaude, State: Thinking, PaneID: "%1", WorkingDir: "/project"},
+				{PID: 200, Tool: ToolClaude, State: Idle, PaneID: "%2", WorkingDir: "/project"},
+			},
+		},
+	}
+	manager.summary = calcSummary(manager.projects)
+
+	term := &paneTextTerminal{
+		texts: map[string]string{
+			// %1 は実際には Idle（❯ プロンプト表示）
+			"%1": "Done.\n────────────────────────\n❯\n────────────────────────\n  📁 project\n",
+			// %2 は Working（通常出力）
+			"%2": "⏺ Thinking about the problem...\nGenerating code...\n",
+		},
+	}
+
+	manager.RefineToolUseState(term)
+	projects := manager.Projects()
+
+	states := map[string]SessionState{}
+	for _, sess := range projects[0].Sessions {
+		states[sess.PaneID] = sess.State
+	}
+
+	if got := states["%1"]; got != Idle {
+		t.Errorf("pane %%1 state = %v, want Idle (idle prompt detected, override JSONL Thinking)", got)
+	}
+	// %2 は Idle のまま（pane text に承認プロンプトも idle プロンプトもないが、JSONL が Idle なので維持）
+	if got := states["%2"]; got != Idle {
+		t.Errorf("pane %%2 state = %v, want Idle (JSONL Idle, no override needed)", got)
 	}
 }
 
 func TestRefineClaudeMultiSessionPromotesPromptPaneToWaiting(t *testing.T) {
-	// 同一 CWD の Claude で Waiting が未割り当てでも、
-	// 承認プロンプトのあるペインは Waiting に昇格することを確認する。
+	// 同一 CWD の Claude で、承認プロンプトのあるペインは Waiting に昇格することを確認する。
+	// 元々 Waiting でなかったセッションでも承認プロンプトがあれば Waiting になる。
 	manager := NewStateManager(nil)
 	manager.projects = []Project{
 		{
@@ -823,5 +1185,103 @@ func TestRefineClaudeMultiSessionPromotesPromptPaneToWaiting(t *testing.T) {
 	}
 	if got := states["%2"]; got != Waiting {
 		t.Errorf("pane %%2 state = %v, want Waiting", got)
+	}
+}
+
+func TestClassifyClaudePane(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantState SessionState
+		wantOK    bool
+	}{
+		// Idle: ❯ + 区切り線、上に Working シグナルなし
+		{
+			name:      "idle with completed message",
+			input:     "output\n✻ Worked for 4m 12s\n\n────────────────────────\n❯ \n────────────────────────\n  📁 project │ 🌿 main\n  Opus 4.6\n",
+			wantState: Idle,
+			wantOK:    true,
+		},
+		{
+			name:      "idle with queued messages",
+			input:     "output\n────────────────────────\n❯ Press up to edit queued messages\n────────────────────────\n  📁 proj\n",
+			wantState: Idle,
+			wantOK:    true,
+		},
+		{
+			name:      "idle with non-breaking space",
+			input:     "output\n────────────────────────\n❯\u00a0\n────────────────────────\n  📁 proj\n",
+			wantState: Idle,
+			wantOK:    true,
+		},
+		// Working: ❯ + 区切り線あり、上に Working シグナル
+		{
+			name:      "working with streaming indicator",
+			input:     "⏺ researcher(task)\n  Running…\n· Symbioting… (5m)\n\n────────────────────────\n❯\n────────────────────────\n  📁 proj\n",
+			wantState: Thinking,
+			wantOK:    true,
+		},
+		{
+			name:      "working with running tool",
+			input:     "⏺ Bash(some command)\n  ⎿  Running…\n\n────────────────────────\n❯\n────────────────────────\n  📁 proj\n",
+			wantState: Thinking,
+			wantOK:    true,
+		},
+		{
+			name:      "working with checkmark indicator",
+			input:     "previous\n✢ Enchanting… (3m 0s)\n\n────────────────────────\n❯\n────────────────────────\n  📁 proj\n",
+			wantState: Thinking,
+			wantOK:    true,
+		},
+		{
+			name:      "working with six-pointed star indicator",
+			input:     "previous\n✶ Envisioning… (2m 10s)\n\n────────────────────────\n❯\n────────────────────────\n  📁 proj\n",
+			wantState: Thinking,
+			wantOK:    true,
+		},
+		// Waiting: 選択肢 UI
+		{
+			name:      "waiting with choice UI",
+			input:     "Do you want to proceed?\n❯ 1. Yes\n  2. No\n\nEsc to cancel\n",
+			wantState: Waiting,
+			wantOK:    true,
+		},
+		{
+			name:      "waiting with edit approval",
+			input:     "Do you want to make this edit?\n❯ 1. Yes\n  2. Yes, allow all\n  3. No\n\nEsc to cancel\n",
+			wantState: Waiting,
+			wantOK:    true,
+		},
+		{
+			name:      "waiting with allow prompt",
+			input:     "Allow Bash? (y)\n",
+			wantState: Waiting,
+			wantOK:    true,
+		},
+		// Fallback: 判定不能
+		{
+			name:      "empty text",
+			input:     "",
+			wantState: 0,
+			wantOK:    false,
+		},
+		{
+			name:      "no prompt structure",
+			input:     "just some text\nwithout any prompt\n",
+			wantState: 0,
+			wantOK:    false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotState, gotOK := classifyClaudePane(tc.input)
+			if gotOK != tc.wantOK {
+				t.Errorf("classifyClaudePane ok = %v, want %v", gotOK, tc.wantOK)
+			}
+			if gotOK && gotState != tc.wantState {
+				t.Errorf("classifyClaudePane state = %v, want %v", gotState, tc.wantState)
+			}
+		})
 	}
 }

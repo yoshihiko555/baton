@@ -210,6 +210,10 @@ func (r *IncrementalReader) ReadNew(filepath string) ([]*Entry, error) {
 
 // ReadLastEntry は filepath の末尾から最終エントリ1件を返す。
 // このメソッドは読み取りオフセットを更新しない。
+//
+// Claude Code の assistant エントリはツール呼び出し内容を含むため数万バイトに
+// なることがある。初回は 64KB を読み、パース失敗時は段階的に読み取り範囲を
+// 拡大して最大 512KB までリトライする。
 func (r *IncrementalReader) ReadLastEntry(filepath string) (*Entry, error) {
 	file, err := os.Open(filepath)
 	if err != nil {
@@ -225,32 +229,40 @@ func (r *IncrementalReader) ReadLastEntry(filepath string) (*Entry, error) {
 		return nil, nil
 	}
 
-	const tailSize int64 = 4096
-	start := info.Size() - tailSize
-	if start < 0 {
-		start = 0
-	}
-
-	if _, err := file.Seek(start, io.SeekStart); err != nil {
-		return nil, err
-	}
-
-	buf := make([]byte, info.Size()-start)
-	n, err := io.ReadFull(file, buf)
-	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return nil, err
-	}
-	buf = buf[:n]
-
-	lines := bytes.Split(buf, []byte{'\n'})
-	for i := len(lines) - 1; i >= 0; i-- {
-		if len(bytes.TrimSpace(lines[i])) == 0 {
-			continue
+	// 段階的に読み取り範囲を拡大する
+	tailSizes := []int64{64 * 1024, 256 * 1024, 512 * 1024}
+	for _, tailSize := range tailSizes {
+		start := info.Size() - tailSize
+		if start < 0 {
+			start = 0
 		}
 
-		entry, parseErr := ParseRecord(lines[i])
-		if parseErr == nil {
-			return entry, nil
+		if _, err := file.Seek(start, io.SeekStart); err != nil {
+			return nil, err
+		}
+
+		buf := make([]byte, info.Size()-start)
+		n, err := io.ReadFull(file, buf)
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, err
+		}
+		buf = buf[:n]
+
+		lines := bytes.Split(buf, []byte{'\n'})
+		for i := len(lines) - 1; i >= 0; i-- {
+			if len(bytes.TrimSpace(lines[i])) == 0 {
+				continue
+			}
+
+			entry, parseErr := ParseRecord(lines[i])
+			if parseErr == nil {
+				return entry, nil
+			}
+		}
+
+		// ファイル全体を読んでもパースできなかった場合はリトライ不要
+		if start == 0 {
+			break
 		}
 	}
 

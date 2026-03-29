@@ -26,6 +26,7 @@ var (
 	denyKey       = key.NewBinding(key.WithKeys("d"))
 	promptApprove = key.NewBinding(key.WithKeys("A"))
 	promptDeny    = key.NewBinding(key.WithKeys("D"))
+	autoApproveKey = key.NewBinding(key.WithKeys("t"))
 )
 
 // approvalSendDelay は承認/拒否確定後に追加入力を送るまでの待機時間。
@@ -117,6 +118,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.enterInputMode(inputApprove)
 		case key.Matches(msg, promptDeny):
 			return m.enterInputMode(inputDeny)
+		case key.Matches(msg, autoApproveKey):
+			return m.handleToggleAutoApprove()
 		}
 		return m, nil
 	case tea.WindowSizeMsg:
@@ -137,7 +140,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildEntries()
 		// 選択セッションが変わったらプレビュー更新
 		cmd := m.maybeUpdatePreview()
-		return m, tea.Batch(tickCmd(m.config.ScanInterval), cmd)
+		// 自動承認チェック
+		autoCmd := m.checkAutoApprove()
+		return m, tea.Batch(tickCmd(m.config.ScanInterval), cmd, autoCmd)
 	case PreviewResultMsg:
 		if msg.PaneID != "" && msg.PaneID != m.previewPaneID {
 			// 選択が変わった後の遅延レスポンスは破棄する。
@@ -482,6 +487,81 @@ func (m Model) updateFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, inputCmd
 	}
 	return m, filterCmd
+}
+
+// handleToggleAutoApprove は選択中の Claude セッションの自動承認を ON/OFF する。
+func (m Model) handleToggleAutoApprove() (tea.Model, tea.Cmd) {
+	if !m.canInput() {
+		return m, nil
+	}
+	sel := m.selectedSession()
+	if sel == nil || sel.session == nil {
+		return m, nil
+	}
+	paneID := sel.session.PaneID
+	m.autoApprove[paneID] = !m.autoApprove[paneID]
+	m.flashGen++
+	currentGen := m.flashGen
+	if m.autoApprove[paneID] {
+		m.flashMessage = "Auto-approve: ON"
+	} else {
+		m.flashMessage = "Auto-approve: OFF"
+	}
+	return m, flashClearCmd(currentGen)
+}
+
+// checkAutoApprove は全セッションを走査し、自動承認 ON かつ Waiting の Claude セッションに Enter を送信する。
+// 多重送信防止: Waiting から離脱したセッションの autoApproved フラグをリセットし、
+// 未送信のセッションにのみ Enter を送信する。
+//
+// ポインタレシーバを使用する理由: m.autoApproved マップを直接変更するため。
+// Update() はバリューレシーバだが、Go が自動で &m を渡すため変更は反映される。
+func (m *Model) checkAutoApprove() tea.Cmd {
+	// Waiting 状態にある Claude セッションの PaneID を収集する
+	waitingPanes := make(map[string]bool)
+	for _, entry := range m.entries {
+		if entry.isHeader || entry.session == nil {
+			continue
+		}
+		if entry.session.State == core.Waiting && entry.session.Tool == core.ToolClaude {
+			waitingPanes[entry.session.PaneID] = true
+		}
+	}
+	// Waiting でなくなったセッションの送信済みフラグをリセットする
+	for paneID := range m.autoApproved {
+		if !waitingPanes[paneID] {
+			delete(m.autoApproved, paneID)
+		}
+	}
+
+	// Waiting + autoApprove ON + 未送信のセッションに Enter を送信する
+	var cmds []tea.Cmd
+	for _, entry := range m.entries {
+		if entry.isHeader || entry.session == nil {
+			continue
+		}
+		sess := entry.session
+		if sess.State != core.Waiting || sess.Tool != core.ToolClaude {
+			continue
+		}
+		if !m.autoApprove[sess.PaneID] {
+			continue
+		}
+		if m.autoApproved[sess.PaneID] {
+			continue // 既に送信済み
+		}
+		m.autoApproved[sess.PaneID] = true
+		paneID := sess.PaneID
+		term := m.terminal
+		cmds = append(cmds, func() tea.Msg {
+			err := term.SendKeys(paneID, "Enter")
+			return ApprovalResultMsg{Err: err, Label: "Auto-approved", PaneID: paneID}
+		})
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
 }
 
 // --- 以下は v1 互換のために残す型（テストが参照） ---
