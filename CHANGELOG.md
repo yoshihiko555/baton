@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-03-29
+
 ### Added
 
 - `main` 基準のリリース運用を定義した `docs/release-process.md` を追加
@@ -59,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - 既定のターミナルバックエンドを WezTerm から tmux 中心の構成へ整理した
 
-[Unreleased]: https://github.com/yoshihiko555/baton/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/yoshihiko555/baton/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/yoshihiko555/baton/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/yoshihiko555/baton/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/yoshihiko555/baton/releases/tag/v0.1.0
