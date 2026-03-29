@@ -129,7 +129,7 @@ func run() error {
 		}
 		summary := stateManager.Summary()
 		fmt.Printf("baton: found %d sessions across %d projects\n", summary.TotalSessions, len(stateManager.Projects()))
-		return runNoTUI(ctx, scanner, stateManager, cfg.ScanInterval, writeStatus)
+		return runNoTUI(ctx, scanner, stateManager, term, cfg.ScanInterval, writeStatus)
 	}
 
 	// TUI モード: stateManager は StateUpdater と StateReader を両方実装する。
@@ -155,6 +155,7 @@ func runNoTUI(
 	ctx context.Context,
 	scanner core.Scanner,
 	sm core.StateUpdater,
+	term terminal.Terminal,
 	interval time.Duration,
 	writeStatus func() error,
 ) error {
@@ -171,6 +172,7 @@ func runNoTUI(
 				log.Printf("scan error: %v", err)
 				continue
 			}
+			sm.RefineToolUseState(term)
 			if err := writeStatus(); err != nil {
 				log.Printf("export error: %v", err)
 			}

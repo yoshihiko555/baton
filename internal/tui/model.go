@@ -126,6 +126,12 @@ type Model struct {
 	textInput    textinput.Model
 	flashMessage string // 操作結果の一時表示メッセージ
 	flashGen     uint64 // フラッシュ消去タイマーの世代番号
+
+	// 自動承認モード: PaneID → true で自動承認 ON
+	autoApprove map[string]bool
+	// autoApproved は既に自動承認 Enter を送信済みの PaneID を記録する。
+	// セッションが Waiting から離脱したらエントリを削除する。
+	autoApproved map[string]bool
 }
 
 // NewModel はデフォルト設定で TUI モデルを初期化する。
@@ -152,6 +158,8 @@ func NewModel(
 		exitOnJump:   exitOnJump,
 		textInput:    ti,
 		filterInput:  fti,
+		autoApprove:  make(map[string]bool),
+		autoApproved: make(map[string]bool),
 	}
 }
 
@@ -212,11 +220,14 @@ func fetchPreviewDelayedCmd(term terminal.Terminal, paneID string, delay time.Du
 	}
 }
 
-// canApprove は選択中のセッションが承認/拒否の送信可能かを返す。
-// 条件: 右ペインがアクティブ、Waiting 状態、Claude Code または Codex セッション。
+// canApprove は選択中のセッションが手動承認/拒否の送信可能かを返す。
+// 条件: Waiting 状態、Claude Code または Codex セッション、自動承認 OFF。
 func (m Model) canApprove() bool {
 	sel := m.selectedSession()
 	if sel == nil || sel.session == nil {
+		return false
+	}
+	if m.autoApprove[sel.session.PaneID] {
 		return false
 	}
 	return sel.session.State == core.Waiting && (sel.session.Tool == core.ToolClaude || sel.session.Tool == core.ToolCodex) && sel.session.PaneID != ""

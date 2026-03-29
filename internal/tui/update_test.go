@@ -1608,6 +1608,195 @@ func TestPromptApproveFullKeySequence(t *testing.T) {
 	}
 }
 
+// --- 自動承認テスト ---
+
+// TestToggleAutoApprove は 't' キーで autoApprove が ON/OFF することを確認する。
+func TestToggleAutoApprove(t *testing.T) {
+	m, _ := waitingClaudeModel()
+
+	// Arrange: autoApprove は初期状態で false
+	if m.autoApprove["%1"] {
+		t.Fatal("autoApprove[%%1] should be false initially")
+	}
+
+	// Act: 't' キーで ON にする
+	tKey := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}}
+	updated, cmd := m.Update(tKey)
+	m = updated.(Model)
+
+	// Assert: autoApprove が true になり、フラッシュメッセージが設定される
+	if !m.autoApprove["%1"] {
+		t.Error("autoApprove[%%1] = false, want true after first 't'")
+	}
+	if m.flashMessage == "" {
+		t.Error("flashMessage should be non-empty after toggling auto-approve ON")
+	}
+	if cmd == nil {
+		t.Error("expected flash-clear timer cmd")
+	}
+
+	// Act: もう一度 't' キーで OFF にする
+	updated, cmd = m.Update(tKey)
+	m = updated.(Model)
+
+	// Assert: autoApprove が false に戻り、フラッシュメッセージが更新される
+	if m.autoApprove["%1"] {
+		t.Error("autoApprove[%%1] = true, want false after second 't'")
+	}
+	if m.flashMessage == "" {
+		t.Error("flashMessage should be non-empty after toggling auto-approve OFF")
+	}
+	if cmd == nil {
+		t.Error("expected flash-clear timer cmd after second toggle")
+	}
+}
+
+// TestAutoApproveOnScanResult は autoApprove ON + Waiting の Claude セッションで
+// ScanResultMsg 受信時に Enter が自動送信されることを確認する。
+func TestAutoApproveOnScanResult(t *testing.T) {
+	m, term := waitingClaudeModel()
+
+	// Arrange: autoApprove を ON にする
+	m.autoApprove["%1"] = true
+
+	// Act: 同じ Waiting セッションの ScanResultMsg を送る
+	scanMsg := ScanResultMsg{
+		Projects: []core.Project{
+			{
+				Path: "/project-a",
+				Name: "project-a",
+				Sessions: []*core.Session{
+					{PID: 100, State: core.Waiting, Tool: core.ToolClaude, PaneID: "%1"},
+				},
+			},
+		},
+	}
+	updated, cmd := m.Update(scanMsg)
+	_ = updated.(Model)
+
+	// Assert: cmd が返ること（checkAutoApprove が cmd を生成する）
+	if cmd == nil {
+		t.Fatal("expected cmd from checkAutoApprove when auto-approve is ON and session is Waiting")
+	}
+
+	// Act: cmd を実行して結果を確認
+	result := cmd()
+
+	// tea.BatchMsg の場合は中身を展開する
+	var approvalMsg ApprovalResultMsg
+	found := false
+	switch r := result.(type) {
+	case ApprovalResultMsg:
+		approvalMsg = r
+		found = true
+	case tea.BatchMsg:
+		for _, innerCmd := range r {
+			if innerCmd != nil {
+				innerResult := innerCmd()
+				if ar, ok := innerResult.(ApprovalResultMsg); ok {
+					approvalMsg = ar
+					found = true
+					break
+				}
+			}
+		}
+	}
+
+	if !found {
+		t.Fatalf("expected ApprovalResultMsg in cmd result, got %T", result)
+	}
+	if approvalMsg.PaneID != "%1" {
+		t.Errorf("ApprovalResultMsg.PaneID = %q, want %%1", approvalMsg.PaneID)
+	}
+	if !strings.Contains(strings.Join(term.sentKeys, ","), "Enter") {
+		t.Errorf("sentKeys = %v, want to contain 'Enter'", term.sentKeys)
+	}
+}
+
+// TestAutoApproveDisablesManualApprove は autoApprove ON のとき 'a' キーでの
+// 手動承認が無効化されることを確認する。
+func TestAutoApproveDisablesManualApprove(t *testing.T) {
+	m, _ := waitingClaudeModel()
+
+	// Arrange: autoApprove を ON にする
+	m.autoApprove["%1"] = true
+
+	// Act: 'a' キーを押す
+	aKey := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
+	_, cmd := m.Update(aKey)
+
+	// Assert: canApprove() が false を返すため cmd は nil
+	if cmd != nil {
+		t.Error("expected nil cmd for manual approve when auto-approve is ON")
+	}
+}
+
+// TestAutoApproveOnlyAffectsClaude は Codex セッションでは autoApprove が発動しないことを確認する。
+func TestAutoApproveOnlyAffectsClaude(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	// Arrange: Codex の Waiting セッションを作成
+	projects := []core.Project{
+		{
+			Path: "/project-b",
+			Name: "project-b",
+			Sessions: []*core.Session{
+				{PID: 200, State: core.Waiting, Tool: core.ToolCodex, PaneID: "%2"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	// autoApprove を Codex ペインに対して ON にする
+	m.autoApprove["%2"] = true
+
+	// Act: ScanResultMsg を送る
+	scanMsg := ScanResultMsg{
+		Projects: projects,
+	}
+	_, cmd := m.Update(scanMsg)
+
+	// Assert: checkAutoApprove は Claude セッションのみ対象のため、
+	// cmd が nil または ApprovalResultMsg を返さないことを確認する
+	if cmd == nil {
+		return // nil の場合は OK
+	}
+
+	// cmd が non-nil の場合は ApprovalResultMsg でないことを確認
+	result := cmd()
+	switch r := result.(type) {
+	case ApprovalResultMsg:
+		t.Errorf("got ApprovalResultMsg for Codex session, want no auto-approve: %+v", r)
+	case tea.BatchMsg:
+		for _, innerCmd := range r {
+			if innerCmd != nil {
+				if ar, ok := innerCmd().(ApprovalResultMsg); ok {
+					if ar.Label == "Auto-approved" {
+						t.Errorf("got Auto-approved for Codex session, auto-approve should only affect Claude")
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestAutoApproveBadgeInView は autoApprove ON のセッションの View() 出力に
+// '[AUTO]' バッジが含まれることを確認する。
+func TestAutoApproveBadgeInView(t *testing.T) {
+	m, _ := waitingClaudeModel()
+
+	// Arrange: autoApprove を ON にする
+	m.autoApprove["%1"] = true
+
+	// Act: View を取得する
+	view := m.View()
+
+	// Assert: '[AUTO]' が含まれること
+	if !strings.Contains(view, "[AUTO]") {
+		t.Error("View() output does not contain '[AUTO]' when auto-approve is ON")
+	}
+}
+
 // TestPromptDenyFullKeySequence verifies D -> type "bad idea" -> Enter
 // sends ["Escape", "bad idea", "Enter"] to the terminal.
 func TestPromptDenyFullKeySequence(t *testing.T) {
