@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   release:
     uses: yoshihiko555/.github/.github/workflows/release.yml@main
+    permissions:
+      contents: write
