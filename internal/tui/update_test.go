@@ -109,9 +109,6 @@ func feedProjects(m Model, projects []core.Project) Model {
 func TestNewModel(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
-	if m.activePane != 0 {
-		t.Errorf("activePane = %d, want 0", m.activePane)
-	}
 	if m.err != nil {
 		t.Errorf("err = %v, want nil", m.err)
 	}
@@ -138,29 +135,6 @@ func TestUpdateQuitKey(t *testing.T) {
 	result := cmd()
 	if _, ok := result.(tea.QuitMsg); !ok {
 		t.Errorf("expected tea.QuitMsg, got %T", result)
-	}
-}
-
-func TestUpdateTabKey(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-
-	if m.activePane != 0 {
-		t.Fatal("initial activePane should be 0")
-	}
-
-	msg := tea.KeyMsg{Type: tea.KeyTab}
-	updated, _ := m.Update(msg)
-	m = updated.(Model)
-
-	if m.activePane != 1 {
-		t.Errorf("activePane after tab = %d, want 1", m.activePane)
-	}
-
-	updated, _ = m.Update(msg)
-	m = updated.(Model)
-
-	if m.activePane != 0 {
-		t.Errorf("activePane after second tab = %d, want 0", m.activePane)
 	}
 }
 
@@ -1029,7 +1003,6 @@ func TestCursorMovesAcrossGroups(t *testing.T) {
 // --- 承認/拒否テスト ---
 
 // waitingClaudeModel は Waiting 状態の Claude Code セッションを持つモデルを返す。
-// activePane=1（右ペイン）に設定済み。
 func waitingClaudeModel() (Model, *mockTerminal) {
 	m, _, _, _, term := newTestModel()
 	projects := []core.Project{
@@ -1042,7 +1015,6 @@ func waitingClaudeModel() (Model, *mockTerminal) {
 		},
 	}
 	m = feedProjects(m, projects)
-	m.activePane = 1 // 右ペインをアクティブに
 	return m, term
 }
 
@@ -1090,22 +1062,12 @@ func TestSimpleDenyOnWaitingClaude(t *testing.T) {
 	if msgResult.PaneID != "%1" {
 		t.Errorf("PaneID = %q, want %%1", msgResult.PaneID)
 	}
-	if len(term.sentKeys) != 3 || term.sentKeys[0] != "Down" || term.sentKeys[1] != "Down" || term.sentKeys[2] != "Enter" {
-		t.Errorf("sentKeys = %v, want [Down Down Enter]", term.sentKeys)
+	// Claude Code / Codex ともに Escape で "No" を選択
+	if len(term.sentKeys) != 1 || term.sentKeys[0] != "Escape" {
+		t.Errorf("sentKeys = %v, want [Escape]", term.sentKeys)
 	}
 }
 
-func TestApproveIgnoredWhenNotActivePane(t *testing.T) {
-	m, _ := waitingClaudeModel()
-	m.activePane = 0 // 左ペイン
-
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
-	_, cmd := m.Update(msg)
-
-	if cmd != nil {
-		t.Error("expected nil cmd when left pane is active")
-	}
-}
 
 func TestApproveIgnoredOnNonWaitingState(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
@@ -1118,7 +1080,6 @@ func TestApproveIgnoredOnNonWaitingState(t *testing.T) {
 		},
 	}
 	m = feedProjects(m, projects)
-	m.activePane = 1
 
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
 	_, cmd := m.Update(msg)
@@ -1128,24 +1089,116 @@ func TestApproveIgnoredOnNonWaitingState(t *testing.T) {
 	}
 }
 
-func TestApproveIgnoredOnNonClaudeTool(t *testing.T) {
+func TestApproveIgnoredOnGeminiTool(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 	projects := []core.Project{
 		{
 			Path: "/project-a",
 			Sessions: []*core.Session{
-				{PID: 100, State: core.Waiting, Tool: core.ToolCodex, PaneID: "%1"},
+				{PID: 100, State: core.Waiting, Tool: core.ToolGemini, PaneID: "%1"},
 			},
 		},
 	}
 	m = feedProjects(m, projects)
-	m.activePane = 1
 
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
 	_, cmd := m.Update(msg)
 
 	if cmd != nil {
-		t.Error("expected nil cmd for non-Claude tool")
+		t.Error("expected nil cmd for Gemini tool (approve not supported)")
+	}
+}
+
+// waitingCodexModel は Waiting 状態の Codex セッションを持つモデルを返す。
+// waitingCodexModel は Waiting 状態の Codex セッションを持つモデルを返す。
+func waitingCodexModel() (Model, *mockTerminal) {
+	m, _, _, _, term := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{PID: 200, State: core.Waiting, Tool: core.ToolCodex, PaneID: "%2"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+	return m, term
+}
+
+func TestSimpleApproveOnWaitingCodex(t *testing.T) {
+	m, term := waitingCodexModel()
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
+	updated, cmd := m.Update(msg)
+	_ = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected cmd for approve on Codex session")
+	}
+
+	result := cmd()
+	msgResult, ok := result.(ApprovalResultMsg)
+	if !ok {
+		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+	if msgResult.PaneID != "%2" {
+		t.Errorf("PaneID = %q, want %%2", msgResult.PaneID)
+	}
+	// Codex は Yes がデフォルト選択済みなので Enter のみ
+	if len(term.sentKeys) != 1 || term.sentKeys[0] != "Enter" {
+		t.Errorf("sentKeys = %v, want [Enter]", term.sentKeys)
+	}
+}
+
+func TestSimpleDenyOnWaitingCodex(t *testing.T) {
+	m, term := waitingCodexModel()
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
+	updated, cmd := m.Update(msg)
+	_ = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected cmd for deny on Codex session")
+	}
+
+	result := cmd()
+	msgResult, ok := result.(ApprovalResultMsg)
+	if !ok {
+		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+	if msgResult.PaneID != "%2" {
+		t.Errorf("PaneID = %q, want %%2", msgResult.PaneID)
+	}
+	// Codex も Claude と同様に Escape で "No" を選択
+	if len(term.sentKeys) != 1 || term.sentKeys[0] != "Escape" {
+		t.Errorf("sentKeys = %v, want [Escape]", term.sentKeys)
+	}
+}
+
+func TestPromptApproveIgnoredOnCodexSession(t *testing.T) {
+	m, _ := waitingCodexModel()
+
+	// Shift+A は Codex セッションでは入力モードに入らない（canInput=false）
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}}
+	updated, _ := m.Update(msg)
+	m = updated.(Model)
+
+	if m.inputMode != inputNone {
+		t.Errorf("inputMode = %d, want inputNone for Codex session (A key should be ignored)", m.inputMode)
+	}
+}
+
+func TestPromptDenyIgnoredOnCodexSession(t *testing.T) {
+	m, _ := waitingCodexModel()
+
+	// Shift+D は Codex セッションでは入力モードに入らない（canInput=false）
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}
+	updated, _ := m.Update(msg)
+	m = updated.(Model)
+
+	if m.inputMode != inputNone {
+		t.Errorf("inputMode = %d, want inputNone for Codex session (D key should be ignored)", m.inputMode)
 	}
 }
 
@@ -1274,31 +1327,12 @@ func TestCanInputOnClaudeSession(t *testing.T) {
 		},
 	}
 	m = feedProjects(m, projects)
-	m.activePane = 1
 
 	if !m.canInput() {
 		t.Error("canInput() = false, want true for Claude session on right pane")
 	}
 }
 
-// TestCanInputFalseOnLeftPane verifies canInput returns false when left pane is active.
-func TestCanInputFalseOnLeftPane(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-	projects := []core.Project{
-		{
-			Path: "/project-a",
-			Sessions: []*core.Session{
-				{PID: 100, State: core.Waiting, Tool: core.ToolClaude, PaneID: "%1"},
-			},
-		},
-	}
-	m = feedProjects(m, projects)
-	m.activePane = 0 // left pane
-
-	if m.canInput() {
-		t.Error("canInput() = true, want false when left pane is active")
-	}
-}
 
 // TestCanInputFalseOnNonClaude verifies canInput returns false for Codex and Gemini sessions.
 func TestCanInputFalseOnNonClaude(t *testing.T) {
@@ -1313,7 +1347,6 @@ func TestCanInputFalseOnNonClaude(t *testing.T) {
 			},
 		}
 		m = feedProjects(m, projects)
-		m.activePane = 1
 
 		if m.canInput() {
 			t.Errorf("canInput() = true for tool=%v, want false", tool)
@@ -1468,7 +1501,6 @@ func TestPromptInputOnNonWaitingShowsWarning(t *testing.T) {
 		},
 	}
 	m = feedProjects(m, projects)
-	m.activePane = 1
 
 	// Arrange: enter input mode with A key (Idle Claude — canInput true, canApprove false)
 	aMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}}
@@ -1686,8 +1718,7 @@ func TestAutoApproveOnScanResult(t *testing.T) {
 func TestAutoApproveDisablesManualApprove(t *testing.T) {
 	m, _ := waitingClaudeModel()
 
-	// Arrange: 右ペインをアクティブにして autoApprove を ON にする
-	m.activePane = 1
+	// Arrange: autoApprove を ON にする
 	m.autoApprove["%1"] = true
 
 	// Act: 'a' キーを押す
@@ -1892,7 +1923,6 @@ func TestPromptApproveFirstSendKeysError(t *testing.T) {
 		},
 	}
 	m = feedProjects(m, projects)
-	m.activePane = 1
 
 	// Simple approve (a key) — triggers handleSimpleApprove which calls SendKeys once
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
@@ -1930,7 +1960,6 @@ func TestPromptInputAvailableOnIdleClaude(t *testing.T) {
 		},
 	}
 	m = feedProjects(m, projects)
-	m.activePane = 1
 
 	// Arrange & Act: A key should enter inputApprove mode
 	aMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}}

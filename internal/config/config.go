@@ -13,8 +13,9 @@ import (
 
 // StatusbarConfig はステータスバーの表示設定を表す。
 type StatusbarConfig struct {
-	Format    string            `yaml:"format"`
-	ToolIcons map[string]string `yaml:"tool_icons"`
+	Format     string            `yaml:"format"`
+	ToolIcons  map[string]string `yaml:"tool_icons"`
+	StateIcons map[string]string `yaml:"state_icons"`
 }
 
 // ThemeConfig はテーマ/カラー設定を表す。
@@ -65,6 +66,11 @@ func Default() Config {
 			Format: "{{.Active}}/{{.TotalSessions}}",
 			ToolIcons: map[string]string{
 				"default": "●",
+			},
+			StateIcons: map[string]string{
+				"working": "🤔",
+				"waiting": "✋",
+				"idle":    "~",
 			},
 		},
 	}
@@ -131,6 +137,9 @@ func mergeConfig(base *Config, override Config) {
 	}
 	if len(override.Statusbar.ToolIcons) > 0 {
 		base.Statusbar.ToolIcons = override.Statusbar.ToolIcons
+	}
+	if len(override.Statusbar.StateIcons) > 0 {
+		base.Statusbar.StateIcons = override.Statusbar.StateIcons
 	}
 	mergeThemeConfig(&base.Theme, override.Theme)
 }

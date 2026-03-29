@@ -161,6 +161,10 @@ statusbar:
     codex: ""
     gemini: ""
     default: "●"
+  state_icons:
+    working: "🤔"
+    waiting: "✋"
+    idle: "~"
 ```
 
 ## How it works

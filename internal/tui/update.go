@@ -14,7 +14,6 @@ import (
 
 var (
 	quitKeys = key.NewBinding(key.WithKeys("q", "ctrl+c"))
-	tabKey   = key.NewBinding(key.WithKeys("tab"))
 	enterKey = key.NewBinding(key.WithKeys("enter"))
 	escKey   = key.NewBinding(key.WithKeys("esc"))
 	slashKey = key.NewBinding(key.WithKeys("/"))
@@ -94,9 +93,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, quitKeys):
 			return m, tea.Quit
-		case key.Matches(msg, tabKey):
-			m.activePane = 1 - m.activePane
-			return m, nil
 		case key.Matches(msg, slashKey):
 			return m.enterFilterMode()
 		case key.Matches(msg, escKey):
@@ -374,8 +370,8 @@ func (m Model) handleSimpleApprove() (tea.Model, tea.Cmd) {
 	}
 }
 
-// handleSimpleDeny は単純拒否（Down Down Enter）を送信する。
-// Claude Code の承認プロンプトで 3番目の "No" を選択して確定する。
+// handleSimpleDeny は単純拒否（Escape）を送信する。
+// Claude Code / Codex ともに承認プロンプトの "No" に Escape ショートカットが割り当てられている。
 func (m Model) handleSimpleDeny() (tea.Model, tea.Cmd) {
 	if !m.canApprove() {
 		return m, nil
@@ -383,7 +379,7 @@ func (m Model) handleSimpleDeny() (tea.Model, tea.Cmd) {
 	paneID := m.selectedSession().session.PaneID
 	term := m.terminal
 	return m, func() tea.Msg {
-		err := term.SendKeys(paneID, "Down", "Down", "Enter")
+		err := term.SendKeys(paneID, "Escape")
 		return ApprovalResultMsg{Err: err, Label: "Denied", PaneID: paneID}
 	}
 }

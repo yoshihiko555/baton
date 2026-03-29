@@ -160,6 +160,10 @@ statusbar:
     codex: ""
     gemini: ""
     default: "●"
+  state_icons:
+    working: "🤔"
+    waiting: "✋"
+    idle: "~"
 ```
 
 ## 仕組み
