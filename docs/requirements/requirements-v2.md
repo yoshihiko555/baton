@@ -1,11 +1,11 @@
 # baton v2 要件定義書
 
-**文書バージョン**: 0.3 (ドラフト)
-**最終更新**: 2026-03-07
-**ステータス**: レビュー待ち
+**文書バージョン**: 0.4
+**最終更新**: 2026-03-29
+**ステータス**: 実装反映済み
 
-> **注意**: 本文書は v1 の設計（`docs/architecture/overview.md`, `README.md`）を置き換える v2 の要件を定義する。
-> v1 の設計文書は参考として残すが、v2 の実装においては本文書を正とする。
+> **注意**: 本文書は baton v2 の要件定義における正本である。
+> `docs/architecture/overview.md`、`README.md`、`docs/README.ja.md`、`AGENTS.md` は本文書と実装に基づく派生文書として同期する。
 
 ---
 
@@ -13,12 +13,12 @@
 
 ### 1.1 baton とは
 
-baton は、AI コーディングエージェント（Claude Code, Codex CLI, Gemini CLI）のセッション状態をリアルタイム監視し、WezTerm ステータスバーと TUI ダッシュボードに表示するツールである。
+baton は、AI コーディングエージェント（Claude Code, Codex CLI, Gemini CLI）のセッション状態をリアルタイム監視し、tmux（デフォルト）および WezTerm ステータスバーと TUI ダッシュボードに表示するツールである。
 
 ### 1.2 ユーザーのワークフロー
 
-```
-WezTerm Tab（プロジェクト X）= 8 ペイン同時表示
+```text
+tmux Window（プロジェクト X）= 8 ペイン同時表示
 ┌──────────────────┬──────────────────┬──────────┬──────────┐
 │ Claude 1         │ Claude 2         │ Codex    │ Gemini   │
 │ (branch: feat-A) │ (branch: feat-B) │          │          │
@@ -27,9 +27,9 @@ WezTerm Tab（プロジェクト X）= 8 ペイン同時表示
 └──────────────────┴──────────────────┴──────────┴──────────┘
 ```
 
-- 複数プロジェクトを WezTerm タブで管理（1 タブ = 1 プロジェクト）
-- 各タブ内で複数の AI ツールを同時に起動
-- AI ツールは WezTerm ペインから直接起動（baton 経由ではない）
+- 複数プロジェクトを tmux Window (または WezTerm Tab) で管理（1 Window = 1 プロジェクト）
+- 各 Window 内で複数の AI ツールを同時に起動
+- AI ツールは tmux ペインから直接起動（baton 経由ではない）
 - baton は**観察者**として外部から全セッションの状態を把握する
 
 ### 1.3 v1 の根本的な問題
@@ -40,7 +40,7 @@ WezTerm Tab（プロジェクト X）= 8 ペイン同時表示
 | 状態検出の不正確さ | 終了セッションの JSONL が Active 状態で残る | Idle であるべきセッションが Thinking/ToolUse と表示 |
 | 承認待ち検出の欠如 | ツール承認待ち状態を JSONL から判定する仕組みがない | ユーザーが介入すべきタイミングがわからない |
 | 表示情報の不足 | プロジェクト名とセッション ID のみ | どのセッションが何をしているか判別できない |
-| WezTerm 連携の形骸化 | 上記問題により表示データ自体が不正確 | ステータスバーが信頼できない情報を表示 |
+| tmux/WezTerm連携の形骸化 | 上記問題により表示データ自体が不正確 | ステータスバーが信頼できない情報を表示 |
 
 ### 1.4 v2 の目的
 
@@ -55,15 +55,12 @@ WezTerm Tab（プロジェクト X）= 8 ペイン同時表示
 > 複数の AI セッションを同時に動かしている時に、どのセッションがユーザーの入力を待っているかを即座に把握したい。承認待ちのまま放置して作業効率が落ちることを防ぎたい。
 
 **受け入れ基準**:
-- WezTerm ステータスバーに承認待ちセッション数が表示される
+- ステータスバーに承認待ちセッション数が表示される
 - TUI ダッシュボードで承認待ちセッションが視覚的に強調される
 - 承認待ちのセッションが存在するペインにジャンプできる
 
-> **制約（同一 CWD に複数 Claude がある場合の Waiting 集計）**:
-> Waiting 中は JSONL への書き込みが停止するため mtime が更新されず、アクティブ JSONL の候補から外れる可能性がある。
-> 実装では `tmux capture-pane` の承認プロンプト検出で Waiting を再補正するため、漏れは軽減される。
-> ただしプロンプトが画面に残っていない場合などは、Waiting セッションが集計から漏れる可能性がある（ベストエフォート）。
-> 同一 CWD に Claude が 1 つの場合は正確に動作する。
+> **制約（同一 CWD に複数 Claude がある場合の集計）**:
+> JSONL のみではPIDとの紐付けが不可能なため、状態割り当てが不正確になりがちだが、`tmux capture-pane` によるペインテキスト解析を権威的ソースとすることで、Waitingの検出漏れを防いでいる。
 
 ### US-02: 全セッションの状態一覧
 
@@ -86,9 +83,9 @@ WezTerm Tab（プロジェクト X）= 8 ペイン同時表示
 > **注**: 詳細情報は Claude Code セッションでのみ取得可能。Codex/Gemini セッションでは取得不能な項目は `-` 表示とする。
 > Claude Code セッションであっても、session-meta と JSONL の紐付けに失敗した場合は同様にフォールバックする。
 
-### US-04: WezTerm ステータスバーでの常時監視
+### US-04: ステータスバーでの常時監視
 
-> WezTerm のステータスバーを見るだけで、全プロジェクトの AI セッション状況を把握したい。TUI を開かなくても承認待ちに気づけるようにしたい。
+> ステータスバーを見るだけで、全プロジェクトの AI セッション状況を把握したい。TUI を開かなくても承認待ちに気づけるようにしたい。
 
 **受け入れ基準**:
 - ステータスバーにアクティブセッション数、承認待ち数が表示される
@@ -100,14 +97,8 @@ WezTerm Tab（プロジェクト X）= 8 ペイン同時表示
 > TUI ダッシュボードから承認待ちセッションを選択し、そのペインに即座にジャンプしたい。
 
 **受け入れ基準**:
-- 同一 CWD に Claude が 1 つの場合: TUI でセッションを選択し Enter でそのペインに直接ジャンプする
-- 同一 CWD に Claude が複数の場合: Enter で候補ペインの選択サブメニューを表示し、ユーザーが選択してジャンプする
-- いずれの場合も、間違ったペインにジャンプしない（不確定な場合は直接ジャンプしない）
-
-> **制約（同一 CWD に複数 Claude がある場合）**:
-> PID→JSONL の紐付けが技術的に不可能なため、どの状態がどのペインかを確定できない。
-> この場合は候補ペインの選択メニューを表示し、ユーザーが選択してジャンプする。
-> 同一 CWD に Claude が 1 つの場合（典型的なユースケース）は直接ジャンプが正確に動作する。
+- TUI でセッションを選択し Enter で対応するペインへジャンプする（tmuxの`switch-client`等を利用）。
+- ペイン候補が複数ある曖昧なセッションでは、候補一覧のサブメニューを表示してからジャンプ先を選択できる。
 
 ---
 
@@ -118,26 +109,21 @@ WezTerm Tab（プロジェクト X）= 8 ペイン同時表示
 | 項目 | 内容 |
 |------|------|
 | 概要 | 実際に動作中の AI プロセスのみをセッションとして認識する |
-| 入力 | WezTerm ペイン情報（TTY, CWD）、OS プロセス一覧 |
-| 処理 | ペインの TTY から `ps -t <tty> -o pid,ppid,comm` でプロセスを検出し、COMM 名でマッチング |
+| 入力 | tmux (または WezTerm) ペイン情報（TTY, CWD, Cmd）、OS プロセス一覧 |
+| 処理 | ペインの TTY から `ps -t <tty> -o pid,ppid,comm,args` でプロセスを検出し、COMM または ARGS名でマッチング |
 | 出力 | 生存中の AI セッション一覧（PID, ToolType, CWD, PaneID） |
 | 周期 | 2-3 秒間隔のポーリング |
 
-**プロセス同定方法**（実機検証済み 2026-03-07）:
+**プロセス同定方法**（実機検証済み）:
 
-| ツール | COMM 名 | プロセスツリー | 検証状況 | 備考 |
-|--------|---------|---------------|----------|------|
-| Claude Code | `claude` | `zsh → claude → [MCP servers]` | **実機検証済み** | `/opt/homebrew/bin/claude` バイナリ |
-| Codex CLI | `codex` | `zsh → codex → [MCP servers]` | **実機検証済み** | `/opt/homebrew/bin/codex` バイナリ |
-| Gemini CLI | `gemini` | `zsh → gemini` | **未検証** | ベストエフォート対応（後述） |
+| ツール | 検出方式 | 備考 |
+|--------|---------|------|
+| Claude Code | COMM=`claude` または ARGS ベース | |
+| Codex CLI | COMM=`codex` または ARGS ベース | |
+| Gemini CLI | ARGS=`gemini` (COMM は `node`) | `node`起動のため、ARGSのbasename照合を行う |
 
-- COMM 名が `claude` / `codex` に完全一致するプロセスは確実に検出する
-- Gemini CLI は COMM 名が未検証のため **ベストエフォート** 扱いとする:
-  - `gemini` で検出できた場合は対応する
-  - 検出できない場合（COMM 名が異なる等）は v2 初期リリースでは非対応とし、検証後に追加する
-  - **受け入れ基準（US-02 等）の対象は Claude Code / Codex CLI のみ**。Gemini は検出できた場合のボーナスとする
-- シェル（zsh/bash）の直接子プロセスとして起動されるため、PPID のシェル確認は不要（COMM 名で十分）
-- サブエージェント（`--output-format stream-json` 付き）も `claude` COMM 名で検出されるが、TTY が `??` のため WezTerm ペインとは紐付かない
+- tmux では `pane_current_command` による事前フィルタが可能。
+- Geminiは `node` コマンドで実行されるため、プロセス引数 (ARGS) をパースして `gemini` との完全一致でフォールバック検出を行う。
 
 ### FR-02: セッション状態検出
 
@@ -148,125 +134,49 @@ WezTerm Tab（プロジェクト X）= 8 ペイン同時表示
 
 #### 共通状態モデル
 
-全ツールで統一して使用する状態列挙。ダッシュボード・ステータスバーの集計・色分け・並び順はこのモデルに基づく。
+全ツールで統一して使用する状態列挙。
 
 | 状態 | 意味 | 表示色 | 集計対象 |
 |------|------|--------|----------|
 | **Idle** | ターン完了、ユーザー入力待ち | グレー | - |
-| **Thinking** | AI が推論中 | 黄色 | active |
+| **Thinking** | AI が推論中 / 作業中 | 黄色 | active |
 | **ToolUse** | ツール実行中（承認済み） | シアン | active |
 | **Waiting** | ユーザーの操作を待機中 | オレンジ | active, waiting |
 | **Error** | エラー発生 | 赤 | error |
 
-- `active` 集計: Thinking + ToolUse + Waiting の合計
-- `waiting` 集計: Waiting のみ
-- 表示ソート優先順: Waiting > Error > Thinking > ToolUse > Idle
-
-#### Claude Code の状態判定（JSONL ベース）
-
-**判定ルール**（実機検証済み 2026-03-07）:
-
-JSONL の**最終エントリ**（末尾 1 件）の `type` と属性で状態を判定する。
-`progress` エントリも判定対象とする（スキップしない）。
-
-| 最終エントリのパターン | 判定される状態 | 根拠 |
-|----------------------|---------------|------|
-| `type: "system"` + `subtype: "turn_duration"` | **Idle** | ターン完了を示すシステムイベント |
-| `type: "assistant"` + `stop_reason: "end_turn"` | **Idle** | AI が応答を完了 |
-| `type: "assistant"` + `stop_reason: "tool_use"` | **Waiting** | ツール承認待ち（後述） |
-| `type: "progress"` | **ToolUse** | 承認済みツールが実行中（後述） |
-| `type: "user"` + `content[0].type: "tool_result"` | **Thinking** | ツール結果を受けて AI が応答生成中 |
-| `type: "user"`（tool_result 以外） | **Thinking** | ユーザー入力を受け、AI が応答生成中 |
-| `type: "assistant"` + `content[-1].type: "thinking"` | **Thinking** | AI が思考ブロックを出力中 |
-| `type: "assistant"` + `content[-1].type: "error"` | **Error** | エラー発生 |
-| 上記いずれにも該当しない | **Idle** | フォールバック |
-
-**Waiting と ToolUse の区別（実機検証済み）**:
-
-Claude Code のツール実行シーケンスは以下の順序で JSONL に記録される:
-
-```
-1. assistant (stop_reason: "tool_use")   ← ツール実行を要求
-2. [ユーザーが承認 or 自動承認]
-3. progress (data.type: "hook_progress") ← PreToolUse フックが発火（承認後）
-4. progress (data.type: "bash_progress" / "agent_progress") ← ツール実行中
-5. user (content[0].type: "tool_result") ← ツール実行完了
-```
+#### Claude Code の状態判定（ペインテキスト優先 + JSONLハイブリッド）
 
 **判定ロジック**:
-- 最終エントリがステップ 1 で止まっている → **Waiting**（承認がまだ行われていない）
-- 最終エントリがステップ 3-4 → **ToolUse**（承認済み、ツール実行中）
-- 最終エントリがステップ 5 → **Thinking**（AI が結果を処理中）
+1. `tmux capture-pane` によるペインテキスト（末尾から逆順スキャン）を主軸とする。
+   - `Waiting`: 承認プロンプトや選択肢UIがある
+   - `Thinking`/`ToolUse`: `✢`/`·`/`✶` 等のインジケーターがプロンプトより上にある
+   - `Idle`: 待機状態のプロンプト (`❯` + 区切り線) で完了している
+2. ペインテキストから判定できない場合は JSONL（最終エントリの `type` / `stop_reason` など）を補助として用いる。
 
-この判定は特定のツール名（`AskUserQuestion` 等）に依存しない。
-`hook_progress` の存在が「承認済み」のシグナルとして機能するため、
-長時間実行される Bash コマンドでも誤って Waiting に分類されない。
+#### Codex CLI の状態判定
 
-> **検証データ** (`progress.data.type` の出現回数):
-> - `hook_progress`: 263 回（全ツールの承認後に発火）
-> - `agent_progress`: 229 回（Agent ツール実行中）
-> - `bash_progress`: 8 回（Bash 実行中）
+- `pgrep -P` を用いて、バックグラウンドプロセス以外の作業用子プロセスが存在するかを検査する。
+- 作業用子プロセスあり → `Thinking`
+- 作業用子プロセスなし → `Idle`
+- 更に `capture-pane` で承認プロンプトを検知した場合は `Waiting`。
 
-#### Codex/Gemini CLI の状態判定（プロセスベース）
+#### Gemini CLI の状態判定
 
-Codex/Gemini は JSONL を書き出さないため、プロセス存在のみで判定する。
-
-| 条件 | 判定される状態 |
-|------|---------------|
-| プロセスが存在する | **Thinking**（共通状態モデルにマッピング） |
-| プロセスが存在しない | セッション一覧から除外（非表示） |
-
-- Codex/Gemini をあえて `Thinking` とする理由: `Active` は共通状態モデルに存在しないため、「AI が動作中」に最も近い状態にマッピングする
-- 将来的に Codex/Gemini が状態ファイルを出力するようになれば、より細かい判定が可能になる
+- プロセスが存在する場合、基本的に `Thinking`。
+- `capture-pane` により、`workspace (...) ... sandbox` などのステータスバーを検知した場合は `Idle`。
+- 承認プロンプトを検知した場合は `Waiting`。
 
 ### FR-03: セッション詳細情報の取得
 
 | 情報項目 | データソース | 対象ツール | 取得保証 |
 |----------|-------------|-----------|----------|
-| ツール種別 | プロセス COMM 名 | 全ツール | **必須**（プロセス検出と同時に確定） |
-| 所属ペイン | WezTerm pane_id | 全ツール | **必須**（スキャンの起点） |
-| 作業ディレクトリ | WezTerm CWD | 全ツール | **必須**（`file://` プレフィックスを除去して使用） |
+| ツール種別 | プロセス COMM/ARGS 名 | 全ツール | **必須** |
+| 所属ペイン | tmux pane_id | 全ツール | **必須** |
+| 作業ディレクトリ | tmux CWD | 全ツール | **必須** |
 | ブランチ名 | JSONL `gitBranch` フィールド | Claude Code | ベストエフォート |
 | 実行中ツール名 | JSONL 最新 `tool_use` の `name` | Claude Code | ベストエフォート |
 | タスク概要 | session-meta `first_prompt` | Claude Code | ベストエフォート |
 | トークン使用量 | session-meta `input_tokens` / `output_tokens` | Claude Code | ベストエフォート |
-
-**取得保証レベル**:
-- **必須**: 常に取得可能。取得できない場合はセッション自体が検出されない
-- **ベストエフォート**: 取得できた場合のみ表示。取得不能時は `-` を表示
-
-**CWD の正規化ルール**:
-
-WezTerm CLI の `cwd` フィールドは `file:///Users/foo/project` 形式で返される。
-
-| 処理 | ルール |
-|------|--------|
-| プレフィックス除去 | `file://` を除去して OS パスに変換（例: `file:///Users/foo` → `/Users/foo`） |
-| シンボリックリンク | 解決しない（WezTerm が返す値をそのまま使用） |
-| 末尾スラッシュ | 除去して統一（`/Users/foo/` → `/Users/foo`） |
-
-**プロジェクト識別**:
-
-セッションのプロジェクト所属は CWD で決定する。
-
-| ルール | 説明 |
-|--------|------|
-| 同一 CWD | 同じ CWD を持つセッションは同一プロジェクトに所属 |
-| プロジェクト名 | CWD の最後のパスコンポーネントを表示名とする（例: `/Users/foo/myproject` → `myproject`） |
-| CWD 取得失敗時 | WezTerm の `cwd` が空文字列の場合、プロジェクトを `(unknown)` とし、セッション自体は表示する（非表示にしない） |
-
-> **注**: CWD が空になるケースは、WezTerm のバージョンや OS の制約で稀に発生しうる。
-> セッションの生死判定（FR-01）は TTY + プロセスで行うため、CWD 取得失敗はセッション検出には影響しない。
-
-**session-meta と JSONL の紐付け**:
-
-session-meta ファイル（`~/.claude/usage-data/session-meta/{uuid}.json`）と
-JSONL ファイル（`~/.claude/projects/{slug}/{uuid}.jsonl`）は同一の `session_id`（UUID）で紐付く。
-
-紐付け手順:
-1. JSONL ファイル名から UUID を取得（例: `74eca77c-...-.jsonl` → `74eca77c-...`）
-2. `~/.claude/usage-data/session-meta/{同じ UUID}.json` を読み込む
-3. ファイルが存在しない場合は session-meta 由来の項目を `-` 表示とする
 
 ### FR-04: TUI ダッシュボード
 
@@ -278,13 +188,13 @@ JSONL ファイル（`~/.claude/projects/{slug}/{uuid}.jsonl`）は同一の `se
 | 操作 | セッション選択 → ペインジャンプ（Enter） |
 | 更新頻度 | 2-3 秒 |
 
-### FR-05: WezTerm ステータスバー連携
+### FR-05: ステータスバー連携
 
 | 項目 | 内容 |
 |------|------|
 | 表示内容 | アクティブセッション数、承認待ち数、ツール別セッション数 |
 | 表示例 | `baton: 3 active | 1 waiting | 2 claude | 1 codex` |
-| 更新頻度 | 5 秒（Lua 側キャッシュ TTL） |
+| 更新頻度 | 定期ポーリングによる出力 |
 | 承認待ち強調 | 色変更やアイコンで視覚的に目立たせる |
 
 ### FR-06: JSON ステータス出力
@@ -293,59 +203,7 @@ JSONL ファイル（`~/.claude/projects/{slug}/{uuid}.jsonl`）は同一の `se
 |------|------|
 | 出力先 | `/tmp/baton-status.json`（設定で変更可能） |
 | 書き込み方式 | アトミック（temp + rename） |
-| 用途 | WezTerm Lua プラグインおよび外部ツールとの連携 |
-| `formatted_status` | baton が設定テンプレートを評価した整形済みステータス文字列。Lua はこれをそのまま表示する |
-
-**出力スキーマ**:
-
-```jsonc
-{
-  "version": 2,                          // スキーマバージョン（必須）
-  "timestamp": "2026-03-07T12:00:00Z",   // 生成時刻 ISO8601（必須）
-  "projects": [                           // プロジェクト一覧（必須、0個以上）
-    {
-      "path": "/Users/foo/myproject",     // プロジェクトパス（必須）
-      "name": "myproject",               // 表示用プロジェクト名（必須）
-      "sessions": [                       // セッション一覧（必須、1個以上）
-        {
-          // --- 必須フィールド ---
-          "pane_id": "0",                 // WezTerm ペイン ID
-          "tool": "claude",               // ツール種別: "claude" | "codex" | "gemini"
-          "state": "thinking",            // 状態: "idle" | "thinking" | "tool_use" | "waiting" | "error"
-          "pid": 12345,                   // プロセス PID
-          "working_dir": "/Users/foo/myproject", // 作業ディレクトリ
-
-          // --- 任意フィールド（取得不能時は省略） ---
-          "branch": "feat-auth",          // Git ブランチ名
-          "current_tool": "Bash",         // 実行中のツール名
-          "first_prompt": "認証機能を実装して", // タスク概要
-          "input_tokens": 12500,          // 入力トークン数
-          "output_tokens": 8300           // 出力トークン数
-        }
-      ]
-    }
-  ],
-  "summary": {                            // 集計情報（必須）
-    "total_sessions": 3,                  // 全セッション数
-    "active": 2,                          // Thinking + ToolUse + Waiting
-    "waiting": 1,                         // Waiting のみ
-    "by_tool": {                          // ツール別セッション数
-      "claude": 2,
-      "codex": 1
-    }
-  },
-  "formatted_status": "baton: 2 active | ⚠ 1 waiting | 2⚡ 1📦"
-                                          // 整形済みステータス文字列（必須）
-                                          // baton が設定テンプレートを評価した結果
-                                          // Lua プラグインはこの文字列をそのまま表示する
-}
-```
-
-**スキーマルール**:
-- `version` フィールドでスキーマの互換性を管理する。破壊的変更時にインクリメントする
-- 必須フィールドは常に存在する。任意フィールドは取得不能時にキー自体を省略する（`null` ではない）
-- `projects` が空配列の場合、AI セッションが 1 つも検出されなかったことを意味する
-- Lua プラグイン側は `version` を確認し、未知のバージョンの場合はフォールバック表示を行う
+| 用途 | tmux ステータスライン、WezTerm Lua プラグインおよび外部ツールとの連携 |
 
 ### FR-07: 動作モード
 
@@ -373,24 +231,21 @@ JSONL ファイル（`~/.claude/projects/{slug}/{uuid}.jsonl`）は同一の `se
 - セッションの誤検出（存在しないセッションを表示）が発生しないこと
 - プロセスが終了したセッションは次回スキャンで自動的に消えること
 - JSONL の破損や不完全なレコードに対して安全にフォールバックすること
-- 状態判定の過渡的な不一致（自動承認ツールが一瞬 Waiting と表示される等）はポーリング間隔（2-3 秒）以内に自然解消すること。永続的な誤表示は許容しない
 
 ### NFR-03: 拡張性
 
 - ターミナルエミュレータの差し替えが可能（Terminal インターフェース）
-- 新しい AI ツールの追加が容易（ToolType の拡張とプロセス名マッチング追加のみ）
-- 表示フォーマットのカスタマイズが可能（設定ファイル）
+- 新しい AI ツールの追加が容易
 
 ### NFR-04: テスタビリティ
 
 - プロセス検出、ターミナル連携は DI（依存性注入）でモック差し替え可能
 - 外部コマンド実行なしでユニットテストが完結すること
-- テストカバレッジ 80% 以上
 
 ### NFR-05: プラットフォーム
 
 - macOS (Darwin) を主要ターゲット
-- Linux は将来対応（`/proc` ベースのプロセス検出を追加）
+- Linux は将来対応
 
 ---
 
@@ -400,116 +255,30 @@ JSONL ファイル（`~/.claude/projects/{slug}/{uuid}.jsonl`）は同一の `se
 
 - プロセス監視によるセッション生死判定
 - Claude Code / Codex CLI / Gemini CLI の 3 ツール対応
-- 5 段階の状態検出（Idle, Thinking, ToolUse, Waiting, Error）
-- セッション詳細情報（ブランチ、ツール名、トークン）
-- TUI ダッシュボード + WezTerm ステータスバー
+- tmux（主軸）および WezTerm 連携
 - ペインジャンプ機能
 
 ### v2 スコープ外（将来検討）
 
-- コスト金額の算出（トークン数は表示するが、金額変換は ccusage 等に委譲）
-- セッションの起動・停止操作（baton は観察者に徹する）
-- 通知機能（macOS 通知、音声等）
-- Linux / WSL 対応
-- tmux / Kitty 等の他ターミナル対応
-- Claude Code Desktop アプリとの連携
+- コスト金額の算出（トークン数は表示するが、金額変換は外部ツールに委譲）
+- セッションの起動・停止操作
+- Linux / WSL 完全対応
 
 ---
 
-## 6. 既存プロダクトとの比較・参考
+## 6. 未決事項・検討課題
 
-### 6.1 表示項目の比較
-
-| 表示項目 | ccmanager | agent-deck | claude-squad | baton v2 |
-|----------|:---------:|:----------:|:------------:|:--------:|
-| セッション状態 | 3段階 | 4段階 | 基本的 | **5段階** |
-| ツール種別 | 表示 | 表示 | 表示 | **表示** |
-| ブランチ名 | - | - | - | **表示** |
-| 実行中ツール名 | - | - | - | **表示** |
-| トークン使用量 | - | - | - | **表示** |
-| 承認待ち | 検出可 | 検出可 | - | **検出+強調** |
-| マルチプロジェクト | 対応 | 対応 | 限定的 | **対応** |
-
-### 6.2 アーキテクチャの差異
-
-| 観点 | 既存ツール | baton v2 |
-|------|----------|----------|
-| セッション発見 | 自分が起動したもののみ | **外部起動も含め全て** |
-| 生死判定 | tmux セッション管理 | **OS プロセス監視** |
-| 表示方式 | 1 セッションずつ切替 | **全セッション同時表示可** |
-| tmux 依存 | 必須（大半） | **不要** |
-| 状態検出 | ターミナル出力監視 | **JSONL + プロセス監視** |
-
-### 6.3 session-meta から取得可能なデータ
-
-Claude Code は `~/.claude/usage-data/session-meta/{uuid}.json` に以下の情報を記録:
-
-```json
-{
-  "session_id": "uuid",
-  "project_path": "/path/to/project",
-  "start_time": "ISO8601",
-  "duration_minutes": 15,
-  "input_tokens": 12500,
-  "output_tokens": 8300,
-  "first_prompt": "ユーザーの最初のメッセージ",
-  "git_commits": 2,
-  "git_pushes": 0,
-  "lines_added": 150,
-  "lines_removed": 30,
-  "files_modified": 5,
-  "tool_counts": {"Bash": 10, "Read": 5, "Edit": 3},
-  "uses_mcp": true,
-  "uses_task_agent": true
-}
-```
-
-v2 ではこのデータを補助的に活用し、セッションのコンテキスト表示を充実させる。
+> 本フェーズにおける未決事項はすべて **解決済み**。
+> （ADR-0008〜0011 にて、tmux 移行、Gemini 状態判定、Codex 子プロセス検査、Claude ペインテキスト判定の設計方針が確立・実装されたため）
 
 ---
 
-## 7. 用語定義
-
-| 用語 | 定義 |
-|------|------|
-| セッション | 1 つの WezTerm ペインで動作中の AI ツールプロセス |
-| プロジェクト | 共通の作業ディレクトリを持つセッションのグループ |
-| 状態 (State) | セッションの現在の動作状態（Idle/Thinking/ToolUse/Waiting/Error） |
-| ペイン | WezTerm 内の分割された端末領域 |
-| スキャン | 全ペインのプロセスを検査して生存セッションを発見する1回の処理 |
-| JSONL | Claude Code が書き出すセッションログファイル（行区切り JSON） |
-| session-meta | Claude Code が書き出すセッション統計ファイル |
-
----
-
-## 8. 未決事項・検討課題
-
-> 以下の項目は基本設計フェーズで詳細化する。
-
-### 解決済み
-
-- [x] `ps -t <tty>` でプロセス名のマッチングが十分か → **解決**: COMM 名 `claude` / `codex` で直接検出可能（実機検証済み）
-- [x] session-meta ファイルと JSONL の sessionId の紐付け方法 → **解決**: ファイル名の UUID で紐付け（FR-03 に記載）
-- [x] Waiting 判定の仕様 → **解決**: 最終エントリが `assistant(stop_reason: "tool_use")` なら Waiting、`progress` エントリなら ToolUse（承認済み）。`progress(hook_progress)` の有無が承認シグナルとして機能する（FR-02 に詳細記載）
-
-### 未解決（基本設計で詳細化）
-
-- [ ] Gemini CLI のプロセス COMM 名の実機検証（`gemini` と表示されるか）
-- [ ] Codex/Gemini の状態をもう少し細かく取れないか（標準出力のパターンマッチ等）
-- [ ] WezTerm 以外のターミナルでのプロセス検出手法（TTY がない場合）
-- [ ] ステータスバーの表示フォーマットのカスタマイズ性
-- [ ] `wezterm cli list` の CWD `file:///` プレフィックスの扱い（バージョン依存性の確認）
-- [ ] Waiting 判定の過渡状態: 自動承認ツールが一瞬 Waiting として見える可能性（実用上は 2-3 秒の polling 間隔で自然に解消するが、許容可能か確認）
-- [ ] 同一 CWD の複数 Claude セッションにおける JSONL-ペイン対応: PID→JSONL の厳密な紐付け手段がないため、補助情報（ブランチ名、トークン等）がペイン間で入れ替わる可能性がある。セッション数・状態集計・ペインジャンプ（PID ベース）は正確。Claude Code が PID を JSONL に記録するようになれば解消可能
-
----
-
-## 9. 既存文書との関係
+## 7. 既存文書との関係
 
 | 文書 | ステータス | 対応 |
 |------|----------|------|
-| `docs/architecture/overview.md` | **v1 旧設計** | v2 基本設計書で置き換え予定。参考として残す |
-| `docs/adr/0001-0004` | **v1 判断記録** | v1 時点の判断として有効。v2 で覆す判断は新規 ADR で記録 |
-| `README.md` | **要更新** | v2 実装完了時に更新 |
-| `CLAUDE.md` | **要更新** | v2 実装完了時に更新 |
-| `.claude/Plans.md` | **v1 完了済み** | v2 用に新しいフェーズを追記予定 |
+| `docs/architecture/overview.md` | **v2 更新済み** | アーキテクチャの最新状態を反映 |
+| `docs/adr/*` | **有効** | 実装の変遷と判断の記録 |
+| `README.md` | **最新化済み** | |
+| `docs/README.ja.md` | **最新化済み** | README 日本語版 |
+| `AGENTS.md` | **最新化済み** | 開発者向け概要 |
