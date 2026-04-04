@@ -13,8 +13,8 @@ baton discovers AI coding sessions running in tmux panes and displays their stat
 Key design decisions:
 
 - **Pane-centric**: Primary key is `TMUX_PANE`, not tmux session name. Multiple AI sessions in the same tmux session are tracked individually.
-- **Non-intrusive**: Sessions are started manually; baton discovers them via `ps` + JSONL log parsing.
-- **Hook-free status**: State is derived from JSONL logs, child process detection, and screen scraping — no Claude Code hooks required.
+- **Non-intrusive**: Sessions are started manually; baton discovers them via `ps`, `tmux capture-pane`, and Claude JSONL/session-meta files.
+- **Hook-free status**: State is derived from pane text, child process detection, and JSONL fallback — no Claude Code hooks required.
 
 ## Features
 
@@ -51,7 +51,6 @@ Or download prebuilt binaries from GitHub Releases (`baton_<tag>_<os>_<arch>.tar
 Release notes:
 
 - [CHANGELOG.md](CHANGELOG.md)
-- [Release process](docs/release-process.md)
 
 If `baton` is not found after installation, ensure your Go bin directory is in `PATH`.
 
@@ -169,15 +168,16 @@ statusbar:
 
 ## How it works
 
-```
+```text
 Ticker (2s)
   └── Scanner.Scan()
-        ├── tmux list-panes -a          # discover all panes
-        ├── ps + pgrep                  # find AI processes per pane
-        └── JSONL log parsing           # determine session state
+        ├── tmux list-panes -a          # discover panes and current commands
+        ├── ps -t <tty>                 # find AI processes per pane
+        └── pgrep -P <pid>              # inspect Codex child processes
   └── StateManager.UpdateFromScan()
-        ├── ResolveMultiple()           # match processes to JSONL logs
-        └── RefineToolUseState()        # screen scrape for approval prompts
+        └── ResolveMultiple()           # build Claude base data from JSONL/session-meta
+  └── StateManager.RefineToolUseState()
+        └── tmux capture-pane           # refine Waiting / Idle from pane text
   └── ScanResultMsg → TUI Update()
   └── Exporter.Write()                  # /tmp/baton-status.json
 ```
@@ -186,9 +186,9 @@ Ticker (2s)
 
 | Tool | Working | Idle | Waiting |
 |------|---------|------|---------|
-| Claude Code | JSONL `assistant` entries | JSONL `end_turn` | Screen: approval prompt patterns |
-| Codex CLI | `pgrep -P`: child process exists | No child processes | Screen: approval prompt patterns |
-| Gemini CLI | Process running | — | — |
+| Claude Code | Pane text indicators (`✢` / `·` / `✶`) with JSONL fallback | Prompt line (`❯` + divider) with JSONL fallback | Screen: approval prompt patterns |
+| Codex CLI | `pgrep -P`: child process exists | No child processes | Screen: numbered approval prompt |
+| Gemini CLI | Process running (default) | Screen: `workspace (...) ... sandbox` | Screen: approval prompt patterns |
 
 ## Project Structure
 
@@ -200,10 +200,12 @@ Ticker (2s)
 │   │   ├── model.go                 # Domain types (SessionState, Session, Project)
 │   │   ├── parser.go                # JSONL parser + IncrementalReader
 │   │   ├── process.go               # Process detection (ps/pgrep)
+│   │   ├── resolver.go              # Claude JSONL/session-meta resolver
 │   │   ├── scanner.go               # DefaultScanner (pane scan + CurrentCommand filter)
-│   │   ├── watcher.go               # fsnotify file watcher + debounce
 │   │   ├── state.go                 # State aggregation manager
-│   │   └── exporter.go              # Atomic JSON export
+│   │   ├── exporter.go              # Atomic JSON export
+│   │   ├── tmux_status.go           # tmux status-line formatter
+│   │   └── watcher.go               # fsnotify file watcher (legacy/compat)
 │   ├── terminal/
 │   │   ├── terminal.go              # Terminal interface
 │   │   ├── tmux.go                  # tmux implementation (default)

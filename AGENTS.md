@@ -1,13 +1,13 @@
 
 # baton - AI Session Monitor
 
-**概要**: Claude Code のセッション状態をリアルタイム監視し、TUI ダッシュボードと WezTerm ステータスバーに表示する Go アプリケーション
+**概要**: Claude Code, Codex, Gemini のセッション状態をリアルタイム監視し、TUI ダッシュボードと tmux (デフォルト) / WezTerm ステータスバーに表示する Go アプリケーション
 
 ---
 
 ## Tech Stack
 
-- **Language**: Go 1.22+
+- **Language**: Go 1.25.5+
 - **Framework**: bubbletea (TUI), bubbles (components), lipgloss (styling)
 - **File Watching**: fsnotify
 - **Config**: yaml.v3
@@ -46,17 +46,22 @@ go vet ./...
 
 ```
 .
-├── main.go                          # エントリポイント（--no-tui/--once/--config フラグ）
+├── main.go                          # エントリポイント（--no-tui/--once/--exit/--config フラグ）
 ├── internal/
 │   ├── core/
 │   │   ├── model.go                 # ドメイン型（SessionState, Session, Project, StatusOutput）
 │   │   ├── parser.go                # JSONL パーサー + IncrementalReader
-│   │   ├── watcher.go               # fsnotify ファイルウォッチャー + デバウンス
+│   │   ├── process.go               # プロセス検出（ps / pgrep）
+│   │   ├── resolver.go              # Claude JSONL / session-meta 解決
+│   │   ├── scanner.go               # ペイン走査 + CurrentCommand フィルタ
 │   │   ├── state.go                 # 状態集約マネージャー
-│   │   └── exporter.go              # アトミック JSON 書き出し
+│   │   ├── exporter.go              # アトミック JSON 書き出し
+│   │   ├── tmux_status.go           # tmux ステータスライン文字列生成
+│   │   └── watcher.go               # fsnotify ファイルウォッチャー（互換用途）
 │   ├── terminal/
 │   │   ├── terminal.go              # Terminal インターフェース定義
-│   │   └── wezterm.go               # WezTerm CLI 実装
+│   │   ├── tmux.go                  # tmux CLI 実装（デフォルト）
+│   │   └── wezterm.go               # WezTerm CLI 実装（レガシー）
 │   ├── config/
 │   │   └── config.go                # YAML 設定読み込み
 │   └── tui/
@@ -64,7 +69,7 @@ go vet ./...
 │       ├── update.go                # キー入力・イベントハンドリング
 │       └── view.go                  # 左右ペイン + ステータスバー描画
 └── wezterm/
-    └── baton-status.lua             # WezTerm ステータスバー Lua プラグイン
+    └── baton-status.lua             # WezTerm ステータスバー Lua プラグイン（レガシー）
 ```
 
 ---
@@ -82,5 +87,6 @@ go vet ./...
 
 - 設定ファイル: `~/.config/baton/config.yaml`（オプション）
 - ステータス出力: `/tmp/baton-status.json`（アトミック書き込み）
-- データフロー: watcher → channel → tea.Sub → bubbletea Msg → Update()
-- state.go は集約のみ、JSON 書き出しは exporter.go に分離
+- デフォルト terminal: `tmux`（`terminal: wezterm` でレガシー切り替え可能）
+- データフロー: `ticker` → `Scanner.Scan()` → `StateManager.UpdateFromScan()` → `RefineToolUseState()` → TUI / Exporter
+- 状態判定: Claude は pane text 優先 + JSONL 補助、Codex は子プロセス検査、Gemini は pane text で `Idle` / `Waiting` を精緻化
