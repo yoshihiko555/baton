@@ -1068,7 +1068,6 @@ func TestSimpleDenyOnWaitingClaude(t *testing.T) {
 	}
 }
 
-
 func TestApproveIgnoredOnNonWaitingState(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 	projects := []core.Project{
@@ -1332,7 +1331,6 @@ func TestCanInputOnClaudeSession(t *testing.T) {
 		t.Error("canInput() = false, want true for Claude session on right pane")
 	}
 }
-
 
 // TestCanInputFalseOnNonClaude verifies canInput returns false for Codex and Gemini sessions.
 func TestCanInputFalseOnNonClaude(t *testing.T) {
@@ -2005,6 +2003,64 @@ func TestFilterModeStartsWithSlash(t *testing.T) {
 	}
 	if m.filterQuery != "" {
 		t.Errorf("filterQuery = %q, want empty", m.filterQuery)
+	}
+}
+
+func TestFilterModeArrowKeysMoveCursor(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Idle, Tool: core.ToolClaude, PaneID: "%1"},
+				{PID: 200, State: core.Idle, Tool: core.ToolCodex, PaneID: "%2"},
+				{PID: 300, State: core.Waiting, Tool: core.ToolClaude, PaneID: "%3"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("idle")})
+	m = updated.(Model)
+
+	if got := visibleSessionCount(m.entries); got != 2 {
+		t.Fatalf("visible sessions = %d, want 2 for idle filter", got)
+	}
+	if pid := selectedPID(m); pid != 100 {
+		t.Fatalf("selected PID before down = %d, want 100", pid)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if pid := selectedPID(m); pid != 200 {
+		t.Fatalf("selected PID after down = %d, want 200", pid)
+	}
+	if !m.filtering {
+		t.Fatal("expected filtering=true after down in filter mode")
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = updated.(Model)
+	if pid := selectedPID(m); pid != 100 {
+		t.Fatalf("selected PID after up = %d, want 100", pid)
+	}
+}
+
+func TestFilterModeRuneKIsAcceptedAsInput(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("wor")})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	m = updated.(Model)
+
+	if got := m.filterInput.Value(); got != "work" {
+		t.Fatalf("filter input = %q, want work", got)
 	}
 }
 
