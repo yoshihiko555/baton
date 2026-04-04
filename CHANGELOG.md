@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- セッションフィルタ入力中に `↑/↓` キーで一覧選択を移動できない不具合を修正（Enter で pane 移動しなくてもカーソル移動可能）
+
 ## [0.1.2] - 2026-03-29
 
 ### Added

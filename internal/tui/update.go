@@ -21,10 +21,10 @@ var (
 	upKeys   = key.NewBinding(key.WithKeys("k", "up"))
 	downKeys = key.NewBinding(key.WithKeys("j", "down"))
 
-	approveKey    = key.NewBinding(key.WithKeys("a"))
-	denyKey       = key.NewBinding(key.WithKeys("d"))
-	promptApprove = key.NewBinding(key.WithKeys("A"))
-	promptDeny    = key.NewBinding(key.WithKeys("D"))
+	approveKey     = key.NewBinding(key.WithKeys("a"))
+	denyKey        = key.NewBinding(key.WithKeys("d"))
+	promptApprove  = key.NewBinding(key.WithKeys("A"))
+	promptDeny     = key.NewBinding(key.WithKeys("D"))
 	autoApproveKey = key.NewBinding(key.WithKeys("t"))
 )
 
@@ -471,6 +471,10 @@ func (m Model) updateFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filtering = false
 		m.filterInput.Blur()
 		return m.handleEnter()
+	case msg.Type == tea.KeyUp:
+		return m.moveCursor(-1)
+	case msg.Type == tea.KeyDown:
+		return m.moveCursor(1)
 	}
 
 	var inputCmd tea.Cmd
