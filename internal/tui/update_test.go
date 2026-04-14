@@ -1711,10 +1711,10 @@ func TestAutoApproveOnScanResult(t *testing.T) {
 	}
 }
 
-// TestAutoApproveDisablesManualApprove は autoApprove ON のとき 'a' キーでの
-// 手動承認が無効化されることを確認する。
-func TestAutoApproveDisablesManualApprove(t *testing.T) {
-	m, _ := waitingClaudeModel()
+// TestManualApproveWorksWithAutoOn は autoApprove ON でも 'a' キーで
+// 手動承認が可能であることを確認する（auto 失敗時のフォールバック）。
+func TestManualApproveWorksWithAutoOn(t *testing.T) {
+	m, term := waitingClaudeModel()
 
 	// Arrange: autoApprove を ON にする
 	m.autoApprove["%1"] = true
@@ -1723,14 +1723,25 @@ func TestAutoApproveDisablesManualApprove(t *testing.T) {
 	aKey := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
 	_, cmd := m.Update(aKey)
 
-	// Assert: canApprove() が false を返すため cmd は nil
-	if cmd != nil {
-		t.Error("expected nil cmd for manual approve when auto-approve is ON")
+	// Assert: cmd が返ること（手動承認が機能する）
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd for manual approve even when auto-approve is ON")
+	}
+	result := cmd()
+	ar, ok := result.(ApprovalResultMsg)
+	if !ok {
+		t.Fatalf("expected ApprovalResultMsg, got %T", result)
+	}
+	if ar.Label != "Approved" {
+		t.Errorf("Label = %q, want %q", ar.Label, "Approved")
+	}
+	if len(term.sentKeys) != 1 || term.sentKeys[0] != "Enter" {
+		t.Errorf("sentKeys = %v, want Enter", term.sentKeys)
 	}
 }
 
-// TestAutoApproveOnlyAffectsClaude は Codex セッションでは autoApprove が発動しないことを確認する。
-func TestAutoApproveOnlyAffectsClaude(t *testing.T) {
+// TestAutoApproveAlsoAffectsCodex は Codex セッションでも autoApprove が発動することを確認する。
+func TestAutoApproveAlsoAffectsCodex(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
 	// Arrange: Codex の Waiting セッションを作成
@@ -1754,27 +1765,58 @@ func TestAutoApproveOnlyAffectsClaude(t *testing.T) {
 	}
 	_, cmd := m.Update(scanMsg)
 
-	// Assert: checkAutoApprove は Claude セッションのみ対象のため、
-	// cmd が nil または ApprovalResultMsg を返さないことを確認する
+	// Assert: checkAutoApprove が Codex セッションにも Enter を送信すること
 	if cmd == nil {
-		return // nil の場合は OK
+		t.Fatal("expected non-nil cmd for Codex auto-approve")
 	}
-
-	// cmd が non-nil の場合は ApprovalResultMsg でないことを確認
 	result := cmd()
 	switch r := result.(type) {
 	case ApprovalResultMsg:
-		t.Errorf("got ApprovalResultMsg for Codex session, want no auto-approve: %+v", r)
+		if r.Label != "Auto-approved" {
+			t.Errorf("Label = %q, want %q", r.Label, "Auto-approved")
+		}
 	case tea.BatchMsg:
+		found := false
 		for _, innerCmd := range r {
 			if innerCmd != nil {
 				if ar, ok := innerCmd().(ApprovalResultMsg); ok {
 					if ar.Label == "Auto-approved" {
-						t.Errorf("got Auto-approved for Codex session, auto-approve should only affect Claude")
+						found = true
+						break
 					}
 				}
 			}
 		}
+		if !found {
+			t.Error("expected Auto-approved in BatchMsg for Codex session")
+		}
+	default:
+		t.Errorf("unexpected result type %T", result)
+	}
+}
+
+// TestAutoApprovedClearedOnSuccess は承認成功後に autoApproved がクリアされ、
+// 次の Waiting 遷移で再発動することを確認する。
+func TestAutoApprovedClearedOnSuccess(t *testing.T) {
+	m, _ := waitingClaudeModel()
+
+	// Arrange: autoApprove ON + autoApproved をセット（既に送信済み状態）
+	m.autoApprove["%1"] = true
+	m.autoApproved["%1"] = true
+
+	// Act: ApprovalResultMsg を受信（送信成功）
+	resultMsg := ApprovalResultMsg{Err: nil, Label: "Auto-approved", PaneID: "%1"}
+	updated, _ := m.Update(resultMsg)
+	m = updated.(Model)
+
+	// Assert: autoApproved がクリアされていること
+	if m.autoApproved["%1"] {
+		t.Error("autoApproved[%1] should be cleared after successful ApprovalResultMsg")
+	}
+
+	// autoApprove は ON のまま
+	if !m.autoApprove["%1"] {
+		t.Error("autoApprove[%1] should still be ON")
 	}
 }
 

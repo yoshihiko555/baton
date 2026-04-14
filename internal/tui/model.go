@@ -227,9 +227,6 @@ func (m Model) canApprove() bool {
 	if sel == nil || sel.session == nil {
 		return false
 	}
-	if m.autoApprove[sel.session.PaneID] {
-		return false
-	}
 	return sel.session.State == core.Waiting && (sel.session.Tool == core.ToolClaude || sel.session.Tool == core.ToolCodex) && sel.session.PaneID != ""
 }
 
