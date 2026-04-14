@@ -53,6 +53,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.err = nil
 			m.flashMessage = msg.Label
+			// 送信成功時に autoApproved をクリアして次の Waiting 遷移で再発動可能にする
+			delete(m.autoApproved, msg.PaneID)
 		}
 		previewCmd := m.forceRefreshPreview(msg.PaneID)
 		if previewCmd != nil {
@@ -510,7 +512,7 @@ func (m Model) handleToggleAutoApprove() (tea.Model, tea.Cmd) {
 	return m, flashClearCmd(currentGen)
 }
 
-// checkAutoApprove は全セッションを走査し、自動承認 ON かつ Waiting の Claude セッションに Enter を送信する。
+// checkAutoApprove は全セッションを走査し、自動承認 ON かつ Waiting の Claude/Codex セッションに Enter を送信する。
 // 多重送信防止: Waiting から離脱したセッションの autoApproved フラグをリセットし、
 // 未送信のセッションにのみ Enter を送信する。
 //
@@ -523,7 +525,7 @@ func (m *Model) checkAutoApprove() tea.Cmd {
 		if entry.isHeader || entry.session == nil {
 			continue
 		}
-		if entry.session.State == core.Waiting && entry.session.Tool == core.ToolClaude {
+		if entry.session.State == core.Waiting && (entry.session.Tool == core.ToolClaude || entry.session.Tool == core.ToolCodex) {
 			waitingPanes[entry.session.PaneID] = true
 		}
 	}
@@ -541,7 +543,7 @@ func (m *Model) checkAutoApprove() tea.Cmd {
 			continue
 		}
 		sess := entry.session
-		if sess.State != core.Waiting || sess.Tool != core.ToolClaude {
+		if sess.State != core.Waiting || (sess.Tool != core.ToolClaude && sess.Tool != core.ToolCodex) {
 			continue
 		}
 		if !m.autoApprove[sess.PaneID] {
