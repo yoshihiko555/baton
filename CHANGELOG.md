@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- TUI 左ペインを `Attention + project/tool/PID 安定順一覧` に変更し、状態変化中でも上下移動の意図が崩れにくいレイアウトにした
+- `Waiting / Working / Idle` のサマリと、最大 5 件の `Waiting` セッションを上部 `Attention` セクションに表示し、`w` で `Waiting` を巡回できるようにした
+
 ### Fixed
 
 - セッションフィルタ入力中に `↑/↓` キーで一覧選択を移動できない不具合を修正（Enter で pane 移動しなくてもカーソル移動可能）

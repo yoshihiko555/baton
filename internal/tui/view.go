@@ -22,6 +22,9 @@ var (
 const outerPadH = 2 // 左右パディング
 const outerPadV = 1 // 上下パディング
 
+const maxAttentionRows = 5
+const minSessionListLines = 2
+
 // View は tea.Model の描画文字列を返す。
 func (m Model) View() string {
 	totalWidth := m.width
@@ -166,8 +169,16 @@ func (m Model) renderSessionList(width, height int) string {
 		return dim.Render("  No sessions found")
 	}
 
+	attentionHeight := 0
+	if height > minSessionListLines {
+		attentionHeight = height - minSessionListLines
+	}
+	attentionLines := m.renderAttention(width, attentionHeight)
+
+	listHeight := max(1, height-len(attentionLines))
+
 	// カーソル行の絶対位置を算出
-	visibleLines := height
+	visibleLines := listHeight
 	cursorLine := 0
 	for i := 0; i < m.cursor && i < len(m.entries); i++ {
 		cursorLine += entryHeight(m.entries[i])
@@ -208,7 +219,7 @@ func (m Model) renderSessionList(width, height int) string {
 		currentLine += h
 	}
 
-	return strings.Join(lines, "\n")
+	return strings.Join(append(attentionLines, lines...), "\n")
 }
 
 // entryHeight はエントリの描画行数を返す。
@@ -221,6 +232,16 @@ func entryHeight(e sessionEntry) int {
 
 // renderGroupHeader はグループヘッダー行を描画する。
 func renderGroupHeader(e sessionEntry, width int, theme Theme) string {
+	if e.project != nil {
+		labelStyle := lipgloss.NewStyle().
+			Foreground(theme.Brand).
+			Bold(true)
+		lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+		label := fmt.Sprintf(" %s ", e.header)
+		rightLineWidth := max(0, width-lipgloss.Width(label)-2)
+		return lineStyle.Render("──") + labelStyle.Render(label) + lineStyle.Render(strings.Repeat("─", rightLineWidth))
+	}
+
 	color, ok := theme.GroupHeaders[e.header]
 	if !ok {
 		color = lipgloss.Color("#888888")
@@ -246,10 +267,7 @@ func renderSessionEntry(e *sessionEntry, width int, isSelected bool, theme Theme
 	}
 
 	s := e.session
-	name := sessionDisplayName(e)
-	if autoApprove[s.PaneID] {
-		name += " [AUTO]"
-	}
+	name := sessionListLabel(e)
 
 	// 状態インジケーター
 	stateColor := theme.States[s.State]
@@ -272,6 +290,10 @@ func renderSessionEntry(e *sessionEntry, width int, isSelected bool, theme Theme
 
 	// メイン行: ▎ project-name    ● claude
 	mainRight := fmt.Sprintf("%s %s", indicator, toolName)
+	if autoApprove[s.PaneID] {
+		autoStyle := lipgloss.NewStyle().Foreground(theme.Brand).Bold(true)
+		mainRight += " " + autoStyle.Render("[AUTO]")
+	}
 	mainRightWidth := lipgloss.Width(mainRight)
 	nameWidth := max(1, width-lipgloss.Width(cursor)-mainRightWidth-2)
 	displayName := truncate(name, nameWidth)
@@ -287,6 +309,117 @@ func renderSessionEntry(e *sessionEntry, width int, isSelected bool, theme Theme
 	detailLine := cursor + detailStyle.Render(truncate(detail, max(1, width-lipgloss.Width(cursor))))
 
 	return []string{mainLine, detailLine}
+}
+
+func (m Model) renderAttention(width, maxLines int) []string {
+	if maxLines <= 0 {
+		return nil
+	}
+
+	titleStyle := lipgloss.NewStyle().
+		Foreground(m.theme.Brand).
+		Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+
+	alerts := m.attentionEntries()
+	lines := []string{titleStyle.Render(fmt.Sprintf("Attention (%d)", len(alerts)))}
+	if len(lines) >= maxLines {
+		return lines[:maxLines]
+	}
+
+	lines = append(lines, renderAttentionSummary(attentionCounts(m.entries), m.theme, width))
+	if len(lines) >= maxLines {
+		return lines[:maxLines]
+	}
+
+	if len(alerts) == 0 {
+		lines = append(lines, dimStyle.Render("  No waiting sessions"))
+	} else {
+		for _, entry := range alerts[:min(len(alerts), maxAttentionRows)] {
+			if len(lines) >= maxLines {
+				return lines[:maxLines]
+			}
+			lines = append(lines, renderAttentionEntry(entry, width, m.theme))
+		}
+	}
+	if len(lines) < maxLines {
+		lines = append(lines, dimStyle.Render(strings.Repeat("─", max(1, width))))
+	}
+	return lines
+}
+
+func (m Model) attentionEntries() []sessionEntry {
+	var alerts []sessionEntry
+	for _, entry := range m.entries {
+		if entry.isHeader || entry.session == nil {
+			continue
+		}
+		if entry.session.State == core.Waiting {
+			alerts = append(alerts, entry)
+		}
+	}
+	return alerts
+}
+
+type attentionStateCounts struct {
+	waiting int
+	working int
+	idle    int
+}
+
+func attentionCounts(entries []sessionEntry) attentionStateCounts {
+	var counts attentionStateCounts
+	for _, entry := range entries {
+		if entry.isHeader || entry.session == nil {
+			continue
+		}
+		switch entry.session.State {
+		case core.Waiting:
+			counts.waiting++
+		case core.Thinking, core.ToolUse:
+			counts.working++
+		case core.Idle:
+			counts.idle++
+		}
+	}
+	return counts
+}
+
+func renderAttentionEntry(entry sessionEntry, width int, theme Theme) string {
+	if entry.session == nil {
+		return ""
+	}
+
+	stateIcon := "!"
+	icon := stateStyle(entry.session.State, theme).Render(stateIcon)
+
+	toolColor, ok := theme.Tools[entry.session.Tool]
+	if !ok {
+		toolColor = lipgloss.Color("#AAAAAA")
+	}
+	toolName := lipgloss.NewStyle().Foreground(toolColor).Render(entry.session.Tool.String())
+	prefix := fmt.Sprintf("%s %s ", icon, toolName)
+
+	location := sessionDisplayName(&entry)
+	if strings.TrimSpace(entry.session.Branch) != "" {
+		location += " / " + entry.session.Branch
+	}
+	pid := lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA")).Render(fmt.Sprintf("%d", entry.session.PID))
+
+	bodyWidth := max(1, width-lipgloss.Width(prefix)-lipgloss.Width(pid)-1)
+	body := truncate(location, bodyWidth)
+	gap := max(0, bodyWidth-lipgloss.Width(body))
+	return prefix + body + strings.Repeat(" ", gap) + " " + pid
+}
+
+func renderAttentionSummary(counts attentionStateCounts, theme Theme, width int) string {
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	parts := []string{
+		stateStyle(core.Waiting, theme).Render(fmt.Sprintf("! waiting %d", counts.waiting)),
+		stateStyle(core.Thinking, theme).Render(fmt.Sprintf("* working %d", counts.working)),
+		stateStyle(core.Idle, theme).Render(fmt.Sprintf("~ idle %d", counts.idle)),
+	}
+	return truncate(strings.Join(parts, dim.Render("  ")), width)
 }
 
 // renderPreview は右ペインのプレビューを描画する。
@@ -367,6 +500,9 @@ func (m Model) renderActionBar(totalWidth int) string {
 		key.Render("j/k") + dim.Render(" move"),
 		key.Render("enter") + dim.Render(" jump"),
 		key.Render("/") + dim.Render(" filter"),
+	}
+	if len(m.attentionEntries()) > 0 {
+		actions = append(actions, key.Render("w")+dim.Render(" next waiting"))
 	}
 	if m.canApprove() {
 		actions = append(actions,

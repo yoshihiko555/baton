@@ -176,7 +176,7 @@ func TestHeaderShowsAllCountsAlways(t *testing.T) {
 	}
 }
 
-func TestViewShowsGroupHeaders(t *testing.T) {
+func TestViewShowsAttentionAndProjectHeaders(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -187,19 +187,22 @@ func TestViewShowsGroupHeaders(t *testing.T) {
 			Path: "/project-a",
 			Name: "project-a",
 			Sessions: []*core.Session{
-				{ID: "s1", PID: 100, State: core.Thinking},
-				{ID: "s2", PID: 200, State: core.Idle},
+				{ID: "s1", PID: 100, State: core.Waiting, Tool: core.ToolClaude, Branch: "feature/auth"},
+				{ID: "s2", PID: 200, State: core.Idle, Tool: core.ToolCodex},
 			},
 		},
 	}
 	m = feedProjects(m, projects)
 
 	view := m.View()
-	if !strings.Contains(view, "WORKING") {
-		t.Error("view should contain WORKING group header")
+	if !strings.Contains(view, "Attention") {
+		t.Error("view should contain Attention title")
 	}
-	if !strings.Contains(view, "IDLE") {
-		t.Error("view should contain IDLE group header")
+	if !strings.Contains(view, "project-a") {
+		t.Error("view should contain project header")
+	}
+	if !strings.Contains(view, "feature/auth") {
+		t.Error("view should contain attention entry branch label")
 	}
 }
 
@@ -388,5 +391,120 @@ func TestViewShowsFilterInputWhileEditing(t *testing.T) {
 	}
 	if !strings.Contains(view, "!idle") {
 		t.Error("view should contain filter input value while editing")
+	}
+}
+
+func TestRenderAttentionShowsAtMostFiveEntries(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = updated.(Model)
+
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", PID: 101, State: core.Waiting, Tool: core.ToolClaude},
+				{ID: "s2", PID: 102, State: core.Waiting, Tool: core.ToolClaude},
+				{ID: "s3", PID: 103, State: core.Waiting, Tool: core.ToolClaude},
+				{ID: "s4", PID: 104, State: core.Waiting, Tool: core.ToolClaude},
+				{ID: "s5", PID: 105, State: core.Waiting, Tool: core.ToolClaude},
+				{ID: "s6", PID: 106, State: core.Waiting, Tool: core.ToolClaude},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	lines := m.renderAttention(60, 10)
+	if len(lines) != 8 {
+		t.Fatalf("attention lines = %d, want 8 (title + summary + 5 items + separator)", len(lines))
+	}
+
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "106") {
+		t.Error("attention should not render more than five alert rows")
+	}
+	if !strings.Contains(joined, "105") {
+		t.Error("attention should include the fifth alert row")
+	}
+	if strings.Contains(joined, "200") {
+		t.Error("attention should only render waiting sessions")
+	}
+}
+
+func TestActionBarShowsWaitingShortcutWhenAttentionExists(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Waiting, Tool: core.ToolClaude, PaneID: "%1"},
+				{PID: 200, State: core.Idle, Tool: core.ToolCodex, PaneID: "%2"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	view := m.View()
+	if !strings.Contains(view, "w") || !strings.Contains(view, "next waiting") {
+		t.Error("action bar should contain waiting shortcut when waiting sessions exist")
+	}
+}
+
+func TestRenderSessionListKeepsEntriesVisibleWhenHeightIsSmall(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", PID: 101, State: core.Waiting, Tool: core.ToolClaude},
+				{ID: "s2", PID: 102, State: core.Waiting, Tool: core.ToolClaude},
+				{ID: "s3", PID: 103, State: core.Waiting, Tool: core.ToolClaude},
+				{ID: "s4", PID: 104, State: core.Waiting, Tool: core.ToolClaude},
+				{ID: "s5", PID: 105, State: core.Waiting, Tool: core.ToolClaude},
+				{ID: "s6", PID: 106, State: core.Idle, Tool: core.ToolCodex},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	rendered := m.renderSessionList(60, 6)
+	if !strings.Contains(rendered, "Attention") {
+		t.Fatal("rendered list should contain attention section")
+	}
+	if !strings.Contains(rendered, "project-a / pane") && !strings.Contains(rendered, "project-a / session") {
+		t.Fatal("rendered list should still contain at least one session row when height is small")
+	}
+}
+
+func TestAttentionSummaryDoesNotTreatErrorAsIdle(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", PID: 101, State: core.Waiting, Tool: core.ToolClaude},
+				{ID: "s2", PID: 102, State: core.Error, Tool: core.ToolCodex},
+				{ID: "s3", PID: 103, State: core.Idle, Tool: core.ToolClaude},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	summary := renderAttentionSummary(attentionCounts(m.entries), m.theme, 80)
+	if !strings.Contains(summary, "waiting 1") {
+		t.Fatal("summary should count waiting sessions")
+	}
+	if !strings.Contains(summary, "idle 1") {
+		t.Fatal("summary should count only actual idle sessions")
+	}
+	if strings.Contains(summary, "idle 2") {
+		t.Fatal("error sessions must not be folded into idle count")
 	}
 }

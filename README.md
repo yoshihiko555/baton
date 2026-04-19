@@ -8,7 +8,7 @@ AI coding session monitor for tmux. Track Claude Code, Codex, and Gemini session
 
 ## Overview
 
-baton discovers AI coding sessions running in tmux panes and displays their status in a grouped dashboard. It works as a **pane indexer + status tracker + switcher** — it doesn't launch sessions, it finds and manages them.
+baton discovers AI coding sessions running in tmux panes and displays their status in a dashboard with an `Attention` section and a stable session list. It works as a **pane indexer + status tracker + switcher** — it doesn't launch sessions, it finds and manages them.
 
 Key design decisions:
 
@@ -19,7 +19,7 @@ Key design decisions:
 ## Features
 
 - Real-time status monitoring: `Thinking` / `ToolUse` / `Waiting` / `Idle` / `Error`
-- State-grouped session list with terminal preview pane
+- `Attention` section for waiting sessions plus a stable `project / tool / PID` ordered session list with terminal preview pane
 - Pane jump: select a session and switch to its tmux pane
 - Multi-tool support: Claude Code, Codex CLI, Gemini CLI
 - Incremental session filtering in TUI (`/`, text match, state filters like `waiting`, `!idle`)
@@ -106,6 +106,7 @@ bind b display-popup -E -w 80% -h 80% "baton"
 | `Enter` | Jump to selected pane |
 | `Tab` | Switch focus between session list and preview |
 | `/` | Start session filter input |
+| `w` | Jump to next Waiting session |
 | `a` / `d` | Approve / deny (Waiting Claude on preview pane) |
 | `A` / `D` | Approve+message / deny+message (Claude on preview pane) |
 | `Esc` | Close submenu or clear active filter |
@@ -124,14 +125,21 @@ Examples:
 - `!idle` → show all sessions except Idle
 - `codex !idle` → show non-idle Codex sessions
 
-### State groups
+### TUI layout
 
-Sessions are grouped by status in the following order:
+The left pane has two layers:
 
-| Group | Icon | Description |
+| Section | Content |
+|---------|---------|
+| Attention | Summary counts for `Waiting / Working / Idle`, plus up to 5 `Waiting` sessions |
+| Sessions | Stable list ordered by `project -> tool -> PID`, grouped by project |
+
+State icons remain visible on each session row:
+
+| State | Icon | Description |
 |-------|------|-------------|
 | WAITING | `!` | Approval prompt detected, needs user action |
-| ERROR | `x` | Error state |
+| ERROR | `x` | Error state on the session row |
 | WORKING | `*` | Thinking or executing tools |
 | IDLE | `~` | Waiting for user input |
 

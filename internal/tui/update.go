@@ -18,8 +18,9 @@ var (
 	escKey   = key.NewBinding(key.WithKeys("esc"))
 	slashKey = key.NewBinding(key.WithKeys("/"))
 
-	upKeys   = key.NewBinding(key.WithKeys("k", "up"))
-	downKeys = key.NewBinding(key.WithKeys("j", "down"))
+	upKeys         = key.NewBinding(key.WithKeys("k", "up"))
+	downKeys       = key.NewBinding(key.WithKeys("j", "down"))
+	waitingJumpKey = key.NewBinding(key.WithKeys("w"))
 
 	approveKey     = key.NewBinding(key.WithKeys("a"))
 	denyKey        = key.NewBinding(key.WithKeys("d"))
@@ -108,6 +109,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.moveCursor(-1)
 		case key.Matches(msg, downKeys):
 			return m.moveCursor(1)
+		case key.Matches(msg, waitingJumpKey):
+			return m.jumpToState(core.Waiting)
 		case key.Matches(msg, approveKey):
 			return m.handleSimpleApprove()
 		case key.Matches(msg, denyKey):
@@ -210,6 +213,29 @@ func (m Model) moveCursor(delta int) (tea.Model, tea.Cmd) {
 	m.cursor = newCursor
 	cmd := m.maybeUpdatePreview()
 	return m, cmd
+}
+
+func (m Model) jumpToState(target core.SessionState) (tea.Model, tea.Cmd) {
+	if len(m.entries) == 0 {
+		return m, nil
+	}
+
+	for offset := 1; offset <= len(m.entries); offset++ {
+		idx := (m.cursor + offset) % len(m.entries)
+		entry := m.entries[idx]
+		if entry.isHeader || entry.session == nil {
+			continue
+		}
+		if entry.session.State != target {
+			continue
+		}
+		m.cursor = idx
+		return m, m.maybeUpdatePreview()
+	}
+
+	m.flashGen++
+	m.flashMessage = fmt.Sprintf("No %s sessions", displayStateLabel(target))
+	return m, flashClearCmd(m.flashGen)
 }
 
 // rebuildEntries はスキャン結果からエントリリストを再構築する。
