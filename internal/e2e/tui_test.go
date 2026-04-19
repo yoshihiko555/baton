@@ -39,22 +39,22 @@ type tuiMockStateReader struct {
 	panes    []terminal.Pane
 }
 
-func (r *tuiMockStateReader) Projects() []core.Project      { return r.projects }
-func (r *tuiMockStateReader) GetProjects() []core.Project    { return r.projects }
-func (r *tuiMockStateReader) Summary() core.Summary          { return r.summary }
-func (r *tuiMockStateReader) Panes() []terminal.Pane         { return r.panes }
+func (r *tuiMockStateReader) Projects() []core.Project    { return r.projects }
+func (r *tuiMockStateReader) GetProjects() []core.Project { return r.projects }
+func (r *tuiMockStateReader) Summary() core.Summary       { return r.summary }
+func (r *tuiMockStateReader) Panes() []terminal.Pane      { return r.panes }
 
 type tuiMockTerminal struct {
 	focusedPane string
 	paneText    string
 }
 
-func (t *tuiMockTerminal) ListPanes() ([]terminal.Pane, error)           { return nil, nil }
-func (t *tuiMockTerminal) FocusPane(paneID string) error                 { t.focusedPane = paneID; return nil }
-func (t *tuiMockTerminal) SendKeys(paneID string, keys ...string) error  { return nil }
-func (t *tuiMockTerminal) GetPaneText(paneID string) (string, error)     { return t.paneText, nil }
-func (t *tuiMockTerminal) IsAvailable() bool                             { return true }
-func (t *tuiMockTerminal) Name() string                                  { return "mock" }
+func (t *tuiMockTerminal) ListPanes() ([]terminal.Pane, error)          { return nil, nil }
+func (t *tuiMockTerminal) FocusPane(paneID string) error                { t.focusedPane = paneID; return nil }
+func (t *tuiMockTerminal) SendKeys(paneID string, keys ...string) error { return nil }
+func (t *tuiMockTerminal) GetPaneText(paneID string) (string, error)    { return t.paneText, nil }
+func (t *tuiMockTerminal) IsAvailable() bool                            { return true }
+func (t *tuiMockTerminal) Name() string                                 { return "mock" }
 
 // --- helpers ---
 
@@ -182,16 +182,16 @@ func TestTUILifecycle_NavigateAndJump(t *testing.T) {
 	}
 	m = feedScanResult(m, projects, summary)
 
-	// View should contain all tools
+	// View should contain the attention section and the project header
 	view := m.View()
-	if !strings.Contains(view, "WAITING") {
-		t.Error("expected WAITING group header in View()")
+	if !strings.Contains(view, "Attention") {
+		t.Error("expected Attention section in View()")
 	}
-	if !strings.Contains(view, "WORKING") {
-		t.Error("expected WORKING group header in View()")
+	if !strings.Contains(view, "my-project") {
+		t.Error("expected project header in View()")
 	}
 
-	// Navigate down twice (skip headers)
+	// Navigate down twice to the third session.
 	m, _ = sendKey(m, tea.KeyDown)
 	m, _ = sendKey(m, tea.KeyDown)
 

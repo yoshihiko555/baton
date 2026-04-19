@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -274,64 +275,70 @@ func buildEntriesWithFilter(projects []core.Project, filter sessionFilter) []ses
 		}
 	}
 
-	// 状態グループ別に分類
-	// WORKING グループは Thinking + ToolUse をまとめる
-	type groupDef struct {
-		icon    string
-		label   string
-		state   core.SessionState
-		entries []sessionWithProject
-	}
+	sort.SliceStable(all, func(i, j int) bool {
+		pi := projectSortKey(all[i].project)
+		pj := projectSortKey(all[j].project)
+		if pi != pj {
+			return pi < pj
+		}
 
-	groups := []groupDef{
-		{icon: "!", label: "WAITING", state: core.Waiting},
-		{icon: "x", label: "ERROR", state: core.Error},
-		{icon: "*", label: "WORKING", state: core.Thinking}, // Thinking + ToolUse
-		{icon: "~", label: "IDLE", state: core.Idle},
-	}
+		ti := all[i].session.Tool.String()
+		tj := all[j].session.Tool.String()
+		if ti != tj {
+			return ti < tj
+		}
 
+		if all[i].session.PID != all[j].session.PID {
+			return all[i].session.PID < all[j].session.PID
+		}
+
+		return all[i].session.PaneID < all[j].session.PaneID
+	})
+
+	var (
+		entries         []sessionEntry
+		currentProjSort string
+	)
 	for _, sp := range all {
-		switch sp.session.State {
-		case core.Waiting:
-			groups[0].entries = append(groups[0].entries, sp)
-		case core.Error:
-			groups[1].entries = append(groups[1].entries, sp)
-		case core.Thinking, core.ToolUse:
-			groups[2].entries = append(groups[2].entries, sp)
-		case core.Idle:
-			groups[3].entries = append(groups[3].entries, sp)
-		default:
-			groups[3].entries = append(groups[3].entries, sp) // unknown → idle
-		}
-	}
-
-	var entries []sessionEntry
-	for _, g := range groups {
-		if len(g.entries) == 0 {
-			continue
-		}
-		// PID でソート
-		sort.SliceStable(g.entries, func(i, j int) bool {
-			return g.entries[i].session.PID < g.entries[j].session.PID
-		})
-		// グループヘッダー
-		entries = append(entries, sessionEntry{
-			isHeader: true,
-			header:   g.label,
-			icon:     g.icon,
-			state:    g.state,
-		})
-		// セッション行
-		for _, sp := range g.entries {
+		projectKey := projectSortKey(sp.project)
+		if projectKey != currentProjSort {
+			currentProjSort = projectKey
 			entries = append(entries, sessionEntry{
-				session: sp.session,
-				project: sp.project,
-				state:   sp.session.State,
+				isHeader: true,
+				header:   projectDisplayName(sp.project),
+				project:  sp.project,
 			})
 		}
+		entries = append(entries, sessionEntry{
+			session: sp.session,
+			project: sp.project,
+			state:   sp.session.State,
+		})
 	}
 
 	return entries
+}
+
+func projectDisplayName(project *core.Project) string {
+	if project == nil {
+		return "?"
+	}
+	if strings.TrimSpace(project.Name) != "" {
+		return project.Name
+	}
+	if strings.TrimSpace(project.Path) != "" {
+		return filepath.Base(project.Path)
+	}
+	return "?"
+}
+
+func projectSortKey(project *core.Project) string {
+	if project == nil {
+		return ""
+	}
+	name := strings.ToLower(projectDisplayName(project))
+	path := strings.ToLower(strings.TrimSpace(project.Path))
+	return name + "\x00" + path
 }
 
 func parseSessionFilter(query string) sessionFilter {
@@ -424,8 +431,13 @@ func sessionMatchesFilter(session *core.Session, project *core.Project, filter s
 	entry := sessionEntry{session: session, project: project}
 	searchTargets := []string{
 		sessionDisplayName(&entry),
+		sessionPrimaryLabel(&entry),
 		session.Tool.String(),
+		displayStateLabel(session.State),
 		session.WorkingDir,
+		session.Branch,
+		session.CurrentTool,
+		session.FirstPrompt,
 	}
 	if project != nil {
 		searchTargets = append(searchTargets, project.Path, project.Name)
@@ -444,13 +456,55 @@ func sessionDisplayName(e *sessionEntry) string {
 	if e.project == nil || e.session == nil {
 		return "?"
 	}
-	name := e.project.Name
-	if name == "" {
-		// パスの最後のセグメントを使う
-		parts := strings.Split(e.project.Path, "/")
-		name = parts[len(parts)-1]
+	return projectDisplayName(e.project)
+}
+
+func sessionPrimaryLabel(e *sessionEntry) string {
+	if e == nil || e.session == nil {
+		return "?"
 	}
-	return name
+
+	s := e.session
+	switch {
+	case strings.TrimSpace(s.Branch) != "":
+		return s.Branch
+	case strings.TrimSpace(s.FirstPrompt) != "":
+		return strings.TrimSpace(s.FirstPrompt)
+	case strings.TrimSpace(s.CurrentTool) != "":
+		return s.CurrentTool
+	case strings.TrimSpace(s.PaneID) != "":
+		return fmt.Sprintf("pane %s", s.PaneID)
+	default:
+		return fmt.Sprintf("session %d", s.PID)
+	}
+}
+
+func sessionListLabel(e *sessionEntry) string {
+	project := sessionDisplayName(e)
+	primary := sessionPrimaryLabel(e)
+	switch {
+	case project == "?" || project == "":
+		return primary
+	case primary == "?" || primary == "":
+		return project
+	default:
+		return fmt.Sprintf("%s / %s", project, primary)
+	}
+}
+
+func displayStateLabel(state core.SessionState) string {
+	switch state {
+	case core.Waiting:
+		return "waiting"
+	case core.Error:
+		return "error"
+	case core.Thinking, core.ToolUse:
+		return "working"
+	case core.Idle:
+		return "idle"
+	default:
+		return state.String()
+	}
 }
 
 // sessionDetailLine はセッション行の詳細情報を返す。
@@ -459,12 +513,11 @@ func sessionDetailLine(e *sessionEntry) string {
 		return ""
 	}
 	s := e.session
-	var parts []string
-	if s.Branch != "" {
-		parts = append(parts, s.Branch)
+	parts := []string{
+		fmt.Sprintf("[%s]", displayStateLabel(s.State)),
+		fmt.Sprintf("PID:%d", s.PID),
 	}
-	parts = append(parts, fmt.Sprintf("[%s]", s.State))
-	if s.CurrentTool != "" {
+	if s.CurrentTool != "" && s.CurrentTool != sessionPrimaryLabel(e) {
 		parts = append(parts, s.CurrentTool)
 	}
 	return strings.Join(parts, "  ")

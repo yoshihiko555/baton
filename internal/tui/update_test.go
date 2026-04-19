@@ -472,41 +472,63 @@ func TestMoveCursorSkipsHeaders(t *testing.T) {
 	}
 }
 
-func TestBuildEntriesGrouping(t *testing.T) {
+func TestBuildEntriesStableProjectToolPIDOrder(t *testing.T) {
 	projects := []core.Project{
+		{
+			Path: "/p2",
+			Name: "p2",
+			Sessions: []*core.Session{
+				{PID: 4, State: core.ToolUse, Tool: core.ToolGemini},
+				{PID: 2, State: core.Idle, Tool: core.ToolClaude},
+				{PID: 3, State: core.Waiting, Tool: core.ToolCodex},
+			},
+		},
 		{
 			Path: "/p1",
 			Name: "p1",
 			Sessions: []*core.Session{
-				{PID: 1, State: core.Thinking},
-				{PID: 2, State: core.Idle},
-				{PID: 3, State: core.Waiting},
-				{PID: 4, State: core.ToolUse},
+				{PID: 5, State: core.Error, Tool: core.ToolCodex},
+				{PID: 1, State: core.Thinking, Tool: core.ToolClaude},
 			},
 		},
 	}
 
 	entries := buildEntries(projects)
 
-	// グループ順: WAITING, WORKING (Thinking+ToolUse), IDLE
 	headerOrder := []string{}
+	sessionOrder := []string{}
 	for _, e := range entries {
 		if e.isHeader {
 			headerOrder = append(headerOrder, e.header)
+			continue
 		}
+		sessionOrder = append(sessionOrder, fmt.Sprintf("%s/%s/%d", e.project.Name, e.session.Tool.String(), e.session.PID))
 	}
 
-	if len(headerOrder) != 3 {
-		t.Fatalf("expected 3 group headers, got %d: %v", len(headerOrder), headerOrder)
+	if len(headerOrder) != 2 {
+		t.Fatalf("expected 2 project headers, got %d: %v", len(headerOrder), headerOrder)
 	}
-	if headerOrder[0] != "WAITING" {
-		t.Errorf("first group = %q, want WAITING", headerOrder[0])
+	if headerOrder[0] != "p1" {
+		t.Errorf("first project header = %q, want p1", headerOrder[0])
 	}
-	if headerOrder[1] != "WORKING" {
-		t.Errorf("second group = %q, want WORKING", headerOrder[1])
+	if headerOrder[1] != "p2" {
+		t.Errorf("second project header = %q, want p2", headerOrder[1])
 	}
-	if headerOrder[2] != "IDLE" {
-		t.Errorf("third group = %q, want IDLE", headerOrder[2])
+
+	wantSessions := []string{
+		"p1/claude/1",
+		"p1/codex/5",
+		"p2/claude/2",
+		"p2/codex/3",
+		"p2/gemini/4",
+	}
+	if len(sessionOrder) != len(wantSessions) {
+		t.Fatalf("session entries = %d, want %d (%v)", len(sessionOrder), len(wantSessions), sessionOrder)
+	}
+	for i, want := range wantSessions {
+		if sessionOrder[i] != want {
+			t.Errorf("sessionOrder[%d] = %q, want %q", i, sessionOrder[i], want)
+		}
 	}
 }
 
@@ -997,6 +1019,35 @@ func TestCursorMovesAcrossGroups(t *testing.T) {
 	}
 	if sel.state != core.Idle {
 		t.Errorf("cursor state = %v, want core.Idle", sel.state)
+	}
+}
+
+func TestJumpToNextWaitingSession(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{ID: "s1", State: core.Waiting, PID: 100, Tool: core.ToolClaude},
+				{ID: "s2", State: core.Idle, PID: 200, Tool: core.ToolClaude},
+				{ID: "s3", State: core.Waiting, PID: 300, Tool: core.ToolClaude},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+	m = updated.(Model)
+	if pid := selectedPID(m); pid != 300 {
+		t.Fatalf("selected PID after first waiting jump = %d, want 300", pid)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+	m = updated.(Model)
+	if pid := selectedPID(m); pid != 100 {
+		t.Fatalf("selected PID after wrapped waiting jump = %d, want 100", pid)
 	}
 }
 
