@@ -363,8 +363,8 @@ func TestTUILifecycle_PreviewUpdatesOnNavigation(t *testing.T) {
 		t.Error("expected Preview header in View()")
 	}
 
-	// Feed preview result
-	m2, _ := m.Update(tui.PreviewResultMsg{Text: "Claude output line 1\nClaude output line 2"})
+	// Feed preview result — Seq must match previewFetchSeq set during feedScanResult.
+	m2, _ := m.Update(tui.PreviewResultMsg{PaneID: "%1", Text: "Claude output line 1\nClaude output line 2", Seq: m.PreviewFetchSeq()})
 	m = m2.(tui.Model)
 
 	view2 := m.View()

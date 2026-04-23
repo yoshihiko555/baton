@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - セッションフィルタ入力中に `↑/↓` キーで一覧選択を移動できない不具合を修正（Enter で pane 移動しなくてもカーソル移動可能）
+- 選択中セッションに留まっている間もプレビューが自動更新されるように修正（承認待ちなどペイン内容の変化が ScanInterval 以内に反映される。同一 pane の silent refresh 中は既存テキストを表示してちらつきを抑止）
 
 ## [0.1.2] - 2026-03-29
 

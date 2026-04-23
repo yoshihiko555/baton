@@ -443,13 +443,18 @@ func (m Model) renderPreview(width, height int) string {
 	if s.Branch != "" {
 		info += fmt.Sprintf("  [%s]", s.Branch)
 	}
+	// silent refresh の視覚フィードバックとして最新取得時刻を表示する。
+	if !m.previewUpdatedAt.IsZero() {
+		info += fmt.Sprintf("  · updated %s", m.previewUpdatedAt.Format("15:04:05"))
+	}
 	infoLine := lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA")).Render(info)
 
 	separator := dimStyle.Render(strings.Repeat("─", width))
 
 	// プレビューテキスト
+	// 初回ロード中（テキストなし）のみ Loading 表示。同一 pane の silent refresh 中は既存テキストを維持する。
 	var previewContent string
-	if m.previewLoading {
+	if m.previewLoading && m.previewText == "" {
 		previewContent = dimStyle.Render("  Loading...")
 	} else if m.previewText == "" {
 		previewContent = dimStyle.Render("  No output")
