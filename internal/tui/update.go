@@ -57,6 +57,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// 送信成功時に autoApproved をクリアして次の Waiting 遷移で再発動可能にする
 			delete(m.autoApproved, msg.PaneID)
 		}
+		// 承認/拒否送信後のプレビュー再取得:
+		//   forceRefreshPreview: 送信直後に即時キャプチャ（受理の即応フィードバック）。
+		//   delayedRefreshPreview: Claude/Codex の応答後の pane 状態を反映するため遅延再取得。
 		previewCmd := m.forceRefreshPreview(msg.PaneID)
 		if previewCmd != nil {
 			retryPreviewCmd := m.delayedRefreshPreview(msg.PaneID, approvalPreviewRetryDelay)
@@ -139,7 +142,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.latestSummary = msg.Summary
 		m.latestPanes = msg.Panes
 		m.rebuildEntries()
-		// 選択セッションが変わったらプレビュー更新
+		// 選択セッションの変更 or 同一 pane の silent refresh を発行する。
+		// fetch 不要時は nil を返すが tea.Batch が無視するため問題ない。
 		cmd := m.maybeUpdatePreview()
 		// 自動承認チェック
 		autoCmd := m.checkAutoApprove()
@@ -149,7 +153,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// 選択が変わった後の遅延レスポンスは破棄する。
 			return m, nil
 		}
+		if msg.Seq != m.previewFetchSeq {
+			// より新しい fetch が発行されているため古い結果は破棄する。
+			return m, nil
+		}
 		m.previewLoading = false
+		m.previewUpdatedAt = time.Now()
 		if msg.Err != nil {
 			m.previewText = fmt.Sprintf("Error: %v", msg.Err)
 		} else {
@@ -293,7 +302,9 @@ func (m *Model) clearFilter() tea.Cmd {
 	return m.maybeUpdatePreview()
 }
 
-// maybeUpdatePreview は選択セッションが変わった場合にプレビューを更新する。
+// maybeUpdatePreview は選択セッションのプレビューを更新する。
+// paneID 変更時はテキストをクリアして Loading 表示、
+// 同一 paneID の silent refresh では既存テキストを保持する。
 func (m *Model) maybeUpdatePreview() tea.Cmd {
 	sel := m.selectedSession()
 	if sel == nil || sel.session == nil {
@@ -303,13 +314,28 @@ func (m *Model) maybeUpdatePreview() tea.Cmd {
 	}
 
 	paneID := sel.session.PaneID
-	if paneID == "" || paneID == m.previewPaneID {
+	if paneID == "" {
 		return nil
 	}
 
-	m.previewPaneID = paneID
+	if paneID != m.previewPaneID {
+		// 選択セッション変更: テキストをクリアして新規 fetch
+		m.previewText = ""
+		m.previewPaneID = paneID
+		m.previewLoading = true
+		m.previewFetchSeq++
+		return fetchPreviewCmd(m.terminal, paneID, m.previewFetchSeq)
+	}
+
+	// 同一 pane の silent refresh: 前回の fetch が進行中なら重複させない
+	if m.previewLoading {
+		return nil
+	}
+
+	// previewText は保持したまま silent refresh
 	m.previewLoading = true
-	return fetchPreviewCmd(m.terminal, paneID)
+	m.previewFetchSeq++
+	return fetchPreviewCmd(m.terminal, paneID, m.previewFetchSeq)
 }
 
 // forceRefreshPreview は指定ペインが現在選択中なら、同一 PaneID でも再取得する。
@@ -324,10 +350,14 @@ func (m *Model) forceRefreshPreview(paneID string) tea.Cmd {
 	if sel.session.PaneID != paneID {
 		return nil
 	}
+	if m.previewLoading {
+		return nil
+	}
 
 	m.previewPaneID = paneID
 	m.previewLoading = true
-	return fetchPreviewCmd(m.terminal, paneID)
+	m.previewFetchSeq++
+	return fetchPreviewCmd(m.terminal, paneID, m.previewFetchSeq)
 }
 
 // delayedRefreshPreview は指定ペインが現在選択中なら、遅延後に再取得する。
@@ -342,7 +372,8 @@ func (m *Model) delayedRefreshPreview(paneID string, delay time.Duration) tea.Cm
 	if sel.session.PaneID != paneID {
 		return nil
 	}
-	return fetchPreviewDelayedCmd(m.terminal, paneID, delay)
+	m.previewFetchSeq++
+	return fetchPreviewDelayedCmd(m.terminal, paneID, m.previewFetchSeq, delay)
 }
 
 // updateSubMenu はサブメニュー表示中のキー入力を処理する。

@@ -55,6 +55,7 @@ type PreviewResultMsg struct {
 	PaneID string
 	Text   string
 	Err    error
+	Seq    uint64 // 発行時点の previewFetchSeq
 }
 
 // ErrMsg は非同期コマンドで発生したエラーを運ぶ。
@@ -107,9 +108,11 @@ type Model struct {
 	err     error
 	scanErr error // スキャン由来のエラー（ScanResultMsg でのみクリア対象）
 
-	previewText    string
-	previewPaneID  string // 現在プレビュー中の PaneID
-	previewLoading bool
+	previewText      string
+	previewPaneID    string // 現在プレビュー中の PaneID
+	previewLoading   bool
+	previewFetchSeq  uint64    // preview fetch 発行ごとにインクリメント。stale 結果検出に使用。
+	previewUpdatedAt time.Time // 最新 PreviewResultMsg 受信時刻。ヘッダに表示して silent refresh の視覚フィードバックを提供。
 
 	showSubMenu   bool
 	subMenuItems  []SubMenuItem
@@ -203,22 +206,27 @@ func doScanCmd(
 }
 
 // fetchPreviewCmd は指定ペインのテキストを非同期で取得する。
-func fetchPreviewCmd(term terminal.Terminal, paneID string) tea.Cmd {
+func fetchPreviewCmd(term terminal.Terminal, paneID string, seq uint64) tea.Cmd {
 	return func() tea.Msg {
 		text, err := term.GetPaneText(paneID)
-		return PreviewResultMsg{PaneID: paneID, Text: text, Err: err}
+		return PreviewResultMsg{PaneID: paneID, Text: text, Err: err, Seq: seq}
 	}
 }
 
 // fetchPreviewDelayedCmd は指定遅延後にプレビューを取得する。
-func fetchPreviewDelayedCmd(term terminal.Terminal, paneID string, delay time.Duration) tea.Cmd {
+func fetchPreviewDelayedCmd(term terminal.Terminal, paneID string, seq uint64, delay time.Duration) tea.Cmd {
 	return func() tea.Msg {
 		if delay > 0 {
 			<-time.After(delay)
 		}
 		text, err := term.GetPaneText(paneID)
-		return PreviewResultMsg{PaneID: paneID, Text: text, Err: err}
+		return PreviewResultMsg{PaneID: paneID, Text: text, Err: err, Seq: seq}
 	}
+}
+
+// PreviewFetchSeq は現在の previewFetchSeq を返す（テスト用）。
+func (m Model) PreviewFetchSeq() uint64 {
+	return m.previewFetchSeq
 }
 
 // canApprove は選択中のセッションが手動承認/拒否の送信可能かを返す。

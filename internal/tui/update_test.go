@@ -632,8 +632,9 @@ func TestInitReturnsCmd(t *testing.T) {
 
 func TestPreviewResultMsg(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
+	m.previewFetchSeq = 1
 
-	updated, _ := m.Update(PreviewResultMsg{Text: "hello world", Err: nil})
+	updated, _ := m.Update(PreviewResultMsg{Text: "hello world", Err: nil, Seq: 1})
 	m = updated.(Model)
 
 	if m.previewText != "hello world" {
@@ -764,8 +765,9 @@ func TestPreviewNotRefetchedForSamePaneID(t *testing.T) {
 // C3: PreviewResultMsg にエラーがあるとき previewText にエラー内容が入る
 func TestPreviewResultMsgError(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
+	m.previewFetchSeq = 1
 
-	updated, _ := m.Update(PreviewResultMsg{Text: "", Err: fmt.Errorf("connection failed")})
+	updated, _ := m.Update(PreviewResultMsg{Text: "", Err: fmt.Errorf("connection failed"), Seq: 1})
 	m = updated.(Model)
 
 	if !strings.Contains(m.previewText, "Error") {
@@ -1532,6 +1534,150 @@ func TestPreviewResultMsgIgnoresStalePane(t *testing.T) {
 	}
 	if !m.previewLoading {
 		t.Error("previewLoading should remain true when stale result is ignored")
+	}
+}
+
+// TestPreviewResultMsgIgnoresStaleSeq は、同一 PaneID でも Seq が古い場合に結果が破棄されることを検証する。
+func TestPreviewResultMsgIgnoresStaleSeq(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	m.previewPaneID = "%1"
+	m.previewLoading = true
+	m.previewText = "current"
+	m.previewFetchSeq = 5
+
+	updated, _ := m.Update(PreviewResultMsg{PaneID: "%1", Text: "stale", Err: nil, Seq: 3})
+	m = updated.(Model)
+
+	if m.previewText != "current" {
+		t.Errorf("previewText = %q, want unchanged 'current'", m.previewText)
+	}
+	if !m.previewLoading {
+		t.Error("previewLoading should remain true when stale seq is ignored")
+	}
+}
+
+// TestForceRefreshPreviewSkipsWhenLoading は、進行中 fetch がある間は forceRefreshPreview が新規 fetch を発行しないことを検証する。
+func TestForceRefreshPreviewSkipsWhenLoading(t *testing.T) {
+	m, _ := waitingClaudeModel()
+	m.previewPaneID = "%1"
+	m.previewLoading = true
+	seqBefore := m.previewFetchSeq
+
+	cmd := m.forceRefreshPreview("%1")
+
+	if cmd != nil {
+		t.Error("expected nil cmd when previewLoading is true")
+	}
+	if m.previewFetchSeq != seqBefore {
+		t.Errorf("previewFetchSeq = %d, want unchanged %d", m.previewFetchSeq, seqBefore)
+	}
+}
+
+// --- maybeUpdatePreview tests ---
+
+// TestMaybeUpdatePreviewRefreshesSamePaneWhenIdle は、同一 pane を選択中に
+// previewLoading=false のとき fetch が走り、previewText が保持されることを検証する。
+func TestMaybeUpdatePreviewRefreshesSamePaneWhenIdle(t *testing.T) {
+	m, term := waitingClaudeModel()
+	_ = term
+	// waitingClaudeModel は内部で feedProjects を呼び maybeUpdatePreview が走る結果、
+	// previewLoading=true の状態で返る。同一 pane の idle 時 silent refresh を検証するために false に戻す。
+	m.previewPaneID = "%1"
+	m.previewLoading = false
+	m.previewText = "existing content"
+
+	cmd := m.maybeUpdatePreview()
+
+	if cmd == nil {
+		t.Fatal("expected fetch cmd, got nil")
+	}
+	if !m.previewLoading {
+		t.Error("previewLoading should be true after maybeUpdatePreview")
+	}
+	if m.previewText != "existing content" {
+		t.Errorf("previewText = %q, want 'existing content' (should be preserved)", m.previewText)
+	}
+	// cmd を実行して実際に正しい pane / seq に対する fetch が発行されていることを確認する。
+	if msg, ok := cmd().(PreviewResultMsg); !ok {
+		t.Fatalf("expected PreviewResultMsg, got %T", cmd())
+	} else {
+		if msg.PaneID != "%1" {
+			t.Errorf("msg.PaneID = %q, want %%1", msg.PaneID)
+		}
+		if msg.Seq != m.previewFetchSeq {
+			t.Errorf("msg.Seq = %d, want %d", msg.Seq, m.previewFetchSeq)
+		}
+	}
+}
+
+// TestMaybeUpdatePreviewSkipsWhenLoading は、fetch が進行中のとき
+// 重複 fetch を起動せず既存テキストも保持することを検証する。
+func TestMaybeUpdatePreviewSkipsWhenLoading(t *testing.T) {
+	m, term := waitingClaudeModel()
+	_ = term
+	m.previewPaneID = "%1"
+	m.previewLoading = true
+	m.previewText = "keep me"
+
+	cmd := m.maybeUpdatePreview()
+
+	if cmd != nil {
+		t.Error("expected nil cmd when previewLoading is true")
+	}
+	if !m.previewLoading {
+		t.Error("previewLoading should remain true")
+	}
+	if m.previewText != "keep me" {
+		t.Errorf("previewText = %q, want unchanged 'keep me'", m.previewText)
+	}
+}
+
+// TestMaybeUpdatePreviewClearsTextOnPaneChange は、選択セッションの paneID が
+// previewPaneID と異なるとき（pane 変更パス）、previewText がクリアされ新規 fetch が走ることを検証する。
+// waitingClaudeModel は単一 Waiting セッション前提のため、ここでは newTestModel + feedProjects で
+// 明示的に状態を構築し、previewPaneID を stale 値に固定して pane 変更パスを検証する。
+func TestMaybeUpdatePreviewClearsTextOnPaneChange(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "project-a",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Idle, Tool: core.ToolClaude, PaneID: "%1"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+	// feedProjects 内の maybeUpdatePreview で previewPaneID は "%1" になっているため、
+	// pane-change パスを確実にテストするために stale 値へ上書きする。
+	m.previewPaneID = "%stale"
+	m.previewText = "old"
+	m.previewLoading = false
+
+	cmd := m.maybeUpdatePreview()
+
+	if m.previewText != "" {
+		t.Errorf("previewText = %q, want '' (should be cleared on pane change)", m.previewText)
+	}
+	if m.previewPaneID != "%1" {
+		t.Errorf("previewPaneID = %q, want %%1", m.previewPaneID)
+	}
+	if cmd == nil {
+		t.Fatal("expected fetch cmd for new pane, got nil")
+	}
+	if !m.previewLoading {
+		t.Error("previewLoading should be true after pane change")
+	}
+	// cmd を実行して新 pane (%1) に対する fetch であることを確認する。
+	if msg, ok := cmd().(PreviewResultMsg); !ok {
+		t.Fatalf("expected PreviewResultMsg, got %T", cmd())
+	} else {
+		if msg.PaneID != "%1" {
+			t.Errorf("msg.PaneID = %q, want %%1", msg.PaneID)
+		}
+		if msg.Seq != m.previewFetchSeq {
+			t.Errorf("msg.Seq = %d, want %d", msg.Seq, m.previewFetchSeq)
+		}
 	}
 }
 

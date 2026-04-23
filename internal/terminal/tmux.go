@@ -143,7 +143,9 @@ func (t *TmuxTerminal) GetPaneText(paneID string) (string, error) {
 		return "", fmt.Errorf("tmux exec function is not configured")
 	}
 
-	out, err := t.execFn("capture-pane", "-t", paneID, "-p", "-J")
+	// -S -200 で末尾から 200 行分のスクロールバックに上限を設ける。
+	// 末尾 80 行スライスで十分なためバッファを小さく抑え、長時間稼働ペインでの無駄な I/O を減らす。
+	out, err := t.execFn("capture-pane", "-t", paneID, "-p", "-J", "-S", "-200")
 	if err != nil {
 		return "", fmt.Errorf("capture-pane: %w", err)
 	}
