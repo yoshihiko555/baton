@@ -4,9 +4,10 @@
     "audit",
     "cli-logging",
     "cocoindex",
+    "codd",
     "codex-suggestions",
     "core",
-    "gemini-suggestions",
+    "antigravity-suggestions",
     "git-workflow",
     "issue-workflow",
     "quality-gates",
@@ -14,7 +15,7 @@
     "tmux-monitor"
   ],
   "orchestra_dir": "/Users/yoshihiko/ghq/github.com/yoshihiko555/ai-orchestra",
-  "last_sync": "2026-04-23T11:49:35.208327+00:00",
+  "last_sync": "2026-07-06T15:18:02.160111+00:00",
   "synced_files": [
     "agents/ai-architect.md",
     "agents/ai-dev.md",
@@ -48,7 +49,14 @@
     "config/audit/audit-flags.json",
     "config/audit/delegation-policy.json",
     "config/cocoindex/cocoindex.yaml",
+    "config/codd/codd.yaml",
     "config/core/task-memory.yaml",
     "config/git-workflow/sandbox-requirements.json"
-  ]
+  ],
+  "file_hashes": {
+    "codd": {
+      "config/codd/codd.yaml": "34b39501ced4cf12868fe6c0eea0071350cc68dd7a0ae413d686ed8d39491bd2"
+    }
+  },
+  "codex_file_hashes": {}
 }
