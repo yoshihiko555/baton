@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/yoshihiko555/baton/internal/autoreview"
 	"github.com/yoshihiko555/baton/internal/config"
 	"github.com/yoshihiko555/baton/internal/core"
 	"github.com/yoshihiko555/baton/internal/terminal"
@@ -1058,6 +1059,7 @@ func TestJumpToNextWaitingSession(t *testing.T) {
 // waitingClaudeModel は Waiting 状態の Claude Code セッションを持つモデルを返す。
 func waitingClaudeModel() (Model, *mockTerminal) {
 	m, _, _, _, term := newTestModel()
+	term.paneText = "Run this command?\n\ngo test ./...\n\n› 1. Yes, allow once\n  2. No"
 	projects := []core.Project{
 		{
 			Path: "/project-a",
@@ -1069,6 +1071,31 @@ func waitingClaudeModel() (Model, *mockTerminal) {
 	}
 	m = feedProjects(m, projects)
 	return m, term
+}
+
+func runAutoReviewResult(t *testing.T, cmd tea.Cmd) AutoReviewResultMsg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("expected auto-review command")
+	}
+	result := cmd()
+	switch r := result.(type) {
+	case AutoReviewResultMsg:
+		return r
+	case tea.BatchMsg:
+		for _, innerCmd := range r {
+			if innerCmd == nil {
+				continue
+			}
+			if msg, ok := innerCmd().(AutoReviewResultMsg); ok {
+				return msg
+			}
+		}
+		t.Fatalf("expected AutoReviewResultMsg in BatchMsg, got %T", result)
+	default:
+		t.Fatalf("expected AutoReviewResultMsg, got %T", result)
+	}
+	return AutoReviewResultMsg{}
 }
 
 func TestSimpleApproveOnWaitingClaude(t *testing.T) {
@@ -1846,6 +1873,28 @@ func TestToggleAutoApprove(t *testing.T) {
 	}
 }
 
+func TestToggleAutoApproveOnCodex(t *testing.T) {
+	m, _ := waitingCodexModel()
+
+	if m.autoApprove["%2"] {
+		t.Fatal("autoApprove[%%2] should be false initially")
+	}
+
+	tKey := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}}
+	updated, cmd := m.Update(tKey)
+	m = updated.(Model)
+
+	if !m.autoApprove["%2"] {
+		t.Error("autoApprove[%%2] = false, want true after 't' on Codex")
+	}
+	if m.flashMessage == "" {
+		t.Error("flashMessage should be non-empty after toggling Codex auto-approve ON")
+	}
+	if cmd == nil {
+		t.Error("expected flash-clear timer cmd")
+	}
+}
+
 // TestAutoApproveOnScanResult は autoApprove ON + Waiting の Claude セッションで
 // ScanResultMsg 受信時に Enter が自動送信されることを確認する。
 func TestAutoApproveOnScanResult(t *testing.T) {
@@ -1854,20 +1903,8 @@ func TestAutoApproveOnScanResult(t *testing.T) {
 	// Arrange: autoApprove を ON にする
 	m.autoApprove["%1"] = true
 
-	// Act: 同じ Waiting セッションの ScanResultMsg を送る
-	scanMsg := ScanResultMsg{
-		Projects: []core.Project{
-			{
-				Path: "/project-a",
-				Name: "project-a",
-				Sessions: []*core.Session{
-					{PID: 100, State: core.Waiting, Tool: core.ToolClaude, PaneID: "%1"},
-				},
-			},
-		},
-	}
-	updated, cmd := m.Update(scanMsg)
-	_ = updated.(Model)
+	// Act: 自動承認チェックを実行する
+	cmd := m.checkAutoApprove()
 
 	// Assert: cmd が返ること（checkAutoApprove が cmd を生成する）
 	if cmd == nil {
@@ -1875,33 +1912,12 @@ func TestAutoApproveOnScanResult(t *testing.T) {
 	}
 
 	// Act: cmd を実行して結果を確認
-	result := cmd()
-
-	// tea.BatchMsg の場合は中身を展開する
-	var approvalMsg ApprovalResultMsg
-	found := false
-	switch r := result.(type) {
-	case ApprovalResultMsg:
-		approvalMsg = r
-		found = true
-	case tea.BatchMsg:
-		for _, innerCmd := range r {
-			if innerCmd != nil {
-				innerResult := innerCmd()
-				if ar, ok := innerResult.(ApprovalResultMsg); ok {
-					approvalMsg = ar
-					found = true
-					break
-				}
-			}
-		}
+	reviewMsg := runAutoReviewResult(t, cmd)
+	if reviewMsg.PaneID != "%1" {
+		t.Errorf("AutoReviewResultMsg.PaneID = %q, want %%1", reviewMsg.PaneID)
 	}
-
-	if !found {
-		t.Fatalf("expected ApprovalResultMsg in cmd result, got %T", result)
-	}
-	if approvalMsg.PaneID != "%1" {
-		t.Errorf("ApprovalResultMsg.PaneID = %q, want %%1", approvalMsg.PaneID)
+	if !reviewMsg.Sent {
+		t.Fatal("expected auto-review to send Enter for low-risk command")
 	}
 	if !strings.Contains(strings.Join(term.sentKeys, ","), "Enter") {
 		t.Errorf("sentKeys = %v, want to contain 'Enter'", term.sentKeys)
@@ -1939,7 +1955,8 @@ func TestManualApproveWorksWithAutoOn(t *testing.T) {
 
 // TestAutoApproveAlsoAffectsCodex は Codex セッションでも autoApprove が発動することを確認する。
 func TestAutoApproveAlsoAffectsCodex(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
+	m, _, _, _, term := newTestModel()
+	term.paneText = "Run this command?\n\ngo test ./...\n\n› 1. Yes, allow once\n  2. No"
 
 	// Arrange: Codex の Waiting セッションを作成
 	projects := []core.Project{
@@ -1956,39 +1973,73 @@ func TestAutoApproveAlsoAffectsCodex(t *testing.T) {
 	// autoApprove を Codex ペインに対して ON にする
 	m.autoApprove["%2"] = true
 
-	// Act: ScanResultMsg を送る
-	scanMsg := ScanResultMsg{
-		Projects: projects,
-	}
-	_, cmd := m.Update(scanMsg)
+	// Act: 自動承認チェックを実行する
+	cmd := m.checkAutoApprove()
 
 	// Assert: checkAutoApprove が Codex セッションにも Enter を送信すること
 	if cmd == nil {
 		t.Fatal("expected non-nil cmd for Codex auto-approve")
 	}
-	result := cmd()
-	switch r := result.(type) {
-	case ApprovalResultMsg:
-		if r.Label != "Auto-approved" {
-			t.Errorf("Label = %q, want %q", r.Label, "Auto-approved")
-		}
-	case tea.BatchMsg:
-		found := false
-		for _, innerCmd := range r {
-			if innerCmd != nil {
-				if ar, ok := innerCmd().(ApprovalResultMsg); ok {
-					if ar.Label == "Auto-approved" {
-						found = true
-						break
-					}
-				}
-			}
-		}
-		if !found {
-			t.Error("expected Auto-approved in BatchMsg for Codex session")
-		}
-	default:
-		t.Errorf("unexpected result type %T", result)
+	result := runAutoReviewResult(t, cmd)
+	if !result.Sent {
+		t.Error("expected AutoReviewResultMsg.Sent to be true")
+	}
+}
+
+func TestAutoApproveStopsDangerousCommand(t *testing.T) {
+	m, term := waitingClaudeModel()
+	term.paneText = "Run this command?\n\nrm -rf ./tmp\n\n› 1. Yes, allow once\n  2. No"
+	m.autoApprove["%1"] = true
+
+	cmd := m.checkAutoApprove()
+	if cmd == nil {
+		t.Fatal("expected cmd for dangerous auto-review")
+	}
+
+	result := runAutoReviewResult(t, cmd)
+	if result.Sent {
+		t.Fatal("dangerous command should not be sent")
+	}
+	if result.Result.Decision != autoreview.DecisionAsk {
+		t.Fatalf("Decision = %q, want ask", result.Result.Decision)
+	}
+	if len(term.sentKeys) != 0 {
+		t.Fatalf("sentKeys = %v, want none", term.sentKeys)
+	}
+}
+
+type fakeAutoReviewer struct {
+	result autoreview.Result
+	err    error
+}
+
+func (f fakeAutoReviewer) Review(ctx context.Context, req autoreview.Request) (autoreview.Result, error) {
+	return f.result, f.err
+}
+
+func TestAutoApproveStopsOnReviewerFailure(t *testing.T) {
+	m, term := waitingClaudeModel()
+	term.paneText = "Do you want to make this edit?\n❯ 1. Yes\n  2. No"
+	m.autoReviewer = fakeAutoReviewer{err: fmt.Errorf("review unavailable")}
+	m.autoApprove["%1"] = true
+
+	cmd := m.checkAutoApprove()
+	if cmd == nil {
+		t.Fatal("expected cmd for reviewer failure")
+	}
+
+	result := runAutoReviewResult(t, cmd)
+	if result.Sent {
+		t.Fatal("reviewer failure should not send Enter")
+	}
+	if result.Result.Decision != autoreview.DecisionError {
+		t.Fatalf("Decision = %q, want error", result.Result.Decision)
+	}
+	if result.Result.Source != autoreview.SourceLLM {
+		t.Fatalf("Source = %q, want llm", result.Result.Source)
+	}
+	if len(term.sentKeys) != 0 {
+		t.Fatalf("sentKeys = %v, want none", term.sentKeys)
 	}
 }
 

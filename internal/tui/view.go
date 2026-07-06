@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/yoshihiko555/baton/internal/autoreview"
 	"github.com/yoshihiko555/baton/internal/core"
 )
 
@@ -213,7 +214,7 @@ func (m Model) renderSessionList(width, height int) string {
 			lines = append(lines, renderGroupHeader(e, width, m.theme))
 		} else {
 			isSelected := i == m.cursor
-			lines = append(lines, renderSessionEntry(&e, width, isSelected, m.theme, m.autoApprove)...)
+			lines = append(lines, renderSessionEntry(&e, width, isSelected, m.theme, m.autoApprove, m.autoReviewResults)...)
 		}
 
 		currentLine += h
@@ -261,7 +262,7 @@ func renderGroupHeader(e sessionEntry, width int, theme Theme) string {
 }
 
 // renderSessionEntry はセッション行を描画する。
-func renderSessionEntry(e *sessionEntry, width int, isSelected bool, theme Theme, autoApprove map[string]bool) []string {
+func renderSessionEntry(e *sessionEntry, width int, isSelected bool, theme Theme, autoApprove map[string]bool, autoReviewResults map[string]autoreview.Result) []string {
 	if e.session == nil {
 		return []string{"  ?"}
 	}
@@ -292,7 +293,11 @@ func renderSessionEntry(e *sessionEntry, width int, isSelected bool, theme Theme
 	mainRight := fmt.Sprintf("%s %s", indicator, toolName)
 	if autoApprove[s.PaneID] {
 		autoStyle := lipgloss.NewStyle().Foreground(theme.Brand).Bold(true)
-		mainRight += " " + autoStyle.Render("[AUTO]")
+		label := "[AUTO]"
+		if result, ok := autoReviewResults[s.PaneID]; ok {
+			label = "[AUTO:" + result.Badge() + "]"
+		}
+		mainRight += " " + autoStyle.Render(label)
 	}
 	mainRightWidth := lipgloss.Width(mainRight)
 	nameWidth := max(1, width-lipgloss.Width(cursor)-mainRightWidth-2)
@@ -520,6 +525,8 @@ func (m Model) renderActionBar(totalWidth int) string {
 			key.Render("A")+dim.Render(" approve+msg"),
 			key.Render("D")+dim.Render(" deny+msg"),
 		)
+	}
+	if m.canToggleAutoApprove() {
 		sel := m.selectedSession()
 		if sel != nil && sel.session != nil && m.autoApprove[sel.session.PaneID] {
 			actions = append(actions, key.Render("t")+dim.Render(" auto:ON"))

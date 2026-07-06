@@ -109,10 +109,19 @@ bind b display-popup -E -w 80% -h 80% "baton"
 | `Tab` | Switch focus between session list and preview |
 | `/` | Start session filter input |
 | `w` | Jump to next Waiting session |
-| `a` / `d` | Approve / deny (Waiting Claude on preview pane) |
+| `a` / `d` | Approve / deny (Waiting Claude/Codex on preview pane) |
 | `A` / `D` | Approve+message / deny+message (Claude on preview pane) |
+| `t` | Toggle safe auto mode for selected Claude/Codex session |
 | `Esc` | Close submenu or clear active filter |
 | `q` / `Ctrl+C` | Quit |
+
+### Safe auto mode
+
+When `t` enables auto mode for a session, baton no longer presses Enter unconditionally. It first applies deterministic safety rules, then routes ambiguous approvals to a Codex exec reviewer using `gpt-5.3-codex-spark` by default.
+
+- `allow`: baton sends `Enter`
+- `ask` / `deny` / `unknown` / `error`: baton stops and shows the reason; use manual `a` / `d` / `A` / `D`
+- High-risk operations such as `rm`, `git reset`, secret access, workspace-external writes, network exfiltration, and production/deploy actions are not auto-approved
 
 ### Session filter
 
@@ -174,6 +183,14 @@ statusbar:
     working: "🤔"
     waiting: "✋"
     idle: "~"
+
+# Safe auto mode reviewer
+auto_mode:
+  enabled: true
+  reviewer: "codex" # "codex" or "none"
+  model: "gpt-5.3-codex-spark"
+  timeout: "20s"
+  risk_threshold: "medium" # low, medium, high
 ```
 
 ## How it works

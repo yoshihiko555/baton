@@ -30,6 +30,16 @@ type ThemeConfig struct {
 	GroupHeaders   map[string]string `yaml:"group_headers"`
 }
 
+// AutoModeConfig は自動承認時の安全判定設定を表す。
+type AutoModeConfig struct {
+	Enabled       bool          `yaml:"enabled"`
+	Reviewer      string        `yaml:"reviewer"`
+	Model         string        `yaml:"model"`
+	Timeout       time.Duration `yaml:"timeout"`
+	RiskThreshold string        `yaml:"risk_threshold"`
+	enabledSet    bool
+}
+
 // UnmarshalYAML はスカラー文字列をプリセット名として扱う。
 func (t *ThemeConfig) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind == yaml.ScalarNode {
@@ -39,6 +49,29 @@ func (t *ThemeConfig) UnmarshalYAML(value *yaml.Node) error {
 	// mapping の場合は通常のアンマーシャルを行う
 	type rawThemeConfig ThemeConfig
 	return value.Decode((*rawThemeConfig)(t))
+}
+
+func (a *AutoModeConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawAutoModeConfig struct {
+		Enabled       *bool         `yaml:"enabled"`
+		Reviewer      string        `yaml:"reviewer"`
+		Model         string        `yaml:"model"`
+		Timeout       time.Duration `yaml:"timeout"`
+		RiskThreshold string        `yaml:"risk_threshold"`
+	}
+	var raw rawAutoModeConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	if raw.Enabled != nil {
+		a.Enabled = *raw.Enabled
+		a.enabledSet = true
+	}
+	a.Reviewer = raw.Reviewer
+	a.Model = raw.Model
+	a.Timeout = raw.Timeout
+	a.RiskThreshold = raw.RiskThreshold
+	return nil
 }
 
 // Config は YAML から読み込む baton の実行時設定を表す。
@@ -51,6 +84,7 @@ type Config struct {
 	LogLevel          string          `yaml:"log_level"`
 	Statusbar         StatusbarConfig `yaml:"statusbar"`
 	Theme             ThemeConfig     `yaml:"theme"`
+	AutoMode          AutoModeConfig  `yaml:"auto_mode"`
 }
 
 // Default はデフォルト設定値を返す。
@@ -72,6 +106,13 @@ func Default() Config {
 				"waiting": "✋",
 				"idle":    "~",
 			},
+		},
+		AutoMode: AutoModeConfig{
+			Enabled:       true,
+			Reviewer:      "codex",
+			Model:         "gpt-5.3-codex-spark",
+			Timeout:       20 * time.Second,
+			RiskThreshold: "medium",
 		},
 	}
 }
@@ -142,6 +183,7 @@ func mergeConfig(base *Config, override Config) {
 		base.Statusbar.StateIcons = override.Statusbar.StateIcons
 	}
 	mergeThemeConfig(&base.Theme, override.Theme)
+	mergeAutoModeConfig(&base.AutoMode, override.AutoMode)
 }
 
 // mergeThemeConfig は非ゼロ値のみで base の Theme を上書きする。
@@ -181,6 +223,24 @@ func mergeThemeConfig(base *ThemeConfig, override ThemeConfig) {
 		for k, v := range override.GroupHeaders {
 			base.GroupHeaders[k] = v
 		}
+	}
+}
+
+func mergeAutoModeConfig(base *AutoModeConfig, override AutoModeConfig) {
+	if override.enabledSet {
+		base.Enabled = override.Enabled
+	}
+	if override.Reviewer != "" {
+		base.Reviewer = override.Reviewer
+	}
+	if override.Model != "" {
+		base.Model = override.Model
+	}
+	if override.Timeout != 0 {
+		base.Timeout = override.Timeout
+	}
+	if override.RiskThreshold != "" {
+		base.RiskThreshold = override.RiskThreshold
 	}
 }
 

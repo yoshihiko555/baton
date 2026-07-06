@@ -108,10 +108,19 @@ bind b display-popup -E -w 80% -h 80% "baton"
 | `Tab` | セッションリストとプレビューのフォーカス切替 |
 | `/` | セッションフィルタ入力を開始 |
 | `w` | 次の Waiting セッションへ移動 |
-| `a` / `d` | 承認 / 拒否（右ペインの Waiting Claude セッション） |
+| `a` / `d` | 承認 / 拒否（右ペインの Waiting Claude/Codex セッション） |
 | `A` / `D` | コメント付き承認 / 拒否（右ペインの Claude セッション） |
+| `t` | 選択中の Claude/Codex セッションの安全オートモードを切替 |
 | `Esc` | サブメニューを閉じる、または有効なフィルタをクリア |
 | `q` / `Ctrl+C` | 終了 |
+
+### 安全オートモード
+
+`t` でセッション単位のオートモードを有効にしても、baton は無条件に Enter を送信しません。まずルールベースで安全判定し、曖昧な承認は既定で `gpt-5.3-codex-spark` を使う Codex exec reviewer に渡します。
+
+- `allow`: baton が `Enter` を送信
+- `ask` / `deny` / `unknown` / `error`: 停止理由を表示し、手動の `a` / `d` / `A` / `D` を待つ
+- `rm`、`git reset`、秘密情報アクセス、workspace 外書き込み、外部ネットワーク送信、production/deploy 系操作は自動承認しない
 
 ### セッションフィルタ
 
@@ -173,6 +182,14 @@ statusbar:
     working: "🤔"
     waiting: "✋"
     idle: "~"
+
+# 安全オートモード reviewer
+auto_mode:
+  enabled: true
+  reviewer: "codex" # "codex" または "none"
+  model: "gpt-5.3-codex-spark"
+  timeout: "20s"
+  risk_threshold: "medium" # low, medium, high
 ```
 
 ## 仕組み

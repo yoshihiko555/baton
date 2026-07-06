@@ -48,6 +48,21 @@ func TestDefault(t *testing.T) {
 	if got.Statusbar.StateIcons["idle"] != "~" {
 		t.Fatalf("unexpected Statusbar.StateIcons[idle]: got %q", got.Statusbar.StateIcons["idle"])
 	}
+	if !got.AutoMode.Enabled {
+		t.Fatal("AutoMode.Enabled should be true by default")
+	}
+	if got.AutoMode.Reviewer != "codex" {
+		t.Fatalf("unexpected AutoMode.Reviewer: got %q", got.AutoMode.Reviewer)
+	}
+	if got.AutoMode.Model != "gpt-5.3-codex-spark" {
+		t.Fatalf("unexpected AutoMode.Model: got %q", got.AutoMode.Model)
+	}
+	if got.AutoMode.Timeout != 20*time.Second {
+		t.Fatalf("unexpected AutoMode.Timeout: got %v", got.AutoMode.Timeout)
+	}
+	if got.AutoMode.RiskThreshold != "medium" {
+		t.Fatalf("unexpected AutoMode.RiskThreshold: got %q", got.AutoMode.RiskThreshold)
+	}
 }
 
 func TestLoadValidYAML(t *testing.T) {
@@ -66,6 +81,12 @@ statusbar:
     default: "◆"
   state_icons:
     idle: "○"
+auto_mode:
+  enabled: false
+  reviewer: none
+  model: gpt-5.3-codex-spark
+  timeout: 3s
+  risk_threshold: low
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
@@ -108,6 +129,18 @@ statusbar:
 	if got.Statusbar.StateIcons["idle"] != "○" {
 		t.Fatalf("unexpected Statusbar.StateIcons[idle]: got %q", got.Statusbar.StateIcons["idle"])
 	}
+	if got.AutoMode.Enabled {
+		t.Fatal("AutoMode.Enabled should be false from YAML")
+	}
+	if got.AutoMode.Reviewer != "none" {
+		t.Fatalf("unexpected AutoMode.Reviewer: got %q", got.AutoMode.Reviewer)
+	}
+	if got.AutoMode.Timeout != 3*time.Second {
+		t.Fatalf("unexpected AutoMode.Timeout: got %v", got.AutoMode.Timeout)
+	}
+	if got.AutoMode.RiskThreshold != "low" {
+		t.Fatalf("unexpected AutoMode.RiskThreshold: got %q", got.AutoMode.RiskThreshold)
+	}
 }
 
 func TestLoadPartialYAML(t *testing.T) {
@@ -145,6 +178,9 @@ status_output_path: ~/tmp/baton-status.json
 	}
 	if got.LogLevel != "info" {
 		t.Fatalf("unexpected LogLevel: got %q", got.LogLevel)
+	}
+	if !got.AutoMode.Enabled {
+		t.Fatal("AutoMode.Enabled should remain default true when omitted")
 	}
 }
 

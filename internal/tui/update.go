@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/yoshihiko555/baton/internal/autoreview"
 	"github.com/yoshihiko555/baton/internal/core"
 )
 
@@ -45,6 +46,28 @@ func flashClearCmd(generation uint64) tea.Cmd {
 // Update は tea.Model のメッセージ処理を行う。
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case AutoReviewResultMsg:
+		m.flashGen++
+		currentGen := m.flashGen
+		m.autoReviewResults[msg.PaneID] = msg.Result
+		if msg.SendErr != nil {
+			m.err = msg.SendErr
+			m.flashMessage = ""
+		} else if msg.Sent {
+			m.err = nil
+			m.flashMessage = "Auto-approved [" + msg.Result.Trace() + "]: " + msg.Result.ShortReason()
+		} else {
+			m.err = nil
+			m.flashMessage = "Auto-stopped [" + msg.Result.Trace() + "]: " + msg.Result.ShortReason()
+		}
+		if msg.Sent {
+			previewCmd := m.forceRefreshPreview(msg.PaneID)
+			if previewCmd != nil {
+				retryPreviewCmd := m.delayedRefreshPreview(msg.PaneID, approvalPreviewRetryDelay)
+				return m, tea.Batch(flashClearCmd(currentGen), previewCmd, retryPreviewCmd)
+			}
+		}
+		return m, flashClearCmd(currentGen)
 	case ApprovalResultMsg:
 		m.flashGen++
 		currentGen := m.flashGen
@@ -56,6 +79,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flashMessage = msg.Label
 			// 送信成功時に autoApproved をクリアして次の Waiting 遷移で再発動可能にする
 			delete(m.autoApproved, msg.PaneID)
+			delete(m.autoReviewResults, msg.PaneID)
 		}
 		// 承認/拒否送信後のプレビュー再取得:
 		//   forceRefreshPreview: 送信直後に即時キャプチャ（受理の即応フィードバック）。
@@ -548,10 +572,15 @@ func (m Model) updateFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, filterCmd
 }
 
-// handleToggleAutoApprove は選択中の Claude セッションの自動承認を ON/OFF する。
+// handleToggleAutoApprove は選択中の Claude/Codex セッションの自動承認を ON/OFF する。
 func (m Model) handleToggleAutoApprove() (tea.Model, tea.Cmd) {
-	if !m.canInput() {
+	if !m.canToggleAutoApprove() {
 		return m, nil
+	}
+	if !m.config.AutoMode.Enabled {
+		m.flashGen++
+		m.flashMessage = "Auto mode is disabled"
+		return m, flashClearCmd(m.flashGen)
 	}
 	sel := m.selectedSession()
 	if sel == nil || sel.session == nil {
@@ -559,6 +588,8 @@ func (m Model) handleToggleAutoApprove() (tea.Model, tea.Cmd) {
 	}
 	paneID := sel.session.PaneID
 	m.autoApprove[paneID] = !m.autoApprove[paneID]
+	delete(m.autoApproved, paneID)
+	delete(m.autoReviewResults, paneID)
 	m.flashGen++
 	currentGen := m.flashGen
 	if m.autoApprove[paneID] {
@@ -569,14 +600,18 @@ func (m Model) handleToggleAutoApprove() (tea.Model, tea.Cmd) {
 	return m, flashClearCmd(currentGen)
 }
 
-// checkAutoApprove は全セッションを走査し、自動承認 ON かつ Waiting の Claude/Codex セッションに Enter を送信する。
+// checkAutoApprove は全セッションを走査し、自動承認 ON かつ Waiting の Claude/Codex セッションを安全判定する。
+// allow の場合のみ Enter を送信し、ask/deny/unknown/error は停止表示に留める。
 // 多重送信防止: Waiting から離脱したセッションの autoApproved フラグをリセットし、
-// 未送信のセッションにのみ Enter を送信する。
+// 未処理のセッションにのみ判定を実行する。
 //
 // ポインタレシーバを使用する理由: m.autoApproved マップを直接変更するため。
 // Update() はバリューレシーバだが、Go が自動で &m を渡すため変更は反映される。
 func (m *Model) checkAutoApprove() tea.Cmd {
-	// Waiting 状態にある Claude セッションの PaneID を収集する
+	if !m.config.AutoMode.Enabled {
+		return nil
+	}
+	// Waiting 状態にある Claude/Codex セッションの PaneID を収集する
 	waitingPanes := make(map[string]bool)
 	for _, entry := range m.entries {
 		if entry.isHeader || entry.session == nil {
@@ -588,12 +623,13 @@ func (m *Model) checkAutoApprove() tea.Cmd {
 	}
 	// Waiting でなくなったセッションの送信済みフラグをリセットする
 	for paneID := range m.autoApproved {
-		if !waitingPanes[paneID] {
+		if !waitingPanes[paneID] || !m.autoApprove[paneID] {
 			delete(m.autoApproved, paneID)
+			delete(m.autoReviewResults, paneID)
 		}
 	}
 
-	// Waiting + autoApprove ON + 未送信のセッションに Enter を送信する
+	// Waiting + autoApprove ON + 未処理のセッションに安全判定を実行する
 	var cmds []tea.Cmd
 	for _, entry := range m.entries {
 		if entry.isHeader || entry.session == nil {
@@ -612,9 +648,45 @@ func (m *Model) checkAutoApprove() tea.Cmd {
 		m.autoApproved[sess.PaneID] = true
 		paneID := sess.PaneID
 		term := m.terminal
+		reviewer := m.autoReviewer
+		policy := autoReviewPolicy(m.config.AutoMode)
+		tool := sess.Tool.String()
+		projectName := ""
+		projectPath := ""
+		if entry.project != nil {
+			projectName = entry.project.Name
+			projectPath = entry.project.Path
+		}
 		cmds = append(cmds, func() tea.Msg {
-			err := term.SendKeys(paneID, "Enter")
-			return ApprovalResultMsg{Err: err, Label: "Auto-approved", PaneID: paneID}
+			paneText, err := term.GetPaneText(paneID)
+			if err != nil {
+				return AutoReviewResultMsg{
+					PaneID: paneID,
+					Result: autoreview.ErrorResult(err),
+				}
+			}
+			req := autoreview.Request{
+				Tool:        tool,
+				PaneID:      paneID,
+				ProjectName: projectName,
+				ProjectPath: projectPath,
+				PaneText:    paneText,
+				Operation:   autoreview.ExtractOperation(paneText),
+			}
+			result := autoreview.Evaluate(context.Background(), policy, reviewer, req)
+			if !result.AllowsAutoApprove(policy.RiskThreshold) {
+				return AutoReviewResultMsg{
+					PaneID: paneID,
+					Result: result,
+				}
+			}
+			err = term.SendKeys(paneID, "Enter")
+			return AutoReviewResultMsg{
+				PaneID:  paneID,
+				Result:  result,
+				Sent:    err == nil,
+				SendErr: err,
+			}
 		})
 	}
 	if len(cmds) == 0 {
