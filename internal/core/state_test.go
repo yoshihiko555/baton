@@ -592,6 +592,83 @@ func (m *paneTextTerminal) SendKeys(paneID string, keys ...string) error { retur
 func (m *paneTextTerminal) IsAvailable() bool                            { return true }
 func (m *paneTextTerminal) Name() string                                 { return "mock" }
 
+func TestRefineCodexThinkingToWaiting(t *testing.T) {
+	// Codex が子プロセスありで Thinking 判定されても、承認UIがあれば Waiting に補正されることを確認する。
+	manager := NewStateManager(nil)
+	manager.projects = []Project{
+		{
+			Name: "proj",
+			Path: "/project",
+			Sessions: []*Session{
+				{PID: 100, Tool: ToolCodex, State: Thinking, PaneID: "%1", WorkingDir: "/project"},
+			},
+		},
+	}
+	manager.summary = calcSummary(manager.projects)
+
+	term := &paneTextTerminal{
+		texts: map[string]string{
+			"%1": "Run this command?\n› 1. Yes, allow once\n  2. No, tell Codex what to do differently\n",
+		},
+	}
+
+	manager.RefineToolUseState(term)
+
+	projects := manager.Projects()
+	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
+		t.Fatalf("unexpected projects/sessions: %v", projects)
+	}
+	if got := projects[0].Sessions[0].State; got != Waiting {
+		t.Errorf("state = %v, want Waiting (codex approval prompt detected from Thinking)", got)
+	}
+	if got := manager.Summary().Waiting; got != 1 {
+		t.Errorf("summary.Waiting = %d, want 1", got)
+	}
+}
+
+func TestCodexApprovalPatternVariants(t *testing.T) {
+	// Codex の選択肢UIがプロンプト記号や文言の差分を含んでも検出できることを確認する。
+	tests := []struct {
+		name      string
+		input     string
+		wantMatch bool
+	}{
+		{
+			name:      "current yes choice",
+			input:     "Apply changes?\n› 1. Yes, apply all changes\n  2. No, discard changes\n",
+			wantMatch: true,
+		},
+		{
+			name:      "heavy prompt symbol",
+			input:     "Run command?\n❯ 1. Yes, allow once\n  2. No\n",
+			wantMatch: true,
+		},
+		{
+			name:      "allow first choice",
+			input:     "Approve command?\n  1. Allow once\n  2. Deny\n",
+			wantMatch: true,
+		},
+		{
+			name:      "single choice only",
+			input:     "1. Yes, proceed\n",
+			wantMatch: false,
+		},
+		{
+			name:      "unrelated numbered list",
+			input:     "1. Install dependencies\n2. Run tests\n",
+			wantMatch: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexApprovalPattern.MatchString(tc.input); got != tc.wantMatch {
+				t.Errorf("codexApprovalPattern.MatchString(%q) = %v, want %v", tc.input, got, tc.wantMatch)
+			}
+		})
+	}
+}
+
 func TestRefineGeminiThinkingToWaiting(t *testing.T) {
 	// Gemini の Thinking 状態がペインテキストの承認パターンで Waiting に変わることを確認する。
 	manager := NewStateManager(nil)
@@ -741,7 +818,6 @@ func TestRefineGeminiWaitingPriority(t *testing.T) {
 		t.Errorf("state = %v, want Waiting (approval prompt takes priority over idle status bar)", got)
 	}
 }
-
 
 func TestContainsApprovalPrompt(t *testing.T) {
 	// containsApprovalPrompt が claudeApprovalPattern の正規表現で正しく動作することを確認する。

@@ -361,7 +361,7 @@ func TestPipelineGemini_RefineToWaiting(t *testing.T) {
 	}
 }
 
-// TestPipelineCodex_RefineToWaiting tests that Codex Idle → Waiting
+// TestPipelineCodex_RefineToWaiting tests that Codex Thinking → Waiting
 // when pane text contains the numbered approval pattern.
 func TestPipelineCodex_RefineToWaiting(t *testing.T) {
 	term := &mockTerminal{
@@ -377,8 +377,8 @@ func TestPipelineCodex_RefineToWaiting(t *testing.T) {
 		map[string]string{
 			"ttys001": psLine(2001, 500, "codex", "codex --full-auto"),
 		},
-		nil, // no children → Idle
-		nil,
+		map[int]string{2001: "3001\n"},
+		map[int]string{3001: "bash"},
 	))
 
 	scanner := core.NewDefaultScanner(term, ps)

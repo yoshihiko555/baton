@@ -304,9 +304,9 @@ var claudeApprovalPattern = regexp.MustCompile(
 )
 
 // codexApprovalPattern は Codex CLI の承認プロンプトの構造を検出する正規表現。
-// 番号付き選択肢（"1. Yes..." + "2. Yes..." or "2. No..."）の連続で判定する。
+// 番号付き選択肢（"1. Yes..." / "1. Allow..." + "2. ..."）の連続で判定する。
 // 単独の "1. Yes" ではなく後続行も確認することで誤検知を防ぐ。
-var codexApprovalPattern = regexp.MustCompile(`(?m)^\s*[›>]?\s*1\.\s+Yes.*\n\s*[›>]?\s*2\.\s+`)
+var codexApprovalPattern = regexp.MustCompile(`(?im)^\s*[›>❯]?\s*1\.\s+(?:yes|allow)\b.*\n\s*[›>❯]?\s*2\.\s+`)
 
 // geminiIdlePattern は Gemini CLI の入力待ちプロンプトを検出する正規表現。
 // Gemini はアイドル時にステータスバーに "workspace" と "sandbox" を表示する。
@@ -314,10 +314,10 @@ var codexApprovalPattern = regexp.MustCompile(`(?m)^\s*[›>]?\s*1\.\s+Yes.*\n\s
 var geminiIdlePattern = regexp.MustCompile(`(?m)workspace\s+\(.+\)\s+.*sandbox`)
 
 // RefineToolUseState はペインテキストから状態を精緻化する。
-// - Claude: 全状態でペインテキストをチェック。classifyClaudePane が権威的ソース。
-//   判定できた場合はその状態を採用。判定不能かつ JSONL=Waiting → ToolUse に降格。
-// - Codex Idle → Waiting（承認待ち検出）
-// - Gemini Thinking → Waiting（承認待ち）または Idle（入力プロンプト検出）
+//   - Claude: 全状態でペインテキストをチェック。classifyClaudePane が権威的ソース。
+//     判定できた場合はその状態を採用。判定不能かつ JSONL=Waiting → ToolUse に降格。
+//   - Codex: プロセス由来の Thinking/Idle → Waiting（承認待ち検出）
+//   - Gemini Thinking → Waiting（承認待ち）または Idle（入力プロンプト検出）
 func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -352,8 +352,8 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 			switch {
 			case sess.Tool == ToolClaude && sess.PaneID != "":
 				// Claude: 全状態でペインテキストをチェック
-			case sess.State == Idle && sess.Tool == ToolCodex:
-				// Codex: 子プロセスなし(Idle) → 承認待ちかもしれない
+			case sess.Tool == ToolCodex:
+				// Codex: 子プロセス有無で Thinking/Idle 判定後、承認待ちなら Waiting に上書きする
 			case sess.State == Thinking && sess.Tool == ToolGemini:
 				// Gemini: 子プロセス検査不可 → ペインテキストで状態判定
 			default:
