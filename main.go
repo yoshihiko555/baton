@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -19,7 +20,7 @@ import (
 	"github.com/yoshihiko555/baton/internal/tui"
 )
 
-var version = "0.1.1"
+var version = "dev"
 
 func main() {
 	if err := run(); err != nil {
@@ -39,7 +40,7 @@ func run() error {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println(version)
+		fmt.Println(currentVersion())
 		return nil
 	}
 
@@ -146,6 +147,39 @@ func run() error {
 	}
 
 	return nil
+}
+
+func currentVersion() string {
+	return effectiveVersion(version, buildInfoVersion())
+}
+
+func buildInfoVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	return info.Main.Version
+}
+
+func effectiveVersion(embeddedVersion, moduleVersion string) string {
+	if normalized := normalizeVersion(embeddedVersion); normalized != "" && normalized != "dev" {
+		return normalized
+	}
+	if normalized := normalizeVersion(moduleVersion); normalized != "" {
+		return normalized
+	}
+	if normalized := normalizeVersion(embeddedVersion); normalized != "" {
+		return normalized
+	}
+	return "dev"
+}
+
+func normalizeVersion(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "(devel)" {
+		return ""
+	}
+	return strings.TrimPrefix(value, "v")
 }
 
 // runNoTUI はヘッドレスモードのイベントループ。

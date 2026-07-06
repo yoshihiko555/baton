@@ -7,6 +7,14 @@ vars:
   BINARY: baton
   LOCAL_BIN_DIR: "{{.HOME}}/.local/bin"
   MAIN_BRANCH: '{{.MAIN_BRANCH | default "main"}}'
+  VERSION:
+    sh: |
+      version="$(git describe --tags --dirty --always --match "v*" 2>/dev/null || true)"
+      if [ -n "$version" ]; then
+        printf "%s" "${version#v}"
+      else
+        printf "dev"
+      fi
 
 includes:
   rel:
@@ -22,7 +30,7 @@ tasks:
   build:
     desc: baton バイナリをビルド
     cmds:
-      - go build -o "{{.BINARY}}" .
+      - go build -trimpath -ldflags "-X main.version={{.VERSION}}" -o "{{.BINARY}}" .
 
   test:
     desc: テストを実行
