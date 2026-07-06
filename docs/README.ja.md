@@ -42,7 +42,7 @@ go install github.com/yoshihiko555/baton@latest
 固定バージョンを導入する場合:
 
 ```bash
-go install github.com/yoshihiko555/baton@v0.1.1
+go install github.com/yoshihiko555/baton@v0.1.2
 ```
 
 または GitHub Releases のビルド済みバイナリ（`baton_<tag>_<os>_<arch>.tar.gz` / `.zip`）を利用してください。
@@ -58,11 +58,13 @@ go install github.com/yoshihiko555/baton@v0.1.1
 ```bash
 git clone https://github.com/yoshihiko555/baton.git
 cd baton
-go build -o baton .
+task build
 
 # macOS: バイナリコピー後に codesign が必須
 cp baton ~/.local/bin/baton && codesign -f -s - ~/.local/bin/baton
 ```
+
+`task build` は `git describe --tags --dirty --always` 由来のバージョンを埋め込みます。通常の `go build` はプロジェクトのバージョン埋め込み処理を実行しないため、ローカルで `baton --version` を確認する場合は `task build` を使ってください。
 
 ## 使い方
 
@@ -237,7 +239,7 @@ go test ./... -v
 go vet ./...
 
 # ビルド＆ローカルインストール（macOS）
-go build -o baton . && cp baton ~/.local/bin/baton && codesign -f -s - ~/.local/bin/baton
+task build && cp baton ~/.local/bin/baton && codesign -f -s - ~/.local/bin/baton
 ```
 
 ## ライセンス

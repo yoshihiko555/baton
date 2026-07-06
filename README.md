@@ -43,7 +43,7 @@ go install github.com/yoshihiko555/baton@latest
 Install a fixed release version:
 
 ```bash
-go install github.com/yoshihiko555/baton@v0.1.1
+go install github.com/yoshihiko555/baton@v0.1.2
 ```
 
 Or download prebuilt binaries from GitHub Releases (`baton_<tag>_<os>_<arch>.tar.gz` / `.zip`).
@@ -59,11 +59,13 @@ Or build from source:
 ```bash
 git clone https://github.com/yoshihiko555/baton.git
 cd baton
-go build -o baton .
+task build
 
 # macOS: codesign is required after copying the binary
 cp baton ~/.local/bin/baton && codesign -f -s - ~/.local/bin/baton
 ```
+
+`task build` embeds the version from `git describe --tags --dirty --always`. A plain `go build` does not run the project version embedding step, so use `task build` when checking `baton --version` locally.
 
 ## Usage
 
@@ -238,7 +240,7 @@ go test ./... -v
 go vet ./...
 
 # Build and install locally (macOS)
-go build -o baton . && cp baton ~/.local/bin/baton && codesign -f -s - ~/.local/bin/baton
+task build && cp baton ~/.local/bin/baton && codesign -f -s - ~/.local/bin/baton
 ```
 
 ## License
