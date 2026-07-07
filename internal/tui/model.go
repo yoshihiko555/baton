@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/yoshihiko555/baton/internal/autoreview"
 	"github.com/yoshihiko555/baton/internal/config"
 	"github.com/yoshihiko555/baton/internal/core"
 	"github.com/yoshihiko555/baton/internal/terminal"
@@ -30,6 +31,14 @@ type ApprovalResultMsg struct {
 	Err    error
 	Label  string // 操作の表示名（例: "Approved", "Denied: fix tests"）
 	PaneID string // 承認/拒否を送信した対象ペイン
+}
+
+// AutoReviewResultMsg は自動承認の安全判定結果を通知する。
+type AutoReviewResultMsg struct {
+	PaneID  string
+	Result  autoreview.Result
+	Sent    bool
+	SendErr error
 }
 
 // FlashClearMsg はフラッシュメッセージの消去タイマー発火時に送られる。
@@ -133,9 +142,12 @@ type Model struct {
 
 	// 自動承認モード: PaneID → true で自動承認 ON
 	autoApprove map[string]bool
-	// autoApproved は既に自動承認 Enter を送信済みの PaneID を記録する。
-	// セッションが Waiting から離脱したらエントリを削除する。
+	// autoApproved は現在の Waiting に対して自動承認処理を実行済みの PaneID を記録する。
+	// allow の場合は Enter 送信済み、ask/deny/error の場合は停止表示済みを意味する。
 	autoApproved map[string]bool
+	// autoReviewResults は最後の自動判定結果を PaneID ごとに保持する。
+	autoReviewResults map[string]autoreview.Result
+	autoReviewer      autoreview.Reviewer
 }
 
 // NewModel はデフォルト設定で TUI モデルを初期化する。
@@ -153,17 +165,19 @@ func NewModel(
 	fti.CharLimit = 300
 	fti.Placeholder = "name/path/tool/status..."
 	return Model{
-		scanner:      scanner,
-		stateUpdater: stateUpdater,
-		stateReader:  stateReader,
-		terminal:     term,
-		config:       cfg,
-		theme:        ResolveTheme(cfg.Theme),
-		exitOnJump:   exitOnJump,
-		textInput:    ti,
-		filterInput:  fti,
-		autoApprove:  make(map[string]bool),
-		autoApproved: make(map[string]bool),
+		scanner:           scanner,
+		stateUpdater:      stateUpdater,
+		stateReader:       stateReader,
+		terminal:          term,
+		config:            cfg,
+		theme:             ResolveTheme(cfg.Theme),
+		exitOnJump:        exitOnJump,
+		textInput:         ti,
+		filterInput:       fti,
+		autoApprove:       make(map[string]bool),
+		autoApproved:      make(map[string]bool),
+		autoReviewResults: make(map[string]autoreview.Result),
+		autoReviewer:      newAutoReviewer(cfg.AutoMode),
 	}
 }
 
@@ -230,13 +244,23 @@ func (m Model) PreviewFetchSeq() uint64 {
 }
 
 // canApprove は選択中のセッションが手動承認/拒否の送信可能かを返す。
-// 条件: Waiting 状態、Claude Code または Codex セッション、自動承認 OFF。
+// 条件: Waiting 状態、Claude Code または Codex セッション。
 func (m Model) canApprove() bool {
 	sel := m.selectedSession()
 	if sel == nil || sel.session == nil {
 		return false
 	}
 	return sel.session.State == core.Waiting && (sel.session.Tool == core.ToolClaude || sel.session.Tool == core.ToolCodex) && sel.session.PaneID != ""
+}
+
+// canToggleAutoApprove は選択中のセッションが安全オートモードを切替可能かを返す。
+// 条件: Claude Code または Codex セッション。
+func (m Model) canToggleAutoApprove() bool {
+	sel := m.selectedSession()
+	if sel == nil || sel.session == nil {
+		return false
+	}
+	return (sel.session.Tool == core.ToolClaude || sel.session.Tool == core.ToolCodex) && sel.session.PaneID != ""
 }
 
 // canInput は選択中のセッションがプロンプト入力モードに入れるかを返す。

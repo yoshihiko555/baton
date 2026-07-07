@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- 自動承認モードに安全判定を追加し、低リスク操作のみ自動承認し、危険・不明・判定失敗時は停止表示に留めるようにした
+- `auto_mode` 設定を追加し、Codex exec reviewer、モデル、タイムアウト、リスク閾値を指定できるようにした
+
 ### Changed
 
 - TUI 左ペインを `Attention + project/tool/PID 安定順一覧` に変更し、状態変化中でも上下移動の意図が崩れにくいレイアウトにした
 - `Waiting / Working / Idle` のサマリと、最大 5 件の `Waiting` セッションを上部 `Attention` セクションに表示し、`w` で `Waiting` を巡回できるようにした
+- `t` の自動承認は無条件 Enter 送信ではなく、ルールベース判定と Codex Spark reviewer を通過した `allow` のみ Enter を送信するようにした
 
 ### Fixed
 
