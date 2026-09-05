@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Claude Code hooks 有効時、同一ディレクトリで複数セッションを開いたときの状態・トークン数の取り違えを解消（hook の transcript_path で JSONL を1:1に紐付け）
 - `baton --version` が `go install @v...` のタグ由来バージョンを優先し、固定値の更新漏れで古いバージョンを表示しないように修正
 - `task build` で `git describe` 由来のバージョンを埋め込み、ローカルビルドでもリリースタグに追従しやすいように修正
 - Codex が子プロセスありで Working 判定されている場合でも、承認選択肢UIを検出したら `Waiting` に補正するように修正

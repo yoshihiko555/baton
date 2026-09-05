@@ -50,6 +50,8 @@ type StateManager struct {
 	hookStore               *hook.Store     // Claude Code hooks 由来の Waiting 状態ストア（nil なら hook 連携なし）
 	hookStatusOverlayPath   string
 	hookStatusOverlayMaxAge time.Duration
+	scanOverlayStatus       StatusOutput
+	scanOverlayValid        bool
 	projects                []Project         // 最新プロジェクト一覧スナップショット（ソート済み）
 	summary                 Summary           // 最新集計キャッシュ
 	panes                   []terminal.Pane   // 最新ペイン一覧（Ambiguous セッション解決用）
@@ -101,8 +103,30 @@ func (s *StateManager) SetHookStatusOverlay(path string, maxAge time.Duration) {
 //  4. 各プロセスをセッションに変換（Claude は StateResolver 経由、Codex/Gemini は最小構成）
 //  5. Summary 再計算 + panes/prevPIDSet を更新
 func (s *StateManager) UpdateFromScan(result ScanResult) error {
+	s.mu.RLock()
+	useOverlay := s.hookStore == nil
+	overlayPath := s.hookStatusOverlayPath
+	overlayMaxAge := s.hookStatusOverlayMaxAge
+	s.mu.RUnlock()
+
+	var overlayStatus StatusOutput
+	haveOverlay := false
+	if useOverlay {
+		overlayStatus, haveOverlay = loadHookStatusOverlay(overlayPath, overlayMaxAge)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// スキャン結果と独立した overlay は、過渡的なエラーでも最新の鮮度判定を失わないよう早期 return 前にキャッシュする。
+	if s.hookStore == nil {
+		s.scanOverlayStatus = overlayStatus
+		s.scanOverlayValid = haveOverlay
+	} else {
+		overlayStatus = StatusOutput{}
+		haveOverlay = false
+		s.scanOverlayStatus = StatusOutput{}
+		s.scanOverlayValid = false
+	}
 
 	// Step 1: エラーチェック — 過渡的なエラーは前回スナップショットを維持する
 	if result.Err != nil {
@@ -124,21 +148,66 @@ func (s *StateManager) UpdateFromScan(result ScanResult) error {
 	entries := make([]sessionEntry, 0, len(result.Processes))
 	currentPIDSet := make(map[int]bool, len(result.Processes))
 
-	// CWD ごとに Claude セッションをグループ化し、ResolveMultiple で状態分布を取得する。
+	// CWD ごとに Claude セッションをグループ化し、ResolveMultipleExcluding で状態分布を取得する。
 	// PID との1対1対応はできないが、重要度順に状態を割り当てる。
-	cwdClaudeProcs := make(map[string][]int) // CWD → プロセスインデックス
+	overlayByPane := make(map[string]SessionOutput)
+	if haveOverlay {
+		for _, project := range overlayStatus.Projects {
+			for _, session := range project.Sessions {
+				if session.PaneID == "" {
+					continue
+				}
+				overlayByPane[session.PaneID] = session
+			}
+		}
+	}
+
+	cwdClaudeProcs := make(map[string][]int)        // CWD → プロセスインデックス
+	cwdExclude := make(map[string]map[string]bool)  // CWD → ピン留め済み transcript パス
+	pinnedResolved := make(map[int]ResolvedSession) // プロセスインデックス → 解決済み状態
+	pinnedTranscript := make(map[int]string)        // プロセスインデックス → transcript パス
+	pinnedSessionID := make(map[int]string)         // プロセスインデックス → Claude session ID
 	for i, proc := range result.Processes {
 		currentPIDSet[proc.PID] = true
-		if proc.ToolType == ToolClaude {
-			cwdClaudeProcs[proc.CWD] = append(cwdClaudeProcs[proc.CWD], i)
+		if proc.ToolType != ToolClaude {
+			continue
 		}
+
+		var pinPath, pinSessionID string
+		if s.hookStore != nil {
+			if hs, ok := s.hookStore.Get(proc.PaneID); ok {
+				pinPath = hs.TranscriptPath
+				pinSessionID = hs.SessionID
+			}
+		} else if haveOverlay {
+			if so, ok := overlayByPane[proc.PaneID]; ok {
+				pinPath = so.TranscriptPath
+				pinSessionID = so.SessionID
+			}
+		}
+
+		if pinPath != "" && s.resolver != nil {
+			resolved, normalizedPath, err := s.resolver.ResolvePath(pinPath)
+			if err == nil {
+				pinnedResolved[i] = resolved
+				pinnedTranscript[i] = pinPath
+				pinnedSessionID[i] = pinSessionID
+				if cwdExclude[proc.CWD] == nil {
+					cwdExclude[proc.CWD] = make(map[string]bool)
+				}
+				cwdExclude[proc.CWD][normalizedPath] = true
+				continue
+			}
+		}
+
+		cwdClaudeProcs[proc.CWD] = append(cwdClaudeProcs[proc.CWD], i)
 	}
 
 	// CWD ごとに状態分布を解決する
 	cwdStates := make(map[string][]ResolvedSession)
 	if s.resolver != nil {
 		for cwd, indices := range cwdClaudeProcs {
-			states, err := s.resolver.ResolveMultiple(cwd, len(indices))
+			states, err := s.resolver.ResolveMultipleExcluding(cwd, len(indices), cwdExclude[cwd])
 			if err != nil {
 				log.Printf("ResolveMultiple error for CWD %s: %v", cwd, err)
 				continue
@@ -149,9 +218,14 @@ func (s *StateManager) UpdateFromScan(result ScanResult) error {
 
 	// 各プロセスをセッションに変換する
 	cwdStateIndex := make(map[string]int) // CWD ごとの割り当てカウンタ
-	for _, proc := range result.Processes {
+	for i, proc := range result.Processes {
 		key := resolveProjectKey(proc, paneWorkspaceMap)
-		sess := s.buildSessionFromStates(proc, cwdStates, cwdStateIndex)
+		var sess Session
+		if resolved, ok := pinnedResolved[i]; ok {
+			sess = s.buildSessionFromPinned(proc, resolved, pinnedTranscript[i], pinnedSessionID[i])
+		} else {
+			sess = s.buildSessionFromStates(proc, cwdStates, cwdStateIndex)
+		}
 		entries = append(entries, sessionEntry{key: key, session: &sess})
 	}
 
@@ -214,20 +288,10 @@ func (s *StateManager) UpdateFromScan(result ScanResult) error {
 //     （RefineToolUseState が pane 判定に成功すれば SourcePane に更新される）
 //  4. Claude 以外のセッションの StateSource は変更しない（空のまま）
 func (s *StateManager) ApplyHookStates() {
-	s.mu.RLock()
-	useOverlay := s.hookStore == nil
-	overlayPath := s.hookStatusOverlayPath
-	overlayMaxAge := s.hookStatusOverlayMaxAge
-	s.mu.RUnlock()
-
-	var overlayStatus StatusOutput
-	haveOverlay := false
-	if useOverlay {
-		overlayStatus, haveOverlay = loadHookStatusOverlay(overlayPath, overlayMaxAge)
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	overlayStatus := s.scanOverlayStatus
+	haveOverlay := s.scanOverlayValid
 
 	if s.hookStore != nil {
 		alive := make(map[string]bool, len(s.panes))
@@ -341,6 +405,24 @@ func (s *StateManager) applyHookStatusOverlayLocked(status StatusOutput) {
 				sess.StateSource = SourceHook
 			}
 		}
+	}
+}
+
+// buildSessionFromPinned は hook でピン留めされた JSONL の解決結果からセッションを構築する。
+func (s *StateManager) buildSessionFromPinned(proc DetectedProcess, resolved ResolvedSession, transcriptPath, sessionID string) Session {
+	return Session{
+		PID:            proc.PID,
+		Tool:           proc.ToolType,
+		WorkingDir:     proc.CWD,
+		PaneID:         proc.PaneID,
+		State:          resolved.State,
+		Branch:         resolved.Branch,
+		CurrentTool:    resolved.CurrentTool,
+		FirstPrompt:    resolved.FirstPrompt,
+		InputTokens:    resolved.InputTokens,
+		OutputTokens:   resolved.OutputTokens,
+		TranscriptPath: transcriptPath,
+		SessionID:      sessionID,
 	}
 }
 

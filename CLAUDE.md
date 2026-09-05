@@ -95,7 +95,7 @@ go vet ./...
 - デフォルトターミナル: tmux（config.yaml の `terminal` で "wezterm" に変更可能）
 - データフロー: Ticker → doScan → ScanResultMsg → Update()（ポーリング方式、2秒間隔）
 - state.go は集約のみ、JSON 書き出しは exporter.go に分離
-- 同一 CWD の複数セッション: ResolveMultiple 方式で ModTime 上位 N 件から状態分布を取得（JSONL → PID の1対1対応は不可）
+- 同一 CWD の複数セッション: ResolveMultiple 方式で ModTime 上位 N 件から状態分布を取得（JSONL → PID の1対1対応は不可）。hook 有効時（`transcript_path` 取得済み）は `StateResolver.ResolvePath` で該当 JSONL を1:1に直接紐付け、CWD 束ねの対象から除外する
 - slug 生成: CWD の "/" と "." を "-" に変換（Claude Code のディレクトリ命名規則に準拠）
 - Pane.ID は string 型（tmux: "%5" 形式、WezTerm: "42" 形式）
 - Scanner 最適化: tmux の `CurrentCommand` で AI ペインのみ `ps` 実行（不要な呼び出しを削減）。`node` も通過させる（Gemini 検出用）

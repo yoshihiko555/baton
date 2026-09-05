@@ -10,6 +10,8 @@ StateResolver は baton v2 の新規コンポーネントであり、以下の�
 
 **スコープ外**: Codex / Gemini プロセスはプロセス存在のみで `Thinking` に固定されるため、StateResolver は関与しない。
 
+**Phase 4 拡張（実装済み）**: Claude Code hooks（[ADR-0015](../../adr/0015-hook-based-waiting-detection.md)）由来の `transcript_path` を持つプロセスは、下記の CWD 束ね方式ではなく `ResolvePath` で JSONL を直接1:1解決する。詳細は [`hook-state-detection.md`](hook-state-detection.md) の「resolver の 1:1 化」を参照。
+
 ---
 
 ## 責務
@@ -83,6 +85,21 @@ JSONL ディレクトリパス: `{claudeProjectsDir}/{slug}/`
 | N_f == N_p | — | mtime 降順でソートし 1:1 対応と推定 |
 | N_f > N_p | — | mtime 降順の上位 N_p 本を使用 |
 | N_f < N_p | — | 対応が取れないプロセスを Thinking にフォールバック |
+
+---
+
+### hook pin による1:1直接解決（Phase 4, 実装済み）
+
+hook（`transcript_path`）でピン留めされたプロセスは、上記の CWD 束ね方式を経由しない。
+
+| メソッド | シグネチャ | 用途 |
+|---------|-----------|------|
+| `ResolvePath` | `func (r *StateResolver) ResolvePath(path string) (ResolvedSession, string, error)` | 指定した1本の JSONL を直接解決する。`os.Stat` で存在確認し、絶対パス必須・symlink を実体に正規化・通常ファイル以外（ディレクトリや FIFO 等）と `.jsonl` 以外は error を返す。第 2 返り値は正規化済みパス（呼び出し元はエラー時に従来の CWD 束ねへフォールバックする） |
+| `ResolveMultipleExcluding` | `func (r *StateResolver) ResolveMultipleExcluding(cwd string, count int, exclude map[string]bool) ([]ResolvedSession, error)` | `ResolveMultiple` と同じ状態分布ロジックだが、`exclude`（`filepath.Clean` 済み絶対パスの集合）に含まれる JSONL を候補から除外する。同一 CWD で既に pin 済みのプロセスの JSONL が、未 pin プロセス側に二重割り当てされるのを防ぐ |
+
+`ResolveMultiple(cwd, count)` は `ResolveMultipleExcluding(cwd, count, nil)` を呼ぶ薄いラッパーとして実装されている（除外なし = 従来動作と完全互換）。
+
+呼び出し元（`StateManager.UpdateFromScan`）は、hook（`hookStore.Get(paneID).TranscriptPath`）または非常駐時の status JSON overlay から得た `transcript_path` を `ResolvePath` に渡し、成功したプロセスは `ResolveMultiple`/`ResolveMultipleExcluding` の対象から外す。詳細なフローは [`hook-state-detection.md`](hook-state-detection.md) の「resolver の 1:1 化」を参照。
 
 ---
 

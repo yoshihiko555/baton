@@ -98,7 +98,7 @@ type Session struct {
 
 	// Stage B (ADR-0015): Claude Code hooks 由来の相関情報・状態フラグ
 	SessionID      string // hook 由来の Claude Code session_id
-	TranscriptPath string // hook 由来の transcript JSONL パス
+	TranscriptPath string // hook 由来のパス。設定時は StateResolver.ResolvePath の1対1ピン留めにも使用
 	StateSource    string // "hook" / "pane" / "jsonl" のいずれか（Claude セッションのみ設定）
 	HookWaiting    bool   // true の間、RefineToolUseState は State を上書きしない（hook 由来の Waiting を保護）
 
