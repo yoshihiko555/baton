@@ -100,6 +100,15 @@ func toSessionOutput(s Session) SessionOutput {
 	if s.OutputTokens != 0 {
 		out.OutputTokens = s.OutputTokens
 	}
+	if s.SessionID != "" {
+		out.SessionID = s.SessionID
+	}
+	if s.TranscriptPath != "" {
+		out.TranscriptPath = s.TranscriptPath
+	}
+	if s.StateSource != "" {
+		out.StateSource = s.StateSource
+	}
 	return out
 }
 

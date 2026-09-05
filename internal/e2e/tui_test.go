@@ -31,6 +31,7 @@ type tuiMockStateUpdater struct {
 }
 
 func (u *tuiMockStateUpdater) UpdateFromScan(result core.ScanResult) error { return nil }
+func (u *tuiMockStateUpdater) ApplyHookStates()                            {}
 func (u *tuiMockStateUpdater) RefineToolUseState(term terminal.Terminal)   {}
 
 type tuiMockStateReader struct {
@@ -67,7 +68,7 @@ func newTUITestModel(exitOnJump bool) (tui.Model, *tuiMockStateReader, *tuiMockT
 		ScanInterval: time.Second,
 	}
 
-	model := tui.NewModel(scanner, updater, reader, term, cfg, exitOnJump)
+	model := tui.NewModel(scanner, updater, reader, term, cfg, exitOnJump, nil)
 	return model, reader, term
 }
 

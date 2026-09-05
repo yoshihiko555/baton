@@ -12,12 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - 自動承認モードに安全判定を追加し、低リスク操作のみ自動承認し、危険・不明・判定失敗時は停止表示に留めるようにした
 - `auto_mode` 設定を追加し、Codex exec reviewer、モデル、タイムアウト、リスク閾値を指定できるようにした
 - `log_file` 設定（既定 `~/.local/state/baton/baton.log`）を追加し、TUI 実行中もログをファイルへ出力するようにした。`log_level: debug` ではペイン末尾テキストを診断ログへ記録するため、機微情報に注意が必要
+- Claude Code hooks による承認待ち検知を追加。`baton hook` サブコマンドと `hook` 設定（`enabled` / `socket_path`（既定 `~/.local/state/baton/hook.sock`） / `idle_cancel_scans`）で有効化でき、未登録時は従来通りペインテキスト判定で動作する
 
 ### Changed
 
 - TUI 左ペインを `Attention + project/tool/PID 安定順一覧` に変更し、状態変化中でも上下移動の意図が崩れにくいレイアウトにした
 - `Waiting / Working / Idle` のサマリと、最大 5 件の `Waiting` セッションを上部 `Attention` セクションに表示し、`w` で `Waiting` を巡回できるようにした
 - `t` の自動承認は無条件 Enter 送信ではなく、ルールベース判定と Codex Spark reviewer を通過した `allow` のみ Enter を送信するようにした
+- `/tmp/baton-status.json` の各セッションに `session_id` / `transcript_path` / `state_source`（`hook`/`pane`/`jsonl`）を追加（version は 2 のまま）
 
 ### Fixed
 

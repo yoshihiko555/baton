@@ -12,7 +12,7 @@ baton は tmux ペイン上で動作している AI コーディングセッシ�
 
 - **ペイン中心**: 主キーは `TMUX_PANE`。同一 tmux セッション内の複数 AI セッションを個別に追跡
 - **非侵入的**: セッションは手動起動。baton は `ps`、`tmux capture-pane`、Claude の JSONL/session-meta を使って後追い検出
-- **Hook 不要**: 状態はペインテキスト・子プロセス検出・JSONL フォールバックから導出。Claude Code hooks の設定は不要
+- **Hook はオプション**: 状態はデフォルトでペインテキスト・子プロセス検出・JSONL フォールバックから導出する。Claude Code hooks を任意で登録すると、承認待ち（Waiting）検知が確定的になり `session_id`/`transcript_path` も取得できる。未設定でも従来通り動作する
 
 ## 機能
 
@@ -190,7 +190,47 @@ auto_mode:
   model: "gpt-5.3-codex-spark"
   timeout: "20s"
   risk_threshold: "medium" # low, medium, high
+
+# Claude Code hooks（オプション）: PermissionRequest で承認待ちを確定し、
+# session_id/transcript_path を紐付ける。未設定・未接続時は従来のペイン判定にフォールバックする
+hook:
+  enabled: true
+  socket_path: "~/.local/state/baton/hook.sock"
+  idle_cancel_scans: 3
 ```
+
+### Claude Code hooks（オプション）
+
+baton は Claude Code hooks イベントを Unix domain socket 経由で受信し、承認待ち
+（`Waiting`）検知をペインテキストのヒューリスティックより確定的にできる（完全にオプション。
+未設定でも従来通り動作する）。
+
+1. 薄いラッパースクリプト（例: `~/.claude/hooks/baton-hook.sh`）を用意する:
+
+   ```sh
+   #!/bin/sh
+   command -v baton >/dev/null 2>&1 || exit 0
+   exec baton hook
+   ```
+
+   常駐 `baton` を独自の `--config` フラグ付きで起動する場合は、ラッパースクリプト内の
+   `baton hook` にも同じ `--config` フラグを渡す。指定が異なるとパス（特に socket
+   パス）が無言で食い違い、目に見えるエラーがないまま hook イベントが従来の
+   ペインテキスト判定へフォールバックする。例:
+
+   ```sh
+   exec baton hook --config /path/to/config.yaml
+   ```
+
+2. Claude Code の `settings.json` で以下 7 イベントに登録する: `PermissionRequest`、
+   `PreToolUse`、`PostToolUse`、`Stop`、`UserPromptSubmit`、`SessionStart`、
+   `SessionEnd`。各イベントの hook コマンドを上記ラッパーに向ける。
+3. 常駐 `baton` は `hook.socket_path`（既定 `~/.local/state/baton/hook.sock`）で待ち受け、
+   `PermissionRequest` を Waiting 確定として扱う（最優先。ペインテキスト判定では
+   上書きされない）。解除は後続イベント・ペイン消失・`idle_cancel_scans` 連続
+   Idle 判定（安全網）のいずれかで行う。
+4. `baton hook` は常に exit 0 を返し、baton 未起動時や `hook.enabled: false` でも
+   Claude Code の実行を妨げない。
 
 ## 仕組み
 

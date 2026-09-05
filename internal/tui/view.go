@@ -478,7 +478,13 @@ func (m Model) renderPreview(width, height int) string {
 		previewContent = strings.Join(trimmed, "\n")
 	}
 
-	return header + "\n" + infoLine + "\n" + separator + "\n" + previewContent
+	headerLines := []string{header, infoLine}
+	if s.HookWaiting {
+		// hook 検知の可視化用（検証期間中の暫定表示）。
+		headerLines = append(headerLines, dimStyle.Render("  source: hook"))
+	}
+	headerLines = append(headerLines, separator, previewContent)
+	return strings.Join(headerLines, "\n")
 }
 
 // renderStatusBar はセッション統計を描画する（ヘッダーと重複しないよう簡潔に）。

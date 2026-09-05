@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/yoshihiko555/baton/internal/config"
 	"github.com/yoshihiko555/baton/internal/core"
+	"github.com/yoshihiko555/baton/internal/hook"
 	"github.com/yoshihiko555/baton/internal/terminal"
 	"github.com/yoshihiko555/baton/internal/tui"
 )
@@ -25,6 +27,10 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "hook" {
+		os.Exit(hook.RunHookCommand(os.Args[2:], os.Stdin, os.Getenv))
+	}
+
 	if err := run(); err != nil {
 		log.Printf("error: %v", err)
 		os.Exit(1)
@@ -84,6 +90,9 @@ func run() error {
 	resolver := core.NewStateResolver(reader, cfg.ClaudeProjectsDir, cfg.SessionMetaDir, cfg.ScanInterval)
 	stateManager := core.NewStateManager(resolver)
 	stateManager.SetProcessScanner(processScanner)
+	// rescan は hook サーバーの PermissionRequest 受信時に即時スキャンをトリガーするチャネル。
+	// hook が無効/未起動でも安全に select できるよう常に生成する（誰も送信しなければ単に発火しない）。
+	rescan := make(chan struct{}, 1)
 	exporter := core.NewExporter(cfg.StatusOutputPath, core.ExporterConfig{
 		Format:    cfg.Statusbar.Format,
 		ToolIcons: cfg.Statusbar.ToolIcons,
@@ -107,12 +116,42 @@ func run() error {
 		}
 	}()
 
+	// hook サーバー起動: 常駐起動（--once / --exit ではない）かつ hook.enabled のときのみ listen する。
+	// listen に失敗しても baton の動作は継続する（従来の画面判定にフォールバック）。
+	if cfg.Hook.Enabled && !*once && !*exitOnJump {
+		hookStore := hook.NewStore(cfg.Hook.IdleCancelScans)
+		hookServer, err := hook.Listen(hook.ServerOptions{
+			SocketPath: cfg.Hook.SocketPath,
+			Store:      hookStore,
+			OnPermissionRequest: func() {
+				select {
+				case rescan <- struct{}{}:
+				default:
+				}
+			},
+		})
+		switch {
+		case err == nil:
+			stateManager.SetHookStore(hookStore)
+			defer func() {
+				if closeErr := hookServer.Close(); closeErr != nil {
+					log.Printf("hook server: close: %v", closeErr)
+				}
+			}()
+		case errors.Is(err, hook.ErrAlreadyListening):
+			log.Printf("hook server: %v (continuing without hook integration)", err)
+		default:
+			log.Printf("hook server: listen failed: %v (continuing without hook integration)", err)
+		}
+	}
+
 	// doScan は TUI / ヘッドレス / ワンショット の全モードで共有するスキャン関数。
 	doScan := func() error {
 		result := scanner.Scan(ctx)
 		if err := stateManager.UpdateFromScan(result); err != nil {
 			return err
 		}
+		stateManager.ApplyHookStates()
 		stateManager.RefineToolUseState(term)
 		return nil
 	}
@@ -150,11 +189,11 @@ func run() error {
 		}
 		summary := stateManager.Summary()
 		fmt.Printf("baton: found %d sessions across %d projects\n", summary.TotalSessions, len(stateManager.Projects()))
-		return runNoTUI(ctx, scanner, stateManager, term, cfg.ScanInterval, writeStatus)
+		return runNoTUI(ctx, scanner, stateManager, term, cfg.ScanInterval, writeStatus, rescan)
 	}
 
 	// TUI モード: stateManager は StateUpdater と StateReader を両方実装する。
-	model := tui.NewModel(scanner, stateManager, stateManager, term, cfg, *exitOnJump)
+	model := tui.NewModel(scanner, stateManager, stateManager, term, cfg, *exitOnJump, rescan)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 
 	go func() {
@@ -203,7 +242,7 @@ func normalizeVersion(value string) string {
 }
 
 // runNoTUI はヘッドレスモードのイベントループ。
-// ticker ごとにスキャンと JSON エクスポートを実行する。
+// ticker または hook rescan チャネルのいずれかでスキャンと JSON エクスポートを実行する。
 // スキャンエラー・エクスポートエラーはログ出力して継続する。
 func runNoTUI(
 	ctx context.Context,
@@ -212,24 +251,32 @@ func runNoTUI(
 	term terminal.Terminal,
 	interval time.Duration,
 	writeStatus func() error,
+	rescan <-chan struct{},
 ) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
+	runScan := func() {
+		result := scanner.Scan(ctx)
+		if err := sm.UpdateFromScan(result); err != nil {
+			log.Printf("scan error: %v", err)
+			return
+		}
+		sm.ApplyHookStates()
+		sm.RefineToolUseState(term)
+		if err := writeStatus(); err != nil {
+			log.Printf("export error: %v", err)
+		}
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			result := scanner.Scan(ctx)
-			if err := sm.UpdateFromScan(result); err != nil {
-				log.Printf("scan error: %v", err)
-				continue
-			}
-			sm.RefineToolUseState(term)
-			if err := writeStatus(); err != nil {
-				log.Printf("export error: %v", err)
-			}
+			runScan()
+		case <-rescan:
+			runScan()
 		}
 	}
 }

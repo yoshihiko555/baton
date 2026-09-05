@@ -70,6 +70,14 @@ func (s SessionState) String() string {
 	}
 }
 
+// StateSource の値。hook 経由の Waiting 確定が最優先、次点でペインテキスト判定、
+// 最後に JSONL 由来の初期値。Claude セッションにのみ設定される。
+const (
+	SourceHook  = "hook"
+	SourcePane  = "pane"
+	SourceJSONL = "jsonl"
+)
+
 // Session は監視対象となる1セッションの集約情報。
 type Session struct {
 	// v2 フィールド（プロセスベース監視）
@@ -87,6 +95,12 @@ type Session struct {
 	// 共通フィールド
 	State        SessionState
 	LastActivity time.Time
+
+	// Stage B (ADR-0015): Claude Code hooks 由来の相関情報・状態フラグ
+	SessionID      string // hook 由来の Claude Code session_id
+	TranscriptPath string // hook 由来の transcript JSONL パス
+	StateSource    string // "hook" / "pane" / "jsonl" のいずれか（Claude セッションのみ設定）
+	HookWaiting    bool   // true の間、RefineToolUseState は State を上書きしない（hook 由来の Waiting を保護）
 
 	// v1 互換フィールド（watcher / tui が参照。v2 完全移行後に削除予定）
 	ID          string `json:"id,omitempty"`
@@ -137,6 +151,7 @@ type Summary struct {
 // StateUpdater はスキャン結果から状態を更新するインターフェース。
 type StateUpdater interface {
 	UpdateFromScan(result ScanResult) error
+	ApplyHookStates()
 	RefineToolUseState(term terminal.Terminal)
 }
 
@@ -180,16 +195,19 @@ type ProjectOutput struct {
 
 // SessionOutput はセッション情報の出力 DTO。
 type SessionOutput struct {
-	PID          int    `json:"pid"`
-	Tool         string `json:"tool"`
-	State        string `json:"state"`
-	PaneID       string `json:"pane_id,omitempty"`
-	WorkingDir   string `json:"working_dir"`
-	Branch       string `json:"branch,omitempty"`
-	CurrentTool  string `json:"current_tool,omitempty"`
-	FirstPrompt  string `json:"first_prompt,omitempty"`
-	InputTokens  int    `json:"input_tokens,omitempty"`
-	OutputTokens int    `json:"output_tokens,omitempty"`
+	PID            int    `json:"pid"`
+	Tool           string `json:"tool"`
+	State          string `json:"state"`
+	PaneID         string `json:"pane_id,omitempty"`
+	WorkingDir     string `json:"working_dir"`
+	Branch         string `json:"branch,omitempty"`
+	CurrentTool    string `json:"current_tool,omitempty"`
+	FirstPrompt    string `json:"first_prompt,omitempty"`
+	InputTokens    int    `json:"input_tokens,omitempty"`
+	OutputTokens   int    `json:"output_tokens,omitempty"`
+	SessionID      string `json:"session_id,omitempty"`
+	TranscriptPath string `json:"transcript_path,omitempty"`
+	StateSource    string `json:"state_source,omitempty"`
 }
 
 // SummaryOutput は集計情報の出力 DTO。

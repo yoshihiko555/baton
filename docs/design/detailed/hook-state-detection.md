@@ -25,7 +25,7 @@
 
 ```
 baton hook (CLIサブコマンド, 短命プロセス)
-  → Unix domain socket (/tmp/baton-hook.sock)
+  → Unix domain socket (~/.local/state/baton/hook.sock)
     → 常駐 baton (HookServer)
        → HookStateStore (pane_id -> HookState)
           → StateManager.ApplyHookStates (doScan 内で呼び出し)
@@ -43,7 +43,7 @@ baton hook (CLIサブコマンド, 短命プロセス)
 |------|------|
 | 入力 | stdin から Claude Code hook の JSON（1 件） |
 | 付加情報 | 環境変数 `$TMUX_PANE` を読み取り `pane_id` として JSON に付加する |
-| 送信先 | `hook.socket_path`（既定 `/tmp/baton-hook.sock`） |
+| 送信先 | `hook.socket_path`（既定 `~/.local/state/baton/hook.sock`） |
 | 送信形式 | 改行区切り JSON（1 行 1 イベント） |
 | タイムアウト | 接続確立を含め 1 秒以内に完了しない場合は送信を諦める |
 | 終了コード | 常に `0`（Claude Code をブロックしない） |
@@ -220,7 +220,7 @@ log_file: ~/.local/state/baton/baton.log
 
 hook:
   enabled: true
-  socket_path: /tmp/baton-hook.sock
+  socket_path: ~/.local/state/baton/hook.sock
   idle_cancel_scans: 3
 ```
 
@@ -228,7 +228,7 @@ hook:
 |------|-----|--------|------|
 | `log_file` | string | `~/.local/state/baton/baton.log` | デバッグログの出力先。証拠採取フェーズ（後述）で使用 |
 | `hook.enabled` | bool | `true` | `false` で hook 連携を無効化し、`baton hook` は常に exit 0 を返す |
-| `hook.socket_path` | string | `/tmp/baton-hook.sock` | Unix domain socket のパス |
+| `hook.socket_path` | string | `~/.local/state/baton/hook.sock` | Unix domain socket のパス |
 | `hook.idle_cancel_scans` | int | `3` | Waiting 解除の安全網となる Idle 連続スキャン回数 |
 
 ---
@@ -327,7 +327,7 @@ hook:
 | コンポーネント | 役割 |
 |-------------|------|
 | `internal/core/state.go` (`StateManager`) | `ApplyHookStates` の呼び出し元。Session への反映 |
-| `internal/core` (新規 `HookServer` / `HookStateStore`) | socket リッスン、hook 状態の保持 |
+| `internal/hook`（`Server` / `Store`） | socket リッスン、hook 状態の保持 |
 | `main.go` | `baton hook` サブコマンド追加、常駐起動時の `HookServer` 起動 |
 | `internal/config` (`Config.Hook`) | `hook.enabled` / `hook.socket_path` / `hook.idle_cancel_scans` |
 | dotfiles（別リポジトリ） | `~/.claude/hooks/baton-hook.sh`（`command -v baton` 不在なら exit 0 の薄いラッパー）、`claude/settings.json` / `claude-work/settings.json`（nix 管理の実ファイル。直接編集禁止）への hook 登録 |

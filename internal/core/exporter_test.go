@@ -117,3 +117,60 @@ func TestExporterwriteAtomicJSONInvalidPath(t *testing.T) {
 		t.Fatalf("expected error for invalid destination path, got nil")
 	}
 }
+
+func TestToSessionOutputHookFieldsJSON(t *testing.T) {
+	tests := []struct {
+		name           string
+		session        Session
+		wantHookFields bool
+	}{
+		{
+			name: "hook fields set",
+			session: Session{
+				SessionID:      "sess-1",
+				TranscriptPath: "/path/to/transcript.jsonl",
+				StateSource:    SourceHook,
+			},
+			wantHookFields: true,
+		},
+		{
+			name:           "hook fields omitted when empty",
+			session:        Session{},
+			wantHookFields: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			content, err := json.Marshal(toSessionOutput(tc.session))
+			if err != nil {
+				t.Fatalf("json.Marshal failed: %v", err)
+			}
+
+			var payload map[string]any
+			if err := json.Unmarshal(content, &payload); err != nil {
+				t.Fatalf("json.Unmarshal failed: %v", err)
+			}
+
+			if !tc.wantHookFields {
+				for _, key := range []string{"session_id", "transcript_path", "state_source"} {
+					if _, ok := payload[key]; ok {
+						t.Errorf("unexpected key %q in JSON: %s", key, content)
+					}
+				}
+				return
+			}
+
+			want := map[string]string{
+				"session_id":      "sess-1",
+				"transcript_path": "/path/to/transcript.jsonl",
+				"state_source":    SourceHook,
+			}
+			for key, value := range want {
+				if got := payload[key]; got != value {
+					t.Errorf("%s = %#v, want %q", key, got, value)
+				}
+			}
+		})
+	}
+}

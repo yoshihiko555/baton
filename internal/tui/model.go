@@ -57,7 +57,11 @@ type ScanResultMsg struct {
 	Projects []core.Project
 	Summary  core.Summary
 	Panes    []terminal.Pane
+	Periodic bool // true: 定期 tick から発行された（tick を再アームしてよい）。false: hook rescan から発行された。
 }
+
+// ScanRequestMsg は hook 由来の即時再スキャン要求（rescan channel 経由）を通知する。
+type ScanRequestMsg struct{}
 
 // PreviewResultMsg はプレビューテキスト取得完了時に送られる。
 type PreviewResultMsg struct {
@@ -105,6 +109,7 @@ type Model struct {
 	stateUpdater core.StateUpdater
 	stateReader  core.StateReader
 	terminal     terminal.Terminal
+	rescan       <-chan struct{} // hook 由来の即時再スキャン要求チャネル（nil なら未使用）
 	config       config.Config
 	theme        Theme
 
@@ -158,6 +163,7 @@ func NewModel(
 	term terminal.Terminal,
 	cfg config.Config,
 	exitOnJump bool,
+	rescan <-chan struct{},
 ) Model {
 	ti := textinput.New()
 	ti.CharLimit = 500
@@ -172,6 +178,7 @@ func NewModel(
 		config:            cfg,
 		theme:             ResolveTheme(cfg.Theme),
 		exitOnJump:        exitOnJump,
+		rescan:            rescan,
 		textInput:         ti,
 		filterInput:       fti,
 		autoApprove:       make(map[string]bool),
@@ -183,7 +190,7 @@ func NewModel(
 
 // Init は tea.Model の初期コマンドを返す。
 func (m Model) Init() tea.Cmd {
-	return tickCmd(m.config.ScanInterval)
+	return tea.Batch(tickCmd(m.config.ScanInterval), waitRescanCmd(m.rescan))
 }
 
 func tickCmd(interval time.Duration) tea.Cmd {
@@ -204,18 +211,33 @@ func doScanCmd(
 	sm core.StateUpdater,
 	sr core.StateReader,
 	term terminal.Terminal,
+	periodic bool,
 ) tea.Cmd {
 	return func() tea.Msg {
 		result := scanner.Scan(ctx)
 		if err := sm.UpdateFromScan(result); err != nil {
 			return ErrMsg(err)
 		}
+		sm.ApplyHookStates()
 		sm.RefineToolUseState(term)
 		return ScanResultMsg{
 			Projects: sr.Projects(),
 			Summary:  sr.Summary(),
 			Panes:    sr.Panes(),
+			Periodic: periodic,
 		}
+	}
+}
+
+// waitRescanCmd は rescan channel から1件受信するまで待機し、ScanRequestMsg を返す。
+// ch が nil の場合は何もしない（hook 連携なし、または --once/--exit 実行時）。
+func waitRescanCmd(ch <-chan struct{}) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		<-ch
+		return ScanRequestMsg{}
 	}
 }
 

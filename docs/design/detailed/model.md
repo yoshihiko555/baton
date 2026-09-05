@@ -376,3 +376,32 @@ Scanner ──Scan()──> ScanResult
 | イベント駆動 | `WatchEvent` チャネル | `ScanResult` 全量更新 |
 | JSON 変換 | `MarshalJSON` on `SessionState` | DTO 層のみ |
 | 集計 | `Project.ActiveCount` | `Summary` 型 |
+
+---
+
+## 9. Stage B 追加フィールド（ADR-0015, Claude Code hooks 連携）
+
+`docs/adr/0015-hook-based-waiting-detection.md` の実装（PR2）に伴い、`Session` / `SessionOutput` に以下を追加した。
+
+### Session（追加フィールド）
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `SessionID` | `string` | hook (`PermissionRequest`/`SessionStart`) 由来の Claude Code session_id |
+| `TranscriptPath` | `string` | hook 由来の transcript JSONL パス |
+| `StateSource` | `string` | `"hook"` / `"pane"` / `"jsonl"` のいずれか。Claude セッションにのみ設定される |
+| `HookWaiting` | `bool` | true の間、`RefineToolUseState` は `State` を上書きしない（hook 由来の Waiting を保護するフラグ） |
+
+### SessionOutput（追加フィールド、全て `omitempty`）
+
+| フィールド | JSON キー |
+|-----------|-----------|
+| `SessionID` | `session_id` |
+| `TranscriptPath` | `transcript_path` |
+| `StateSource` | `state_source` |
+
+`StatusOutput.Version` は `2` のまま据え置き（フィールド追加のみで既存フィールドは変更しないため）。
+
+### StateUpdater（メソッド追加）
+
+`ApplyHookStates()`（引数なし）を追加。`UpdateFromScan` の直後・`RefineToolUseState` の前に呼び出す。詳細な処理フローは `state-manager.md` の「ApplyHookStates（Stage B, ADR-0015）」を参照。
