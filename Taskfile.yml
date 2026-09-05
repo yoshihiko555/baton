@@ -44,6 +44,11 @@ tasks:
       - mkdir -p "{{.LOCAL_BIN_DIR}}"
       - cp "./{{.BINARY}}" "{{.LOCAL_BIN_DIR}}/{{.BINARY}}"
       - chmod +x "{{.LOCAL_BIN_DIR}}/{{.BINARY}}"
+      # macOS は cp で上書きした実行ファイルを署名キャッシュ不一致で SIGKILL するため再署名が必須
+      - |
+        if [ "$(uname)" = "Darwin" ]; then
+          codesign -f -s - "{{.LOCAL_BIN_DIR}}/{{.BINARY}}"
+        fi
 
   verify-local:
     desc: ローカル配置済み baton のバージョン確認
@@ -51,7 +56,12 @@ tasks:
       - "{{.LOCAL_BIN_DIR}}/{{.BINARY}} --version"
 
   sync-local:
-    desc: build + install-local + ハッシュ比較
+    desc: build + install-local + 署名検証とバージョン確認
     deps: [build, install-local]
     cmds:
-      - shasum "./{{.BINARY}}" "{{.LOCAL_BIN_DIR}}/{{.BINARY}}"
+      # codesign 後はハッシュがビルド成果物と一致しないため、署名検証とバージョン表示で確認する
+      - |
+        if [ "$(uname)" = "Darwin" ]; then
+          codesign -v "{{.LOCAL_BIN_DIR}}/{{.BINARY}}"
+        fi
+      - "{{.LOCAL_BIN_DIR}}/{{.BINARY}} --version"
