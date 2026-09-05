@@ -68,7 +68,7 @@ func newTUITestModel(exitOnJump bool) (tui.Model, *tuiMockStateReader, *tuiMockT
 		ScanInterval: time.Second,
 	}
 
-	model := tui.NewModel(scanner, updater, reader, term, cfg, exitOnJump, nil)
+	model := tui.NewModel(scanner, updater, reader, term, cfg, exitOnJump, nil, nil)
 	return model, reader, term
 }
 

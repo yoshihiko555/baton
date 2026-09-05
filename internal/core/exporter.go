@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,8 +13,9 @@ import (
 
 // Exporter は StatusOutput をアトミックに JSON ファイルへ書き出す。
 type Exporter struct {
-	destPath string
-	cfg      ExporterConfig
+	destPath     string
+	cfg          ExporterConfig
+	hookListener bool
 }
 
 // ExporterConfig は Exporter の動作を制御する設定。
@@ -27,6 +29,12 @@ type ExporterConfig struct {
 // NewExporter は destPath への書き出しを行う Exporter を生成する。
 func NewExporter(destPath string, cfg ExporterConfig) *Exporter {
 	return &Exporter{destPath: destPath, cfg: cfg}
+}
+
+// SetHookListener marks whether this instance is actively listening on the hook socket.
+// Only the resident instance that successfully bound the hook socket should set this to true.
+func (e *Exporter) SetHookListener(v bool) {
+	e.hookListener = v
 }
 
 // Write は StateReader から状態を読み取り、DTO に変換してアトミックに書き出す。
@@ -48,12 +56,31 @@ func (e *Exporter) Write(sr StateReader) error {
 	status := StatusOutput{
 		Version:         2,
 		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		HookListener:    e.hookListener,
 		Projects:        projects,
 		Summary:         summary,
 		FormattedStatus: formatted,
 	}
 
 	return writeAtomicJSON(status, e.destPath)
+}
+
+// ReadStatus reads and decodes a status JSON file previously written by Exporter.Write.
+// If the file does not exist, the returned error wraps os.ErrNotExist (use errors.Is to check).
+func ReadStatus(path string) (StatusOutput, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return StatusOutput{}, fmt.Errorf("status file %q does not exist: %w", path, err)
+		}
+		return StatusOutput{}, fmt.Errorf("read status %q: %w", path, err)
+	}
+
+	var status StatusOutput
+	if err := json.Unmarshal(data, &status); err != nil {
+		return StatusOutput{}, fmt.Errorf("decode status %q: %w", path, err)
+	}
+	return status, nil
 }
 
 // toProjectOutput は Project ドメイン型を ProjectOutput DTO に変換する。

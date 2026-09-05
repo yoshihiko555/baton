@@ -75,6 +75,9 @@ func TestDefault(t *testing.T) {
 	if got.Hook.IdleCancelScans != 3 {
 		t.Fatalf("unexpected Hook.IdleCancelScans: got %d", got.Hook.IdleCancelScans)
 	}
+	if got.Hook.StatusMaxAge != 10*time.Second {
+		t.Fatalf("unexpected Hook.StatusMaxAge: got %v", got.Hook.StatusMaxAge)
+	}
 }
 
 func TestLoadValidYAML(t *testing.T) {
@@ -104,6 +107,7 @@ hook:
   enabled: false
   socket_path: ~/custom/hook.sock
   idle_cancel_scans: 5
+  status_max_age: 30s
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
@@ -169,6 +173,9 @@ hook:
 	}
 	if got.Hook.IdleCancelScans != 5 {
 		t.Fatalf("unexpected Hook.IdleCancelScans: got %d", got.Hook.IdleCancelScans)
+	}
+	if got.Hook.StatusMaxAge != 30*time.Second {
+		t.Fatalf("unexpected Hook.StatusMaxAge: got %v", got.Hook.StatusMaxAge)
 	}
 }
 
@@ -245,6 +252,42 @@ func TestHookIdleCancelScansExplicitZero(t *testing.T) {
 	}
 	if got.Hook.SocketPath != filepath.Join(home, ".local/state/baton/hook.sock") {
 		t.Fatalf("unexpected Hook.SocketPath: got %q", got.Hook.SocketPath)
+	}
+}
+
+func TestHookStatusMaxAge(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    time.Duration
+	}{
+		{
+			name:    "default when omitted",
+			content: "hook:\n  enabled: true\n",
+			want:    10 * time.Second,
+		},
+		{
+			name:    "explicit override",
+			content: "hook:\n  status_max_age: 30s\n",
+			want:    30 * time.Second,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+				t.Fatalf("WriteFile failed: %v", err)
+			}
+
+			got, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load returned error: %v", err)
+			}
+			if got.Hook.StatusMaxAge != tc.want {
+				t.Fatalf("Hook.StatusMaxAge = %v, want %v", got.Hook.StatusMaxAge, tc.want)
+			}
+		})
 	}
 }
 

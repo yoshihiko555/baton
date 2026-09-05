@@ -155,10 +155,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case TickMsg:
-		return m, doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader, m.terminal, true)
+		return m, doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader, m.terminal, true, m.afterScan)
 	case ScanRequestMsg:
 		return m, tea.Batch(
-			doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader, m.terminal, false),
+			doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader, m.terminal, false, m.afterScan),
 			waitRescanCmd(m.rescan),
 		)
 	case ScanResultMsg:

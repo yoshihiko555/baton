@@ -180,6 +180,7 @@ type Scanner interface {
 type StatusOutput struct {
 	Version         int             `json:"version"`
 	Timestamp       string          `json:"timestamp"`
+	HookListener    bool            `json:"hook_listener"`
 	Projects        []ProjectOutput `json:"projects"`
 	Summary         SummaryOutput   `json:"summary"`
 	FormattedStatus string          `json:"formatted_status"`

@@ -198,6 +198,7 @@ hook:
   enabled: true
   socket_path: "~/.local/state/baton/hook.sock"
   idle_cancel_scans: 3
+  status_max_age: 10s
 ```
 
 ### Claude Code hooks (optional)
@@ -206,6 +207,10 @@ baton can optionally receive Claude Code hook events over a Unix domain socket t
 permission-prompt (`Waiting`) detection exactly, instead of relying solely on pane-text
 heuristics. This is entirely opt-in — without hooks registered, baton behaves exactly as
 before.
+
+tmux status bar (`--once`) and popup (`--exit`) invocations reuse hook-derived `Waiting`
+from the resident instance's status JSON. If the resident stops, it expires after
+`hook.status_max_age` (default `10s`).
 
 1. Add a thin wrapper script, e.g. `~/.claude/hooks/baton-hook.sh`:
 
