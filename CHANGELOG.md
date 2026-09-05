@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - 自動承認モードに安全判定を追加し、低リスク操作のみ自動承認し、危険・不明・判定失敗時は停止表示に留めるようにした
 - `auto_mode` 設定を追加し、Codex exec reviewer、モデル、タイムアウト、リスク閾値を指定できるようにした
+- `log_file` 設定（既定 `~/.local/state/baton/baton.log`）を追加し、TUI 実行中もログをファイルへ出力するようにした。`log_level: debug` ではペイン末尾テキストを診断ログへ記録するため、機微情報に注意が必要
 
 ### Changed
 

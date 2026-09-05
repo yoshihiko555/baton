@@ -20,6 +20,7 @@ baton プロジェクトのアーキテクチャ上の意思決定を記録す�
 | [ADR-0012](0012-attention-first-stable-session-list.md) | Attention セクションと安定順セッション一覧 | 2026-04-19 | Accepted |
 | [ADR-0013](0013-release-version-build-metadata.md) | リリースバージョンをビルドメタデータから解決する | 2026-07-06 | Accepted |
 | [ADR-0014](0014-safe-auto-mode-reviewer.md) | 自動承認を安全判定 reviewer 経由にする | 2026-07-07 | Accepted |
+| [ADR-0015](0015-hook-based-waiting-detection.md) | Claude Code hooks による Waiting 検知の確定と session 相関 | 2026-09-05 | Accepted |
 
 ## ADR の書き方
 
