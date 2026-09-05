@@ -197,6 +197,7 @@ hook:
   enabled: true
   socket_path: "~/.local/state/baton/hook.sock"
   idle_cancel_scans: 3
+  status_max_age: 10s
 ```
 
 ### Claude Code hooks（オプション）
@@ -204,6 +205,10 @@ hook:
 baton は Claude Code hooks イベントを Unix domain socket 経由で受信し、承認待ち
 （`Waiting`）検知をペインテキストのヒューリスティックより確定的にできる（完全にオプション。
 未設定でも従来通り動作する）。
+
+tmux ステータスバー（`--once`）とポップアップ（`--exit`）も、常駐インスタンスが書いた
+status JSON 経由で hook 由来の `Waiting` を引き継ぐ。常駐停止後は
+`hook.status_max_age`（既定 `10s`）を超えると失効する。
 
 1. 薄いラッパースクリプト（例: `~/.claude/hooks/baton-hook.sh`）を用意する:
 

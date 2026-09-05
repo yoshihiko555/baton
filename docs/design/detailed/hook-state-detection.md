@@ -193,15 +193,35 @@ flowchart TD
 
 ## status JSON への反映
 
-`/tmp/baton-status.json` の各セッション（`SessionOutput`）に以下を追加する。version は `2` のまま据え置き（フィールド追加のみ、既存フィールドは変更しない）。
+`/tmp/baton-status.json` のトップレベル（`StatusOutput`）および各セッション（`SessionOutput`）に以下を追加する。version は `2` のまま据え置き（フィールド追加のみ、既存フィールドは変更しない）。
 
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
 | `session_id` | string | hook 由来の Claude Code session ID（未取得時は省略） |
 | `transcript_path` | string | hook 由来の JSONL パス（未取得時は省略） |
 | `state_source` | string | `hook` / `pane` / `jsonl` のいずれか。状態の決定要因を示す |
+| `hook_listener` | bool | このインスタンスが hook socket を listen しているか。常駐のみ true。 |
 
 `state_source` の決定順は「優先順位表」と同一（hook → pane → jsonl）。
+
+---
+
+## 非常駐インスタンスへの共有（status JSON overlay）
+
+`--once` / `--exit` のような非常駐実行は hook socket を listen しない。その代わり、常駐
+baton が書いた status JSON を読み、`hook_listener=true`、`version==2`、かつ `timestamp` が
+`hook.status_max_age` 以内の場合だけ overlay 元として採用する。非常駐側の Claude セッションと
+`pane_id` で突き合わせ、`state_source="hook"` のセッションを `Waiting` に上書きする。
+`session_id` / `transcript_path` は空でなければ `state_source` に関係なく転記する。
+
+自己増殖を防ぐため、非常駐インスタンス自身が書いた `hook_listener=false` の status JSON は、
+次回実行時の overlay 元として採用しない。常駐が停止して status JSON の更新が止まった場合も、
+`hook.status_max_age` を超えた時点で失効する。
+
+`hook.Listen` が `hook.ErrAlreadyListening` を返した場合、そのインスタンスは読み取り専用の
+overlay 利用側となり、TUI と `--no-tui` のどちらでも共有 status JSON を書き込まない。
+それ以外の listen 失敗では `SetHookStatusOverlay` による読み取りへフォールバックしつつ、競合する
+常駐インスタンスは存在しない前提で、通常どおり status JSON への書き込みを継続する。
 
 ---
 
@@ -222,6 +242,7 @@ hook:
   enabled: true
   socket_path: ~/.local/state/baton/hook.sock
   idle_cancel_scans: 3
+  status_max_age: 10s
 ```
 
 | キー | 型 | 既定値 | 説明 |
@@ -230,6 +251,7 @@ hook:
 | `hook.enabled` | bool | `true` | `false` で hook 連携を無効化し、`baton hook` は常に exit 0 を返す |
 | `hook.socket_path` | string | `~/.local/state/baton/hook.sock` | Unix domain socket のパス |
 | `hook.idle_cancel_scans` | int | `3` | Waiting 解除の安全網となる Idle 連続スキャン回数 |
+| `hook.status_max_age` | duration | `10s` | 非常駐実行が常駐 status JSON を overlay 元として扱う最大経過時間 |
 
 ---
 

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/yoshihiko555/baton/internal/hook"
 	"github.com/yoshihiko555/baton/internal/terminal"
@@ -44,15 +45,17 @@ func resolveProjectKey(proc DetectedProcess, paneWorkspaceMap map[string]string)
 // StateManager はスキャン結果をプロジェクト/セッション単位に集約するコンポーネント。
 // v2 ではポーリング + スナップショット照合方式を採用し、Watcher への依存を排除した。
 type StateManager struct {
-	resolver       *StateResolver    // JSONL 解析・状態判定の委譲先
-	processScanner *ProcessScanner   // Codex 子プロセス検査用
-	hookStore      *hook.Store       // Claude Code hooks 由来の Waiting 状態ストア（nil なら hook 連携なし）
-	projects       []Project         // 最新プロジェクト一覧スナップショット（ソート済み）
-	summary        Summary           // 最新集計キャッシュ
-	panes          []terminal.Pane   // 最新ペイン一覧（Ambiguous セッション解決用）
-	prevPIDSet     map[int]bool      // 前回スキャンの PID セット（差分検出用）
-	lastDiagKey    map[string]string // ペインごとの直近診断キー（重複ログ抑制用）
-	mu             sync.RWMutex      // 読み書き保護
+	resolver                *StateResolver  // JSONL 解析・状態判定の委譲先
+	processScanner          *ProcessScanner // Codex 子プロセス検査用
+	hookStore               *hook.Store     // Claude Code hooks 由来の Waiting 状態ストア（nil なら hook 連携なし）
+	hookStatusOverlayPath   string
+	hookStatusOverlayMaxAge time.Duration
+	projects                []Project         // 最新プロジェクト一覧スナップショット（ソート済み）
+	summary                 Summary           // 最新集計キャッシュ
+	panes                   []terminal.Pane   // 最新ペイン一覧（Ambiguous セッション解決用）
+	prevPIDSet              map[int]bool      // 前回スキャンの PID セット（差分検出用）
+	lastDiagKey             map[string]string // ペインごとの直近診断キー（重複ログ抑制用）
+	mu                      sync.RWMutex      // 読み書き保護
 }
 
 // NewStateManager は StateManager を初期化して返す。
@@ -76,6 +79,17 @@ func (s *StateManager) SetHookStore(store *hook.Store) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.hookStore = store
+}
+
+// SetHookStatusOverlay configures StateManager to read a status JSON file written by a
+// resident baton instance and overlay hook-derived Waiting state onto local Claude sessions
+// when this instance itself has no hookStore (i.e. is not the hook socket listener).
+// path == "" disables the overlay (no-op).
+func (s *StateManager) SetHookStatusOverlay(path string, maxAge time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hookStatusOverlayPath = path
+	s.hookStatusOverlayMaxAge = maxAge
 }
 
 // UpdateFromScan はスキャン結果から状態を更新する（StateUpdater 実装）。
@@ -200,6 +214,18 @@ func (s *StateManager) UpdateFromScan(result ScanResult) error {
 //     （RefineToolUseState が pane 判定に成功すれば SourcePane に更新される）
 //  4. Claude 以外のセッションの StateSource は変更しない（空のまま）
 func (s *StateManager) ApplyHookStates() {
+	s.mu.RLock()
+	useOverlay := s.hookStore == nil
+	overlayPath := s.hookStatusOverlayPath
+	overlayMaxAge := s.hookStatusOverlayMaxAge
+	s.mu.RUnlock()
+
+	var overlayStatus StatusOutput
+	haveOverlay := false
+	if useOverlay {
+		overlayStatus, haveOverlay = loadHookStatusOverlay(overlayPath, overlayMaxAge)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -238,7 +264,84 @@ func (s *StateManager) ApplyHookStates() {
 		}
 	}
 
+	if s.hookStore == nil && haveOverlay {
+		s.applyHookStatusOverlayLocked(overlayStatus)
+	}
+
 	s.summary = calcSummary(s.projects)
+}
+
+// loadHookStatusOverlay は status JSON を読み込み、overlay 元として有効な場合に返す。
+func loadHookStatusOverlay(path string, maxAge time.Duration) (StatusOutput, bool) {
+	if path == "" {
+		return StatusOutput{}, false
+	}
+	status, err := ReadStatus(path)
+	if err != nil {
+		debugf("hook status overlay: read %q failed: %v", path, err)
+		return StatusOutput{}, false
+	}
+	if !status.HookListener {
+		debugf("hook status overlay: %q has hook_listener=false, skipping", path)
+		return StatusOutput{}, false
+	}
+	if status.Version != 2 {
+		debugf("hook status overlay: %q has unsupported version %d, skipping", path, status.Version)
+		return StatusOutput{}, false
+	}
+	ts, err := time.Parse(time.RFC3339, status.Timestamp)
+	if err != nil {
+		debugf("hook status overlay: %q has unparsable timestamp %q: %v", path, status.Timestamp, err)
+		return StatusOutput{}, false
+	}
+	age := time.Since(ts)
+	if age < 0 {
+		debugf("hook status overlay: %q has a future timestamp (age=%s), skipping", path, age)
+		return StatusOutput{}, false
+	}
+	if maxAge > 0 && age > maxAge {
+		debugf("hook status overlay: %q is stale (age=%s > max=%s), skipping", path, age, maxAge)
+		return StatusOutput{}, false
+	}
+
+	return status, true
+}
+
+// applyHookStatusOverlayLocked は検証済みの status をセッションへ反映する。
+// 呼び出し元が事前にファイル I/O と鮮度検証を完了し、s.mu を保持していること。
+func (s *StateManager) applyHookStatusOverlayLocked(status StatusOutput) {
+	byPane := make(map[string]SessionOutput)
+	for _, p := range status.Projects {
+		for _, so := range p.Sessions {
+			if so.PaneID == "" {
+				continue
+			}
+			byPane[so.PaneID] = so
+		}
+	}
+
+	for i := range s.projects {
+		for _, sess := range s.projects[i].Sessions {
+			if sess == nil || sess.Tool != ToolClaude || sess.PaneID == "" {
+				continue
+			}
+			so, ok := byPane[sess.PaneID]
+			if !ok {
+				continue
+			}
+			if so.SessionID != "" {
+				sess.SessionID = so.SessionID
+			}
+			if so.TranscriptPath != "" {
+				sess.TranscriptPath = so.TranscriptPath
+			}
+			if so.StateSource == SourceHook {
+				sess.State = Waiting
+				sess.HookWaiting = true
+				sess.StateSource = SourceHook
+			}
+		}
+	}
 }
 
 // buildSessionFromStates はプロセス情報と事前解決済みの状態分布からセッションを構築する。

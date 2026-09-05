@@ -42,11 +42,13 @@ type AutoModeConfig struct {
 
 // HookConfig は Claude Code hooks の受信設定を表す。
 type HookConfig struct {
-	Enabled            bool   `yaml:"enabled"`
-	SocketPath         string `yaml:"socket_path"`
-	IdleCancelScans    int    `yaml:"idle_cancel_scans"`
+	Enabled            bool          `yaml:"enabled"`
+	SocketPath         string        `yaml:"socket_path"`
+	IdleCancelScans    int           `yaml:"idle_cancel_scans"`
+	StatusMaxAge       time.Duration `yaml:"status_max_age"`
 	enabledSet         bool
 	idleCancelScansSet bool
+	statusMaxAgeSet    bool
 }
 
 // UnmarshalYAML はスカラー文字列をプリセット名として扱う。
@@ -85,9 +87,10 @@ func (a *AutoModeConfig) UnmarshalYAML(value *yaml.Node) error {
 
 func (h *HookConfig) UnmarshalYAML(value *yaml.Node) error {
 	type rawHookConfig struct {
-		Enabled         *bool  `yaml:"enabled"`
-		SocketPath      string `yaml:"socket_path"`
-		IdleCancelScans *int   `yaml:"idle_cancel_scans"`
+		Enabled         *bool          `yaml:"enabled"`
+		SocketPath      string         `yaml:"socket_path"`
+		IdleCancelScans *int           `yaml:"idle_cancel_scans"`
+		StatusMaxAge    *time.Duration `yaml:"status_max_age"`
 	}
 	var raw rawHookConfig
 	if err := value.Decode(&raw); err != nil {
@@ -101,6 +104,10 @@ func (h *HookConfig) UnmarshalYAML(value *yaml.Node) error {
 	if raw.IdleCancelScans != nil {
 		h.IdleCancelScans = *raw.IdleCancelScans
 		h.idleCancelScansSet = true
+	}
+	if raw.StatusMaxAge != nil {
+		h.StatusMaxAge = *raw.StatusMaxAge
+		h.statusMaxAgeSet = true
 	}
 	return nil
 }
@@ -153,6 +160,7 @@ func Default() Config {
 			Enabled:         true,
 			SocketPath:      "~/.local/state/baton/hook.sock",
 			IdleCancelScans: 3,
+			StatusMaxAge:    10 * time.Second,
 		},
 	}
 }
@@ -305,6 +313,9 @@ func mergeHookConfig(base *HookConfig, override HookConfig) {
 	}
 	if override.idleCancelScansSet {
 		base.IdleCancelScans = override.IdleCancelScans
+	}
+	if override.statusMaxAgeSet {
+		base.StatusMaxAge = override.StatusMaxAge
 	}
 }
 

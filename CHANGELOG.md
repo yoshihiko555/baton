@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `auto_mode` 設定を追加し、Codex exec reviewer、モデル、タイムアウト、リスク閾値を指定できるようにした
 - `log_file` 設定（既定 `~/.local/state/baton/baton.log`）を追加し、TUI 実行中もログをファイルへ出力するようにした。`log_level: debug` ではペイン末尾テキストを診断ログへ記録するため、機微情報に注意が必要
 - Claude Code hooks による承認待ち検知を追加。`baton hook` サブコマンドと `hook` 設定（`enabled` / `socket_path`（既定 `~/.local/state/baton/hook.sock`） / `idle_cancel_scans`）で有効化でき、未登録時は従来通りペインテキスト判定で動作する
+- TUI 常駐が status JSON を毎スキャン書き出すようになり、`--once` / `--exit` も hook 由来の承認待ちを反映するようにした（`hook.status_max_age` で有効期限を設定可能）。
 
 ### Changed
 
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `Waiting / Working / Idle` のサマリと、最大 5 件の `Waiting` セッションを上部 `Attention` セクションに表示し、`w` で `Waiting` を巡回できるようにした
 - `t` の自動承認は無条件 Enter 送信ではなく、ルールベース判定と Codex Spark reviewer を通過した `allow` のみ Enter を送信するようにした
 - `/tmp/baton-status.json` の各セッションに `session_id` / `transcript_path` / `state_source`（`hook`/`pane`/`jsonl`）を追加（version は 2 のまま）
+- status JSON に `hook_listener` フィールドを追加した。
 
 ### Fixed
 

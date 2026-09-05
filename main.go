@@ -116,9 +116,15 @@ func run() error {
 		}
 	}()
 
-	// hook サーバー起動: 常駐起動（--once / --exit ではない）かつ hook.enabled のときのみ listen する。
-	// listen に失敗しても baton の動作は継続する（従来の画面判定にフォールバック）。
-	if cfg.Hook.Enabled && !*once && !*exitOnJump {
+	// hook サーバー起動: 常駐起動のみ listen し、非常駐または listen 失敗時は
+	// 常駐インスタンスが書いた status JSON の hook 状態を参照する。
+	hookAlreadyListening := false
+	switch {
+	case !cfg.Hook.Enabled:
+		// hook 連携が無効なら overlay も使用しない。
+	case *once || *exitOnJump:
+		stateManager.SetHookStatusOverlay(cfg.StatusOutputPath, cfg.Hook.StatusMaxAge)
+	default:
 		hookStore := hook.NewStore(cfg.Hook.IdleCancelScans)
 		hookServer, err := hook.Listen(hook.ServerOptions{
 			SocketPath: cfg.Hook.SocketPath,
@@ -133,6 +139,7 @@ func run() error {
 		switch {
 		case err == nil:
 			stateManager.SetHookStore(hookStore)
+			exporter.SetHookListener(true)
 			defer func() {
 				if closeErr := hookServer.Close(); closeErr != nil {
 					log.Printf("hook server: close: %v", closeErr)
@@ -140,8 +147,11 @@ func run() error {
 			}()
 		case errors.Is(err, hook.ErrAlreadyListening):
 			log.Printf("hook server: %v (continuing without hook integration)", err)
+			hookAlreadyListening = true
+			stateManager.SetHookStatusOverlay(cfg.StatusOutputPath, cfg.Hook.StatusMaxAge)
 		default:
 			log.Printf("hook server: listen failed: %v (continuing without hook integration)", err)
+			stateManager.SetHookStatusOverlay(cfg.StatusOutputPath, cfg.Hook.StatusMaxAge)
 		}
 	}
 
@@ -156,9 +166,9 @@ func run() error {
 		return nil
 	}
 
-	writeStatus := func() error {
+	writeStatus := guardWriteStatus(func() error {
 		return exporter.Write(stateManager)
-	}
+	}, hookAlreadyListening, cfg.StatusOutputPath)
 
 	// ワンショットモード: 1 回だけスキャンして JSON を書き出して終了。
 	if *once {
@@ -193,7 +203,15 @@ func run() error {
 	}
 
 	// TUI モード: stateManager は StateUpdater と StateReader を両方実装する。
-	model := tui.NewModel(scanner, stateManager, stateManager, term, cfg, *exitOnJump, rescan)
+	var afterScan func()
+	if !*exitOnJump && !hookAlreadyListening {
+		afterScan = func() {
+			if err := writeStatus(); err != nil {
+				log.Printf("export error: %v", err)
+			}
+		}
+	}
+	model := tui.NewModel(scanner, stateManager, stateManager, term, cfg, *exitOnJump, rescan, afterScan)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 
 	go func() {
@@ -206,6 +224,15 @@ func run() error {
 	}
 
 	return nil
+}
+
+func guardWriteStatus(writeStatus func() error, hookAlreadyListening bool, statusPath string) func() error {
+	if !hookAlreadyListening {
+		return writeStatus
+	}
+
+	log.Printf("hook server: another instance is listening; not writing shared status file %q", statusPath)
+	return func() error { return nil }
 }
 
 func currentVersion() string {

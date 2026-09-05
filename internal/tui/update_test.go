@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -39,15 +40,22 @@ func (m *mockStateReader) Panes() []terminal.Pane {
 
 type mockStateUpdater struct {
 	updateFromScanCalls int
+	callOrder           []string
 }
 
 func (m *mockStateUpdater) UpdateFromScan(result core.ScanResult) error {
 	m.updateFromScanCalls++
+	m.callOrder = append(m.callOrder, "UpdateFromScan")
 	return nil
 }
 
-func (m *mockStateUpdater) ApplyHookStates()                          {}
-func (m *mockStateUpdater) RefineToolUseState(term terminal.Terminal) {}
+func (m *mockStateUpdater) ApplyHookStates() {
+	m.callOrder = append(m.callOrder, "ApplyHookStates")
+}
+
+func (m *mockStateUpdater) RefineToolUseState(term terminal.Terminal) {
+	m.callOrder = append(m.callOrder, "RefineToolUseState")
+}
 
 type mockScanner struct {
 	result core.ScanResult
@@ -99,7 +107,7 @@ func newTestModel() (Model, *mockStateReader, *mockStateUpdater, *mockScanner, *
 	term := &mockTerminal{available: true}
 	cfg := config.Default()
 
-	model := NewModel(scanner, updater, reader, term, cfg, false, nil)
+	model := NewModel(scanner, updater, reader, term, cfg, false, nil, nil)
 	return model, reader, updater, scanner, term
 }
 
@@ -478,6 +486,63 @@ func TestUpdateTickMsg(t *testing.T) {
 
 	if cmd == nil {
 		t.Error("expected doScanCmd from TickMsg")
+	}
+}
+
+func TestUpdateTickMsgAfterScan(t *testing.T) {
+	tests := []struct {
+		name          string
+		withAfterScan bool
+		wantCalls     int
+		wantCallOrder []string
+	}{
+		{
+			name:          "nil callback",
+			withAfterScan: false,
+			wantCalls:     0,
+			wantCallOrder: []string{"UpdateFromScan", "ApplyHookStates", "RefineToolUseState"},
+		},
+		{
+			name:          "callback invoked",
+			withAfterScan: true,
+			wantCalls:     1,
+			wantCallOrder: []string{"UpdateFromScan", "ApplyHookStates", "RefineToolUseState", "afterScan"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := &mockStateReader{}
+			updater := &mockStateUpdater{}
+			scanner := &mockScanner{}
+			term := &mockTerminal{available: true}
+			calls := 0
+			var afterScan func()
+			if tc.withAfterScan {
+				afterScan = func() {
+					if updater.updateFromScanCalls != 1 {
+						t.Errorf("afterScan ran before UpdateFromScan completed")
+					}
+					calls++
+					updater.callOrder = append(updater.callOrder, "afterScan")
+				}
+			}
+			m := NewModel(scanner, updater, reader, term, config.Default(), false, nil, afterScan)
+
+			_, cmd := m.Update(TickMsg{})
+			if cmd == nil {
+				t.Fatal("expected doScanCmd from TickMsg")
+			}
+			if _, ok := cmd().(ScanResultMsg); !ok {
+				t.Fatal("expected ScanResultMsg")
+			}
+			if calls != tc.wantCalls {
+				t.Errorf("afterScan calls = %d, want %d", calls, tc.wantCalls)
+			}
+			if !reflect.DeepEqual(updater.callOrder, tc.wantCallOrder) {
+				t.Errorf("call order = %v, want %v", updater.callOrder, tc.wantCallOrder)
+			}
+		})
 	}
 }
 
@@ -2328,7 +2393,7 @@ func TestPromptApproveFirstSendKeysError(t *testing.T) {
 	scanner := &mockScanner{}
 	cfg := config.Default()
 
-	m := NewModel(scanner, updater, reader, failTerm, cfg, false, nil)
+	m := NewModel(scanner, updater, reader, failTerm, cfg, false, nil, nil)
 	projects := []core.Project{
 		{
 			Path: "/project-a",

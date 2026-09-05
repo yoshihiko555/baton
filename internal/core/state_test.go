@@ -3,7 +3,9 @@ package core
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -1489,6 +1491,253 @@ func TestApplyHookStatesNoHookMatchSetsJSONLSource(t *testing.T) {
 	}
 	if session.State != Thinking {
 		t.Errorf("State = %v, want Thinking", session.State)
+	}
+}
+
+func newHookStatusOverlayTestManager(t *testing.T, paneID string, state SessionState) (*StateManager, *Session) {
+	t.Helper()
+	resolverDir := t.TempDir()
+	resolver := NewStateResolver(NewIncrementalReader(), resolverDir, resolverDir, time.Second)
+	manager := NewStateManager(resolver)
+	session := &Session{Tool: ToolClaude, State: state, PaneID: paneID}
+	manager.projects = []Project{{Sessions: []*Session{session}}}
+	manager.summary = calcSummary(manager.projects)
+	return manager, session
+}
+
+func writeHookStatusOverlay(t *testing.T, path string, status StatusOutput) {
+	t.Helper()
+	if err := writeAtomicJSON(status, path); err != nil {
+		t.Fatalf("writeAtomicJSON: %v", err)
+	}
+}
+
+func TestApplyHookStatesStatusOverlayWaiting(t *testing.T) {
+	manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
+	statusPath := filepath.Join(t.TempDir(), "status.json")
+	writeHookStatusOverlay(t, statusPath, StatusOutput{
+		Version:      2,
+		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		HookListener: true,
+		Projects: []ProjectOutput{
+			{Sessions: []SessionOutput{
+				{
+					PaneID:         "%1",
+					SessionID:      "session-from-overlay",
+					TranscriptPath: "/tmp/from-overlay.jsonl",
+					StateSource:    SourceHook,
+				},
+			}},
+		},
+	})
+	manager.SetHookStatusOverlay(statusPath, time.Minute)
+
+	manager.ApplyHookStates()
+
+	if session.State != Waiting {
+		t.Errorf("State = %v, want Waiting", session.State)
+	}
+	if !session.HookWaiting {
+		t.Error("HookWaiting = false, want true")
+	}
+	if session.StateSource != SourceHook {
+		t.Errorf("StateSource = %q, want %q", session.StateSource, SourceHook)
+	}
+	if session.SessionID != "session-from-overlay" {
+		t.Errorf("SessionID = %q, want session-from-overlay", session.SessionID)
+	}
+	if session.TranscriptPath != "/tmp/from-overlay.jsonl" {
+		t.Errorf("TranscriptPath = %q, want /tmp/from-overlay.jsonl", session.TranscriptPath)
+	}
+}
+
+func TestApplyHookStatesStatusOverlayStale(t *testing.T) {
+	manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
+	statusPath := filepath.Join(t.TempDir(), "status.json")
+	writeHookStatusOverlay(t, statusPath, StatusOutput{
+		Version:      2,
+		Timestamp:    time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
+		HookListener: true,
+		Projects: []ProjectOutput{
+			{Sessions: []SessionOutput{{PaneID: "%1", StateSource: SourceHook}}},
+		},
+	})
+	manager.SetHookStatusOverlay(statusPath, 10*time.Second)
+
+	manager.ApplyHookStates()
+
+	if session.State != Thinking {
+		t.Errorf("State = %v, want Thinking", session.State)
+	}
+	if session.HookWaiting {
+		t.Error("HookWaiting = true, want false")
+	}
+	if session.StateSource != SourceJSONL {
+		t.Errorf("StateSource = %q, want %q", session.StateSource, SourceJSONL)
+	}
+}
+
+func TestApplyHookStatesStatusOverlayCorruptedJSON(t *testing.T) {
+	manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
+	statusPath := filepath.Join(t.TempDir(), "status.json")
+	if err := os.WriteFile(statusPath, []byte("{not valid json"), 0o600); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
+	manager.SetHookStatusOverlay(statusPath, time.Minute)
+
+	manager.ApplyHookStates()
+
+	if session.State != Thinking {
+		t.Errorf("State = %v, want Thinking", session.State)
+	}
+	if session.HookWaiting {
+		t.Error("HookWaiting = true, want false")
+	}
+	if session.StateSource != SourceJSONL {
+		t.Errorf("StateSource = %q, want %q", session.StateSource, SourceJSONL)
+	}
+}
+
+func TestApplyHookStatesStatusOverlayWrongVersion(t *testing.T) {
+	manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
+	statusPath := filepath.Join(t.TempDir(), "status.json")
+	writeHookStatusOverlay(t, statusPath, StatusOutput{
+		Version:      1,
+		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		HookListener: true,
+		Projects: []ProjectOutput{
+			{Sessions: []SessionOutput{{PaneID: "%1", StateSource: SourceHook}}},
+		},
+	})
+	manager.SetHookStatusOverlay(statusPath, time.Minute)
+
+	manager.ApplyHookStates()
+
+	if session.State != Thinking {
+		t.Errorf("State = %v, want Thinking", session.State)
+	}
+	if session.HookWaiting {
+		t.Error("HookWaiting = true, want false")
+	}
+	if session.StateSource != SourceJSONL {
+		t.Errorf("StateSource = %q, want %q", session.StateSource, SourceJSONL)
+	}
+}
+
+func TestApplyHookStatesStatusOverlayUnparsableTimestamp(t *testing.T) {
+	manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
+	statusPath := filepath.Join(t.TempDir(), "status.json")
+	writeHookStatusOverlay(t, statusPath, StatusOutput{
+		Version:      2,
+		Timestamp:    "not-a-timestamp",
+		HookListener: true,
+		Projects: []ProjectOutput{
+			{Sessions: []SessionOutput{{PaneID: "%1", StateSource: SourceHook}}},
+		},
+	})
+	manager.SetHookStatusOverlay(statusPath, time.Minute)
+
+	manager.ApplyHookStates()
+
+	if session.State != Thinking {
+		t.Errorf("State = %v, want Thinking", session.State)
+	}
+	if session.HookWaiting {
+		t.Error("HookWaiting = true, want false")
+	}
+	if session.StateSource != SourceJSONL {
+		t.Errorf("StateSource = %q, want %q", session.StateSource, SourceJSONL)
+	}
+}
+
+func TestApplyHookStatesStatusOverlayRejectsNonListener(t *testing.T) {
+	manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
+	statusPath := filepath.Join(t.TempDir(), "status.json")
+	residentState := NewStateManager(nil)
+	residentState.projects = []Project{
+		{Sessions: []*Session{{
+			Tool:        ToolClaude,
+			State:       Waiting,
+			PaneID:      "%1",
+			StateSource: SourceHook,
+			HookWaiting: true,
+		}}},
+	}
+	residentState.summary = calcSummary(residentState.projects)
+	if err := NewExporter(statusPath, ExporterConfig{}).Write(residentState); err != nil {
+		t.Fatalf("Exporter.Write: %v", err)
+	}
+	manager.SetHookStatusOverlay(statusPath, time.Minute)
+
+	manager.ApplyHookStates()
+
+	if session.State != Thinking {
+		t.Errorf("State = %v, want Thinking", session.State)
+	}
+	if session.HookWaiting {
+		t.Error("HookWaiting = true, want false")
+	}
+	if session.StateSource != SourceJSONL {
+		t.Errorf("StateSource = %q, want %q", session.StateSource, SourceJSONL)
+	}
+}
+
+func TestApplyHookStatesStatusOverlayIgnoresUnmatchedPane(t *testing.T) {
+	manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
+	statusPath := filepath.Join(t.TempDir(), "status.json")
+	writeHookStatusOverlay(t, statusPath, StatusOutput{
+		Version:      2,
+		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		HookListener: true,
+		Projects: []ProjectOutput{
+			{Sessions: []SessionOutput{{PaneID: "%9", StateSource: SourceHook}}},
+		},
+	})
+	manager.SetHookStatusOverlay(statusPath, time.Minute)
+
+	manager.ApplyHookStates()
+
+	if session.State != Thinking || session.HookWaiting || session.StateSource != SourceJSONL {
+		t.Errorf("session = %#v, want unchanged state with JSONL source", session)
+	}
+}
+
+func TestApplyHookStatesStatusOverlayCopiesCorrelationWithoutHookState(t *testing.T) {
+	manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
+	statusPath := filepath.Join(t.TempDir(), "status.json")
+	writeHookStatusOverlay(t, statusPath, StatusOutput{
+		Version:      2,
+		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		HookListener: true,
+		Projects: []ProjectOutput{
+			{Sessions: []SessionOutput{
+				{
+					PaneID:         "%1",
+					SessionID:      "session-from-pane-source",
+					TranscriptPath: "/tmp/from-pane-source.jsonl",
+					StateSource:    SourcePane,
+				},
+			}},
+		},
+	})
+	manager.SetHookStatusOverlay(statusPath, time.Minute)
+
+	manager.ApplyHookStates()
+
+	if session.SessionID != "session-from-pane-source" {
+		t.Errorf("SessionID = %q, want session-from-pane-source", session.SessionID)
+	}
+	if session.TranscriptPath != "/tmp/from-pane-source.jsonl" {
+		t.Errorf("TranscriptPath = %q, want /tmp/from-pane-source.jsonl", session.TranscriptPath)
+	}
+	if session.State != Thinking {
+		t.Errorf("State = %v, want Thinking", session.State)
+	}
+	if session.HookWaiting {
+		t.Error("HookWaiting = true, want false")
+	}
+	if session.StateSource != SourceJSONL {
+		t.Errorf("StateSource = %q, want %q", session.StateSource, SourceJSONL)
 	}
 }
 

@@ -110,8 +110,11 @@ type Model struct {
 	stateReader  core.StateReader
 	terminal     terminal.Terminal
 	rescan       <-chan struct{} // hook 由来の即時再スキャン要求チャネル（nil なら未使用）
-	config       config.Config
-	theme        Theme
+	// afterScan は成功した各スキャン後に呼ぶ任意 hook。主に常駐 TUI が status JSON を保存し、
+	// 非常駐の --once / --exit が overlay 経由で hook 状態を参照できるようにする。nil なら何もしない。
+	afterScan func()
+	config    config.Config
+	theme     Theme
 
 	latestProjects []core.Project
 	latestSummary  core.Summary
@@ -164,6 +167,7 @@ func NewModel(
 	cfg config.Config,
 	exitOnJump bool,
 	rescan <-chan struct{},
+	afterScan func(),
 ) Model {
 	ti := textinput.New()
 	ti.CharLimit = 500
@@ -179,6 +183,7 @@ func NewModel(
 		theme:             ResolveTheme(cfg.Theme),
 		exitOnJump:        exitOnJump,
 		rescan:            rescan,
+		afterScan:         afterScan,
 		textInput:         ti,
 		filterInput:       fti,
 		autoApprove:       make(map[string]bool),
@@ -212,6 +217,7 @@ func doScanCmd(
 	sr core.StateReader,
 	term terminal.Terminal,
 	periodic bool,
+	afterScan func(),
 ) tea.Cmd {
 	return func() tea.Msg {
 		result := scanner.Scan(ctx)
@@ -220,6 +226,9 @@ func doScanCmd(
 		}
 		sm.ApplyHookStates()
 		sm.RefineToolUseState(term)
+		if afterScan != nil {
+			afterScan()
+		}
 		return ScanResultMsg{
 			Projects: sr.Projects(),
 			Summary:  sr.Summary(),

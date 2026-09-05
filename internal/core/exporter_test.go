@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -172,5 +173,83 @@ func TestToSessionOutputHookFieldsJSON(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestExporterWriteReadStatusRoundTrip(t *testing.T) {
+	tests := []struct {
+		name         string
+		hookListener bool
+	}{
+		{name: "listener", hookListener: true},
+		{name: "non-listener", hookListener: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			destPath := filepath.Join(t.TempDir(), "status.json")
+			manager := NewStateManager(nil)
+			manager.projects = []Project{
+				{
+					Name: "project-a",
+					Path: "/tmp/project-a",
+					Sessions: []*Session{
+						{
+							PID:            1234,
+							Tool:           ToolClaude,
+							State:          Waiting,
+							PaneID:         "%1",
+							WorkingDir:     "/tmp/project-a",
+							SessionID:      "session-1",
+							TranscriptPath: "/tmp/transcript.jsonl",
+							StateSource:    SourceHook,
+						},
+					},
+				},
+			}
+			manager.summary = calcSummary(manager.projects)
+
+			exporter := NewExporter(destPath, ExporterConfig{})
+			if tc.hookListener {
+				exporter.SetHookListener(true)
+			}
+			if err := exporter.Write(manager); err != nil {
+				t.Fatalf("Write returned error: %v", err)
+			}
+
+			got, err := ReadStatus(destPath)
+			if err != nil {
+				t.Fatalf("ReadStatus returned error: %v", err)
+			}
+			if got.Version != 2 {
+				t.Errorf("Version = %d, want 2", got.Version)
+			}
+			if got.HookListener != tc.hookListener {
+				t.Errorf("HookListener = %v, want %v", got.HookListener, tc.hookListener)
+			}
+			if _, err := time.Parse(time.RFC3339, got.Timestamp); err != nil {
+				t.Errorf("Timestamp = %q, want RFC3339: %v", got.Timestamp, err)
+			}
+			if len(got.Projects) != 1 || len(got.Projects[0].Sessions) != 1 {
+				t.Fatalf("Projects = %#v, want one project with one session", got.Projects)
+			}
+			session := got.Projects[0].Sessions[0]
+			if session.PaneID != "%1" || session.SessionID != "session-1" || session.StateSource != SourceHook {
+				t.Errorf("session = %#v, want pane/session/source hook fields", session)
+			}
+			if got.Summary.TotalSessions != 1 || got.Summary.Waiting != 1 {
+				t.Errorf("Summary = %#v, want one waiting session", got.Summary)
+			}
+		})
+	}
+}
+
+func TestReadStatusNotExist(t *testing.T) {
+	_, err := ReadStatus(filepath.Join(t.TempDir(), "missing-status.json"))
+	if err == nil {
+		t.Fatal("ReadStatus returned nil error for nonexistent path")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("errors.Is(err, os.ErrNotExist) = false: %v", err)
 	}
 }
