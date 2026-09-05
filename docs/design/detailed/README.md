@@ -22,6 +22,7 @@
 | [main-entrypoint.md](main-entrypoint.md) | `main.go` | ワイヤリング・ライフサイクルの再設計 |
 | [lua-plugin.md](lua-plugin.md) | `wezterm/baton-status.lua` | version:2 + formatted_status 対応 |
 | [migration.md](migration.md) | 全体 | v1→v2 ファイル別移行計画 |
+| [hook-state-detection.md](hook-state-detection.md) | `internal/core`（新規 `HookServer`/`HookStateStore`）, `main.go` | Claude Code hooks による Waiting 確定 + session 相関（[ADR-0015](../../adr/0015-hook-based-waiting-detection.md)） |
 
 ---
 

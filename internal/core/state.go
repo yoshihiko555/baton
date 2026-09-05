@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"path/filepath"
 	"regexp"
@@ -42,20 +43,22 @@ func resolveProjectKey(proc DetectedProcess, paneWorkspaceMap map[string]string)
 // StateManager はスキャン結果をプロジェクト/セッション単位に集約するコンポーネント。
 // v2 ではポーリング + スナップショット照合方式を採用し、Watcher への依存を排除した。
 type StateManager struct {
-	resolver       *StateResolver  // JSONL 解析・状態判定の委譲先
-	processScanner *ProcessScanner // Codex 子プロセス検査用
-	projects       []Project       // 最新プロジェクト一覧スナップショット（ソート済み）
-	summary        Summary         // 最新集計キャッシュ
-	panes          []terminal.Pane // 最新ペイン一覧（Ambiguous セッション解決用）
-	prevPIDSet     map[int]bool    // 前回スキャンの PID セット（差分検出用）
-	mu             sync.RWMutex    // 読み書き保護
+	resolver       *StateResolver    // JSONL 解析・状態判定の委譲先
+	processScanner *ProcessScanner   // Codex 子プロセス検査用
+	projects       []Project         // 最新プロジェクト一覧スナップショット（ソート済み）
+	summary        Summary           // 最新集計キャッシュ
+	panes          []terminal.Pane   // 最新ペイン一覧（Ambiguous セッション解決用）
+	prevPIDSet     map[int]bool      // 前回スキャンの PID セット（差分検出用）
+	lastDiagKey    map[string]string // ペインごとの直近診断キー（重複ログ抑制用）
+	mu             sync.RWMutex      // 読み書き保護
 }
 
 // NewStateManager は StateManager を初期化して返す。
 func NewStateManager(resolver *StateResolver) *StateManager {
 	return &StateManager{
-		resolver:   resolver,
-		prevPIDSet: make(map[int]bool),
+		resolver:    resolver,
+		prevPIDSet:  make(map[int]bool),
+		lastDiagKey: make(map[string]string),
 	}
 }
 
@@ -375,11 +378,38 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 			}
 
 			if sess.Tool == ToolClaude {
-				if newState, ok := classifyClaudePane(text); ok {
+				beforeState := sess.State
+				newState, classified := classifyClaudePane(text)
+				afterState := beforeState
+				if classified {
 					s.projects[i].Sessions[j].State = newState
-				} else if sess.State == Waiting {
+					afterState = newState
+				} else if beforeState == Waiting {
 					// ペインテキストから判定不能だが JSONL が Waiting → ToolUse に降格
 					s.projects[i].Sessions[j].State = ToolUse
+					afterState = ToolUse
+				}
+				downgradedFromWaiting := beforeState == Waiting && afterState != Waiting
+
+				if !classified || downgradedFromWaiting {
+					diagKey := fmt.Sprintf("%s|%s|%t", beforeState, afterState, classified)
+					if s.lastDiagKey[sess.PaneID] != diagKey {
+						s.lastDiagKey[sess.PaneID] = diagKey
+						debugf(
+							"claude pane diagnostic: pane_id=%q pid=%d cwd=%q before=%s after=%s ok=%t downgraded=%t pane_tail(last 30 lines):\n%s",
+							sess.PaneID,
+							sess.PID,
+							sess.WorkingDir,
+							beforeState,
+							afterState,
+							classified,
+							downgradedFromWaiting,
+							tailLines(text, 30),
+						)
+					}
+				} else {
+					// 通常状態に戻ったらキーを消し、次の取りこぼしを再度記録できるようにする
+					delete(s.lastDiagKey, sess.PaneID)
 				}
 				continue
 			}
@@ -397,6 +427,17 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 
 func containsApprovalPrompt(text string) bool {
 	return claudeApprovalPattern.MatchString(text)
+}
+
+func tailLines(text string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) <= n {
+		return text
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
 // allDash は s がすべて '─'（U+2500）文字で構成され、4文字以上であるか返す。

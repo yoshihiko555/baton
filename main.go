@@ -4,9 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"syscall"
@@ -48,6 +50,24 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+
+	if err := os.MkdirAll(filepath.Dir(cfg.LogFile), 0o700); err != nil {
+		log.Printf("warning: could not create log directory for %q: %v (falling back to stderr)", cfg.LogFile, err)
+	} else if file, err := os.OpenFile(cfg.LogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err != nil {
+		log.Printf("warning: could not open log file %q: %v (falling back to stderr)", cfg.LogFile, err)
+	} else {
+		previousLogOutput := log.Writer()
+		if !*noTUI && !*once {
+			log.SetOutput(file)
+		} else {
+			log.SetOutput(io.MultiWriter(os.Stderr, file))
+		}
+		defer func() {
+			log.SetOutput(previousLogOutput)
+			_ = file.Close()
+		}()
+	}
+	core.SetDebugLogging(cfg.LogLevel == "debug")
 
 	term, err := initTerminal(cfg.Terminal)
 	if err != nil {

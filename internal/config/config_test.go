@@ -33,6 +33,9 @@ func TestDefault(t *testing.T) {
 	if got.LogLevel != "info" {
 		t.Fatalf("unexpected LogLevel: got %q", got.LogLevel)
 	}
+	if got.LogFile != "~/.local/state/baton/baton.log" {
+		t.Fatalf("unexpected LogFile: got %q", got.LogFile)
+	}
 	if got.Statusbar.Format != "{{.Active}}/{{.TotalSessions}}" {
 		t.Fatalf("unexpected Statusbar.Format: got %q", got.Statusbar.Format)
 	}
@@ -75,6 +78,7 @@ status_output_path: /tmp/custom-status.json
 scan_interval: 5s
 terminal: tmux
 log_level: debug
+log_file: ~/custom/baton.log
 statusbar:
   format: "{{.Active}} sessions"
   tool_icons:
@@ -119,6 +123,9 @@ auto_mode:
 	}
 	if got.LogLevel != "debug" {
 		t.Fatalf("unexpected LogLevel: got %q", got.LogLevel)
+	}
+	if got.LogFile != filepath.Join(home, "custom/baton.log") {
+		t.Fatalf("unexpected LogFile: got %q", got.LogFile)
 	}
 	if got.Statusbar.Format != "{{.Active}} sessions" {
 		t.Fatalf("unexpected Statusbar.Format: got %q", got.Statusbar.Format)

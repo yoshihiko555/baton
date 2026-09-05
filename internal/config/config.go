@@ -76,15 +76,17 @@ func (a *AutoModeConfig) UnmarshalYAML(value *yaml.Node) error {
 
 // Config は YAML から読み込む baton の実行時設定を表す。
 type Config struct {
-	ScanInterval      time.Duration   `yaml:"scan_interval"`
-	ClaudeProjectsDir string          `yaml:"claude_projects_dir"`
-	SessionMetaDir    string          `yaml:"session_meta_dir"`
-	StatusOutputPath  string          `yaml:"status_output_path"`
-	Terminal          string          `yaml:"terminal"`
-	LogLevel          string          `yaml:"log_level"`
-	Statusbar         StatusbarConfig `yaml:"statusbar"`
-	Theme             ThemeConfig     `yaml:"theme"`
-	AutoMode          AutoModeConfig  `yaml:"auto_mode"`
+	ScanInterval      time.Duration `yaml:"scan_interval"`
+	ClaudeProjectsDir string        `yaml:"claude_projects_dir"`
+	SessionMetaDir    string        `yaml:"session_meta_dir"`
+	StatusOutputPath  string        `yaml:"status_output_path"`
+	Terminal          string        `yaml:"terminal"`
+	LogLevel          string        `yaml:"log_level"`
+	// LogFile はログの出力先パス。log_level: debug の場合、ペイン末尾テキスト（機微情報を含み得る）がこのファイルに記録される。
+	LogFile   string          `yaml:"log_file"`
+	Statusbar StatusbarConfig `yaml:"statusbar"`
+	Theme     ThemeConfig     `yaml:"theme"`
+	AutoMode  AutoModeConfig  `yaml:"auto_mode"`
 }
 
 // Default はデフォルト設定値を返す。
@@ -96,6 +98,7 @@ func Default() Config {
 		StatusOutputPath:  "/tmp/baton-status.json",
 		Terminal:          "tmux",
 		LogLevel:          "info",
+		LogFile:           "~/.local/state/baton/baton.log",
 		Statusbar: StatusbarConfig{
 			Format: "{{.Active}}/{{.TotalSessions}}",
 			ToolIcons: map[string]string{
@@ -149,6 +152,10 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("expand status_output_path: %w", err)
 	}
+	cfg.LogFile, err = expandHome(cfg.LogFile)
+	if err != nil {
+		return Config{}, fmt.Errorf("expand log_file: %w", err)
+	}
 
 	return cfg, nil
 }
@@ -172,6 +179,9 @@ func mergeConfig(base *Config, override Config) {
 	}
 	if override.LogLevel != "" {
 		base.LogLevel = override.LogLevel
+	}
+	if override.LogFile != "" {
+		base.LogFile = override.LogFile
 	}
 	if override.Statusbar.Format != "" {
 		base.Statusbar.Format = override.Statusbar.Format

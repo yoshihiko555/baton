@@ -718,7 +718,7 @@ baton 本体（Go）が設定ファイル（`statusbar.*`）のテンプレー�
 
 ### 7.3 ログ出力
 
-- エラーは `log` パッケージで記録する（TUI モード時は `/tmp/baton.log` にリダイレクト）
+- エラーは `log` パッケージで記録する（TUI モード時は `log_file`（既定 `~/.local/state/baton/baton.log`）にリダイレクト）
 - 毎スキャンで発生する既知エラー（JSONL 未発見等）は `debug` レベルにして出力を抑制する
 - 予期しないエラー（WezTerm CLI の異常終了等）は `warn` レベルで記録する
 

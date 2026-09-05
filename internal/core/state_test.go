@@ -1025,6 +1025,58 @@ func TestRefineClaudeWaitingToToolUse(t *testing.T) {
 	}
 }
 
+func TestRefineClaudeDiagnosticDeduplication(t *testing.T) {
+	manager := NewStateManager(nil)
+	manager.projects = []Project{
+		{
+			Name: "proj",
+			Path: "/project",
+			Sessions: []*Session{
+				{PID: 100, Tool: ToolClaude, State: Waiting, PaneID: "%1", WorkingDir: "/project"},
+			},
+		},
+	}
+	manager.summary = calcSummary(manager.projects)
+
+	term := &paneTextTerminal{
+		texts: map[string]string{
+			"%1": "Running some command...\n",
+		},
+	}
+
+	manager.RefineToolUseState(term)
+	firstKey := manager.lastDiagKey["%1"]
+	if firstKey != "waiting|tool_use|false" {
+		t.Fatalf("lastDiagKey = %q, want %q", firstKey, "waiting|tool_use|false")
+	}
+	if len(manager.lastDiagKey) != 1 {
+		t.Fatalf("lastDiagKey length = %d, want 1", len(manager.lastDiagKey))
+	}
+
+	// 次の JSONL スキャンで Waiting が再び割り当てられた状況を再現する。
+	manager.projects[0].Sessions[0].State = Waiting
+	manager.RefineToolUseState(term)
+	if got := manager.lastDiagKey["%1"]; got != firstKey {
+		t.Fatalf("same diagnostic changed key: got %q, want %q", got, firstKey)
+	}
+	if len(manager.lastDiagKey) != 1 {
+		t.Fatalf("lastDiagKey length after duplicate = %d, want 1", len(manager.lastDiagKey))
+	}
+
+	manager.projects[0].Sessions[0].State = Waiting
+	term.texts["%1"] = "Done.\n──────────\n❯\n──────────\n"
+	manager.RefineToolUseState(term)
+	if got := manager.lastDiagKey["%1"]; got != "waiting|idle|true" {
+		t.Fatalf("changed diagnostic key = %q, want %q", got, "waiting|idle|true")
+	}
+
+	manager.projects[0].Sessions[0].State = Idle
+	manager.RefineToolUseState(term)
+	if _, ok := manager.lastDiagKey["%1"]; ok {
+		t.Fatal("lastDiagKey still contains pane %1 after returning to a classified non-Waiting state")
+	}
+}
+
 func TestRefineClaudeToolUseStaysToolUse(t *testing.T) {
 	// Claude ToolUse state remains ToolUse when pane text has no approval prompt.
 	manager := NewStateManager(nil)
@@ -1357,6 +1409,29 @@ func TestClassifyClaudePane(t *testing.T) {
 			}
 			if gotOK && gotState != tc.wantState {
 				t.Errorf("classifyClaudePane state = %v, want %v", gotState, tc.wantState)
+			}
+		})
+	}
+}
+
+func TestTailLines(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		n    int
+		want string
+	}{
+		{name: "empty string", text: "", n: 3, want: ""},
+		{name: "fewer lines than n", text: "one\ntwo", n: 3, want: "one\ntwo"},
+		{name: "exactly n lines", text: "one\ntwo\nthree", n: 3, want: "one\ntwo\nthree"},
+		{name: "more lines than n", text: "one\ntwo\nthree\nfour", n: 2, want: "three\nfour"},
+		{name: "zero lines requested", text: "one\ntwo", n: 0, want: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tailLines(tc.text, tc.n); got != tc.want {
+				t.Fatalf("tailLines(%q, %d) = %q, want %q", tc.text, tc.n, got, tc.want)
 			}
 		})
 	}
