@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yoshihiko555/baton/internal/hook"
 	"github.com/yoshihiko555/baton/internal/terminal"
 )
 
@@ -1434,5 +1435,126 @@ func TestTailLines(t *testing.T) {
 				t.Fatalf("tailLines(%q, %d) = %q, want %q", tc.text, tc.n, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestApplyHookStatesSetsWaitingAndTranscript(t *testing.T) {
+	manager := NewStateManager(nil)
+	session := &Session{Tool: ToolClaude, State: Thinking, PaneID: "%1"}
+	manager.projects = []Project{{Sessions: []*Session{session}}}
+	manager.panes = []terminal.Pane{{ID: "%1"}}
+
+	store := hook.NewStore(3)
+	store.Apply(hook.Event{
+		PaneID:         "%1",
+		HookEventName:  "PermissionRequest",
+		SessionID:      "sess-1",
+		TranscriptPath: "/path/to/transcript.jsonl",
+	})
+	manager.SetHookStore(store)
+
+	manager.ApplyHookStates()
+
+	if session.State != Waiting {
+		t.Errorf("State = %v, want Waiting", session.State)
+	}
+	if !session.HookWaiting {
+		t.Error("HookWaiting = false, want true")
+	}
+	if session.StateSource != SourceHook {
+		t.Errorf("StateSource = %q, want %q", session.StateSource, SourceHook)
+	}
+	if session.SessionID != "sess-1" {
+		t.Errorf("SessionID = %q, want %q", session.SessionID, "sess-1")
+	}
+	if session.TranscriptPath != "/path/to/transcript.jsonl" {
+		t.Errorf("TranscriptPath = %q, want %q", session.TranscriptPath, "/path/to/transcript.jsonl")
+	}
+}
+
+func TestApplyHookStatesNoHookMatchSetsJSONLSource(t *testing.T) {
+	manager := NewStateManager(nil)
+	session := &Session{Tool: ToolClaude, State: Thinking, PaneID: "%9"}
+	manager.projects = []Project{{Sessions: []*Session{session}}}
+	manager.panes = []terminal.Pane{{ID: "%9"}}
+	manager.SetHookStore(hook.NewStore(3))
+
+	manager.ApplyHookStates()
+
+	if session.StateSource != SourceJSONL {
+		t.Errorf("StateSource = %q, want %q", session.StateSource, SourceJSONL)
+	}
+	if session.HookWaiting {
+		t.Error("HookWaiting = true, want false")
+	}
+	if session.State != Thinking {
+		t.Errorf("State = %v, want Thinking", session.State)
+	}
+}
+
+func TestApplyHookStatesRetainPanesRemovesStalePane(t *testing.T) {
+	store := hook.NewStore(3)
+	store.Apply(hook.Event{PaneID: "%1", HookEventName: "PermissionRequest"})
+
+	manager := NewStateManager(nil)
+	manager.SetHookStore(store)
+	manager.panes = []terminal.Pane{{ID: "%2"}}
+	manager.projects = []Project{
+		{Sessions: []*Session{{Tool: ToolClaude, State: Thinking, PaneID: "%2"}}},
+	}
+
+	manager.ApplyHookStates()
+
+	if _, ok := store.Get("%1"); ok {
+		t.Error("stale pane %1 remains in hook store")
+	}
+}
+
+func TestRefineToolUseStateHookWaitingBlocksOverwrite(t *testing.T) {
+	manager := NewStateManager(nil)
+	session := &Session{Tool: ToolClaude, State: Waiting, HookWaiting: true, PaneID: "%1"}
+	manager.projects = []Project{{Sessions: []*Session{session}}}
+	manager.summary = calcSummary(manager.projects)
+
+	store := hook.NewStore(3)
+	store.Apply(hook.Event{PaneID: "%1", HookEventName: "PermissionRequest"})
+	manager.SetHookStore(store)
+
+	term := &paneTextTerminal{texts: map[string]string{
+		"%1": "Running some command...\n",
+	}}
+	manager.RefineToolUseState(term)
+
+	if session.State != Waiting {
+		t.Errorf("State = %v, want Waiting", session.State)
+	}
+}
+
+func TestHookWaitingIdleStreakClearsAfterThreshold(t *testing.T) {
+	store := hook.NewStore(2)
+	store.Apply(hook.Event{
+		PaneID:        "%1",
+		HookEventName: "PermissionRequest",
+		SessionID:     "s1",
+	})
+
+	manager := NewStateManager(nil)
+	manager.SetHookStore(store)
+	term := &paneTextTerminal{texts: map[string]string{
+		"%1": "some output\n────────────────────\n❯ \n",
+	}}
+	wantStates := []SessionState{Waiting, Waiting, Idle}
+
+	for round, want := range wantStates {
+		session := &Session{Tool: ToolClaude, PaneID: "%1", State: Idle}
+		manager.projects = []Project{{Sessions: []*Session{session}}}
+		manager.panes = []terminal.Pane{{ID: "%1"}}
+
+		manager.ApplyHookStates()
+		manager.RefineToolUseState(term)
+
+		if session.State != want {
+			t.Errorf("round %d: State = %v, want %v", round+1, session.State, want)
+		}
 	}
 }

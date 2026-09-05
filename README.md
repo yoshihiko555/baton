@@ -14,7 +14,7 @@ Key design decisions:
 
 - **Pane-centric**: Primary key is `TMUX_PANE`, not tmux session name. Multiple AI sessions in the same tmux session are tracked individually.
 - **Non-intrusive**: Sessions are started manually; baton discovers them via `ps`, `tmux capture-pane`, and Claude JSONL/session-meta files.
-- **Hook-free status**: State is derived from pane text, child process detection, and JSONL fallback — no Claude Code hooks required.
+- **Hooks optional**: State is derived from pane text, child process detection, and JSONL fallback by default. Claude Code hooks can optionally be registered to make permission-prompt (waiting) detection exact and to attach `session_id`/`transcript_path`; without them baton works exactly as before.
 
 ## Features
 
@@ -191,7 +191,49 @@ auto_mode:
   model: "gpt-5.3-codex-spark"
   timeout: "20s"
   risk_threshold: "medium" # low, medium, high
+
+# Claude Code hooks (optional): confirms Waiting via PermissionRequest and
+# attaches session_id/transcript_path. Falls back to pane-text detection if unset/unavailable.
+hook:
+  enabled: true
+  socket_path: "~/.local/state/baton/hook.sock"
+  idle_cancel_scans: 3
 ```
+
+### Claude Code hooks (optional)
+
+baton can optionally receive Claude Code hook events over a Unix domain socket to confirm
+permission-prompt (`Waiting`) detection exactly, instead of relying solely on pane-text
+heuristics. This is entirely opt-in — without hooks registered, baton behaves exactly as
+before.
+
+1. Add a thin wrapper script, e.g. `~/.claude/hooks/baton-hook.sh`:
+
+   ```sh
+   #!/bin/sh
+   command -v baton >/dev/null 2>&1 || exit 0
+   exec baton hook
+   ```
+
+   If the resident `baton` process is started with a custom `--config` flag, pass the
+   same flag to `baton hook` in the wrapper script. Otherwise, the configured paths
+   (especially the socket path) silently mismatch, and hook events fall back to legacy
+   pane-text detection without any visible error. For example:
+
+   ```sh
+   exec baton hook --config /path/to/config.yaml
+   ```
+
+2. Register it for these 7 events in Claude Code's `settings.json`: `PermissionRequest`,
+   `PreToolUse`, `PostToolUse`, `Stop`, `UserPromptSubmit`, `SessionStart`, `SessionEnd`.
+   Each event's hook command should point at the wrapper script above.
+3. The resident `baton` process listens on `hook.socket_path` (default
+   `~/.local/state/baton/hook.sock`) and treats `PermissionRequest` as confirming `Waiting`
+   (highest priority — it is not overridden by pane-text classification) until a
+   follow-up event, the pane disappearing, or `idle_cancel_scans` consecutive
+   Idle-classified scans (safety net) clears it.
+4. `baton hook` always exits 0 and never blocks Claude Code, even if baton isn't
+   running or `hook.enabled: false`.
 
 ## How it works
 

@@ -114,6 +114,7 @@ go vet ./...
   - Working: 入力プロンプト行より上に `✢`/`·`/`✶` または `Running…`
   - Idle: 入力プロンプト行あり + Working シグナルなし
   - 判定不能時は JSONL 状態を維持（Waiting の場合は ToolUse に降格）
+- Claude Code hooks 連携（オプション）: `PermissionRequest` 受信時は pane の Waiting を確定させ、3層ハイブリッド判定より優先する（`classifyClaudePane` は上書きしない）。解除は 3 条件のいずれか — 後続 hook イベント（`PreToolUse`/`PostToolUse`/`Stop`/`UserPromptSubmit`/`SessionEnd`）、対象ペインが tmux スキャンから消失、`classifyClaudePane` が `hook.idle_cancel_scans`（既定 3）回連続で Idle を返す安全網。hooks 未登録時は従来の画面判定にフォールバックする
 - 自動承認モード: TUI で `t` キーによるセッション単位トグル。Waiting 検出 → 即座に Enter 送信（多重送信防止付き）
 - Hook セッション除外: tmux の `claude-*-<digits>` パターン（unattached）を自動除外
 - --no-tui モード: 起動メッセージと初回スキャン結果を標準出力に表示

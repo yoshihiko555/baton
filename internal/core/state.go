@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/yoshihiko555/baton/internal/hook"
 	"github.com/yoshihiko555/baton/internal/terminal"
 )
 
@@ -45,6 +46,7 @@ func resolveProjectKey(proc DetectedProcess, paneWorkspaceMap map[string]string)
 type StateManager struct {
 	resolver       *StateResolver    // JSONL 解析・状態判定の委譲先
 	processScanner *ProcessScanner   // Codex 子プロセス検査用
+	hookStore      *hook.Store       // Claude Code hooks 由来の Waiting 状態ストア（nil なら hook 連携なし）
 	projects       []Project         // 最新プロジェクト一覧スナップショット（ソート済み）
 	summary        Summary           // 最新集計キャッシュ
 	panes          []terminal.Pane   // 最新ペイン一覧（Ambiguous セッション解決用）
@@ -65,6 +67,15 @@ func NewStateManager(resolver *StateResolver) *StateManager {
 // SetProcessScanner は Codex 子プロセス検査用の ProcessScanner を設定する。
 func (s *StateManager) SetProcessScanner(ps *ProcessScanner) {
 	s.processScanner = ps
+}
+
+// SetHookStore は Claude Code hooks 由来の状態ストアを設定する。
+// nil のままなら ApplyHookStates は Claude セッションの StateSource を "jsonl" にするだけの no-op になる
+// （--once / --exit 起動、または hook socket の listen に失敗した場合）。
+func (s *StateManager) SetHookStore(store *hook.Store) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hookStore = store
 }
 
 // UpdateFromScan はスキャン結果から状態を更新する（StateUpdater 実装）。
@@ -174,6 +185,60 @@ func (s *StateManager) UpdateFromScan(result ScanResult) error {
 	s.prevPIDSet = currentPIDSet
 
 	return nil
+}
+
+// ApplyHookStates は Claude Code hooks 由来の Waiting 状態を Session に反映する。
+// UpdateFromScan の直後、RefineToolUseState の前に呼び出すこと。
+//
+// 処理内容:
+//  1. hookStore が設定されていれば、直近スキャンの pane ID 集合で RetainPanes を呼び、
+//     tmux から消えた pane の hook 状態を掃除する
+//  2. Tool == ToolClaude かつ PaneID != "" の Session について、対応する hook.State があれば
+//     SessionID / TranscriptPath を転記し、Waiting なら State を Waiting に固定して
+//     HookWaiting=true, StateSource=SourceHook とする
+//  3. hook 由来の Waiting が確定しなかった Claude セッションは StateSource=SourceJSONL
+//     （RefineToolUseState が pane 判定に成功すれば SourcePane に更新される）
+//  4. Claude 以外のセッションの StateSource は変更しない（空のまま）
+func (s *StateManager) ApplyHookStates() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.hookStore != nil {
+		alive := make(map[string]bool, len(s.panes))
+		for _, pane := range s.panes {
+			alive[pane.ID] = true
+		}
+		s.hookStore.RetainPanes(alive)
+	}
+
+	for i := range s.projects {
+		for _, sess := range s.projects[i].Sessions {
+			if sess == nil || sess.Tool != ToolClaude || sess.PaneID == "" {
+				continue
+			}
+			sess.StateSource = SourceJSONL
+			if s.hookStore == nil {
+				continue
+			}
+			state, ok := s.hookStore.Get(sess.PaneID)
+			if !ok {
+				continue
+			}
+			if state.SessionID != "" {
+				sess.SessionID = state.SessionID
+			}
+			if state.TranscriptPath != "" {
+				sess.TranscriptPath = state.TranscriptPath
+			}
+			if state.Waiting {
+				sess.State = Waiting
+				sess.HookWaiting = true
+				sess.StateSource = SourceHook
+			}
+		}
+	}
+
+	s.summary = calcSummary(s.projects)
 }
 
 // buildSessionFromStates はプロセス情報と事前解決済みの状態分布からセッションを構築する。
@@ -380,9 +445,20 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 			if sess.Tool == ToolClaude {
 				beforeState := sess.State
 				newState, classified := classifyClaudePane(text)
+
+				if sess.HookWaiting {
+					// hook 由来の Waiting は classifyClaudePane の結果で上書きしない（ADR-0015）。
+					// Idle 連続カウント（解除の安全網）だけを進める。
+					if s.hookStore != nil {
+						s.hookStore.NoteScanResult(sess.PaneID, classified && newState == Idle)
+					}
+					continue
+				}
+
 				afterState := beforeState
 				if classified {
 					s.projects[i].Sessions[j].State = newState
+					s.projects[i].Sessions[j].StateSource = SourcePane
 					afterState = newState
 				} else if beforeState == Waiting {
 					// ペインテキストから判定不能だが JSONL が Waiting → ToolUse に降格

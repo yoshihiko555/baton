@@ -40,6 +40,15 @@ type AutoModeConfig struct {
 	enabledSet    bool
 }
 
+// HookConfig は Claude Code hooks の受信設定を表す。
+type HookConfig struct {
+	Enabled            bool   `yaml:"enabled"`
+	SocketPath         string `yaml:"socket_path"`
+	IdleCancelScans    int    `yaml:"idle_cancel_scans"`
+	enabledSet         bool
+	idleCancelScansSet bool
+}
+
 // UnmarshalYAML はスカラー文字列をプリセット名として扱う。
 func (t *ThemeConfig) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind == yaml.ScalarNode {
@@ -74,6 +83,28 @@ func (a *AutoModeConfig) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
+func (h *HookConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawHookConfig struct {
+		Enabled         *bool  `yaml:"enabled"`
+		SocketPath      string `yaml:"socket_path"`
+		IdleCancelScans *int   `yaml:"idle_cancel_scans"`
+	}
+	var raw rawHookConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	if raw.Enabled != nil {
+		h.Enabled = *raw.Enabled
+		h.enabledSet = true
+	}
+	h.SocketPath = raw.SocketPath
+	if raw.IdleCancelScans != nil {
+		h.IdleCancelScans = *raw.IdleCancelScans
+		h.idleCancelScansSet = true
+	}
+	return nil
+}
+
 // Config は YAML から読み込む baton の実行時設定を表す。
 type Config struct {
 	ScanInterval      time.Duration `yaml:"scan_interval"`
@@ -87,6 +118,7 @@ type Config struct {
 	Statusbar StatusbarConfig `yaml:"statusbar"`
 	Theme     ThemeConfig     `yaml:"theme"`
 	AutoMode  AutoModeConfig  `yaml:"auto_mode"`
+	Hook      HookConfig      `yaml:"hook"`
 }
 
 // Default はデフォルト設定値を返す。
@@ -116,6 +148,11 @@ func Default() Config {
 			Model:         "gpt-5.3-codex-spark",
 			Timeout:       20 * time.Second,
 			RiskThreshold: "medium",
+		},
+		Hook: HookConfig{
+			Enabled:         true,
+			SocketPath:      "~/.local/state/baton/hook.sock",
+			IdleCancelScans: 3,
 		},
 	}
 }
@@ -156,6 +193,10 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("expand log_file: %w", err)
 	}
+	cfg.Hook.SocketPath, err = expandHome(cfg.Hook.SocketPath)
+	if err != nil {
+		return Config{}, fmt.Errorf("expand hook socket_path: %w", err)
+	}
 
 	return cfg, nil
 }
@@ -194,6 +235,7 @@ func mergeConfig(base *Config, override Config) {
 	}
 	mergeThemeConfig(&base.Theme, override.Theme)
 	mergeAutoModeConfig(&base.AutoMode, override.AutoMode)
+	mergeHookConfig(&base.Hook, override.Hook)
 }
 
 // mergeThemeConfig は非ゼロ値のみで base の Theme を上書きする。
@@ -251,6 +293,18 @@ func mergeAutoModeConfig(base *AutoModeConfig, override AutoModeConfig) {
 	}
 	if override.RiskThreshold != "" {
 		base.RiskThreshold = override.RiskThreshold
+	}
+}
+
+func mergeHookConfig(base *HookConfig, override HookConfig) {
+	if override.enabledSet {
+		base.Enabled = override.Enabled
+	}
+	if override.SocketPath != "" {
+		base.SocketPath = override.SocketPath
+	}
+	if override.idleCancelScansSet {
+		base.IdleCancelScans = override.IdleCancelScans
 	}
 }
 

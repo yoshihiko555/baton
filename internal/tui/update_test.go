@@ -37,12 +37,16 @@ func (m *mockStateReader) Panes() []terminal.Pane {
 	return nil
 }
 
-type mockStateUpdater struct{}
+type mockStateUpdater struct {
+	updateFromScanCalls int
+}
 
 func (m *mockStateUpdater) UpdateFromScan(result core.ScanResult) error {
+	m.updateFromScanCalls++
 	return nil
 }
 
+func (m *mockStateUpdater) ApplyHookStates()                          {}
 func (m *mockStateUpdater) RefineToolUseState(term terminal.Terminal) {}
 
 type mockScanner struct {
@@ -95,7 +99,7 @@ func newTestModel() (Model, *mockStateReader, *mockStateUpdater, *mockScanner, *
 	term := &mockTerminal{available: true}
 	cfg := config.Default()
 
-	model := NewModel(scanner, updater, reader, term, cfg, false)
+	model := NewModel(scanner, updater, reader, term, cfg, false, nil)
 	return model, reader, updater, scanner, term
 }
 
@@ -164,6 +168,48 @@ func TestUpdateScanResultMsg(t *testing.T) {
 	if sessionCount != 1 {
 		t.Fatalf("session entries = %d, want 1", sessionCount)
 	}
+}
+
+func TestUpdateScanResultMsgPeriodicRearmsTick(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	m.config.ScanInterval = time.Millisecond
+
+	updated, cmd := m.Update(ScanResultMsg{Periodic: true})
+	_ = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected tick command for periodic scan result")
+	}
+	if !containsTickMsg(cmd()) {
+		t.Fatal("expected TickMsg from periodic scan result command")
+	}
+}
+
+func TestUpdateScanResultMsgNonPeriodicDoesNotRearmTick(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	m.config.ScanInterval = time.Millisecond
+
+	updated, cmd := m.Update(ScanResultMsg{Periodic: false})
+	_ = updated.(Model)
+
+	if cmd != nil && containsTickMsg(cmd()) {
+		t.Fatal("unexpected TickMsg from non-periodic scan result command")
+	}
+}
+
+// containsTickMsg はネストした tea.BatchMsg を展開し、TickMsg の有無を返す。
+func containsTickMsg(msg tea.Msg) bool {
+	switch v := msg.(type) {
+	case TickMsg:
+		return true
+	case tea.BatchMsg:
+		for _, cmd := range v {
+			if cmd != nil && containsTickMsg(cmd()) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestUpdateErrMsg(t *testing.T) {
@@ -432,6 +478,88 @@ func TestUpdateTickMsg(t *testing.T) {
 
 	if cmd == nil {
 		t.Error("expected doScanCmd from TickMsg")
+	}
+}
+
+func TestUpdateScanRequestMsgTriggersScan(t *testing.T) {
+	m, _, updater, _, _ := newTestModel()
+
+	updated, cmd := m.Update(ScanRequestMsg{})
+	m = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd from ScanRequestMsg")
+	}
+
+	msg := cmd()
+	result := collectScanResultMsg(t, msg)
+
+	if updater.updateFromScanCalls != 1 {
+		t.Errorf("updateFromScanCalls = %d, want 1", updater.updateFromScanCalls)
+	}
+	if result.Periodic {
+		t.Error("Periodic = true, want false for hook-triggered rescan")
+	}
+}
+
+// collectScanResultMsg executes msg (running any nested tea.BatchMsg commands)
+// until it finds a ScanResultMsg, and fails the test if none is found.
+// tea.Batch may collapse a single non-nil command into that command directly,
+// or wrap multiple into a tea.BatchMsg ([]tea.Cmd) — handle both shapes.
+func collectScanResultMsg(t *testing.T, msg tea.Msg) ScanResultMsg {
+	t.Helper()
+	switch v := msg.(type) {
+	case ScanResultMsg:
+		return v
+	case tea.BatchMsg:
+		for _, c := range v {
+			if c == nil {
+				continue
+			}
+			if result, ok := tryCollectScanResultMsg(c()); ok {
+				return result
+			}
+		}
+	}
+	t.Fatalf("expected a ScanResultMsg somewhere in %#v", msg)
+	return ScanResultMsg{}
+}
+
+func tryCollectScanResultMsg(msg tea.Msg) (ScanResultMsg, bool) {
+	switch v := msg.(type) {
+	case ScanResultMsg:
+		return v, true
+	case tea.BatchMsg:
+		for _, c := range v {
+			if c == nil {
+				continue
+			}
+			if result, ok := tryCollectScanResultMsg(c()); ok {
+				return result, true
+			}
+		}
+	}
+	return ScanResultMsg{}, false
+}
+
+func TestWaitRescanCmdNilChannel(t *testing.T) {
+	if cmd := waitRescanCmd(nil); cmd != nil {
+		t.Error("waitRescanCmd(nil) should return nil cmd")
+	}
+}
+
+func TestWaitRescanCmdFires(t *testing.T) {
+	ch := make(chan struct{}, 1)
+	ch <- struct{}{}
+
+	cmd := waitRescanCmd(ch)
+	if cmd == nil {
+		t.Fatal("waitRescanCmd(non-nil chan) should return a non-nil cmd")
+	}
+
+	msg := cmd()
+	if _, ok := msg.(ScanRequestMsg); !ok {
+		t.Errorf("expected ScanRequestMsg, got %T", msg)
 	}
 }
 
@@ -2200,7 +2328,7 @@ func TestPromptApproveFirstSendKeysError(t *testing.T) {
 	scanner := &mockScanner{}
 	cfg := config.Default()
 
-	m := NewModel(scanner, updater, reader, failTerm, cfg, false)
+	m := NewModel(scanner, updater, reader, failTerm, cfg, false, nil)
 	projects := []core.Project{
 		{
 			Path: "/project-a",

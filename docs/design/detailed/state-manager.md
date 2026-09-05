@@ -466,3 +466,23 @@ baton の読み書き比率は**読み取りが圧倒的に多い**。
 | **ソート順** | Session.ID 昇順 → Project.Path 昇順 | 状態優先度順（Waiting > Error > Thinking > ToolUse > Idle）→ LastActivity 降順 |
 | **Watcher 依存** | あり（`*Watcher` を直接保持） | **なし**（完全に削除） |
 | **IncrementalReader の保持** | StateManager が直接保持 | StateResolver 経由（StateManager は保持しない） |
+
+---
+
+## ApplyHookStates（Stage B, ADR-0015）
+
+`docs/adr/0015-hook-based-waiting-detection.md` / `docs/design/detailed/hook-state-detection.md` の実装（PR2）で `StateManager` に追加されたメソッド。
+
+```go
+func (s *StateManager) SetHookStore(store *hook.Store)
+func (s *StateManager) ApplyHookStates()
+```
+
+- `SetHookStore` は Claude Code hooks 由来の状態ストア（`internal/hook.Store`）を設定する。常駐起動（`--once`/`--exit` 以外）で hook socket の listen に成功した場合のみ呼び出される。呼ばれなければ `hookStore` は `nil` のまま
+- `ApplyHookStates` は `UpdateFromScan` の直後・`RefineToolUseState` の前に呼び出す。処理内容:
+  1. `hookStore` が設定されていれば、直近スキャンの pane ID 集合で `RetainPanes` を呼び、tmux から消えた pane の hook 状態を掃除する
+  2. `Tool == ToolClaude` かつ `PaneID != ""` の Session について、対応する `hook.State` があれば `SessionID`/`TranscriptPath` を転記し、`Waiting` なら `State` を `Waiting` に固定して `HookWaiting=true`, `StateSource="hook"` とする
+  3. hook 由来の Waiting が確定しなかった Claude セッションは `StateSource="jsonl"`（`RefineToolUseState` が pane 判定に成功すれば `StateSource="pane"` に更新される）
+  4. `hookStore == nil`（hooks 未設定/listen 失敗）の場合は Claude セッションの `StateSource` を `"jsonl"` にするだけの no-op
+- `RefineToolUseState` の Claude 分岐は、`sess.HookWaiting == true` の間 `classifyClaudePane` の判定結果で `State` を上書きしない。ただし判定結果自体は `hookStore.NoteScanResult(paneID, classified && newState == Idle)` に渡し、Idle 連続カウント（解除の安全網）だけを進める
+- 優先順位: hook (`PermissionRequest` による Waiting) > ペインテキスト（`classifyClaudePane`）> JSONL（初期値・判定不能時のフォールバック）

@@ -155,7 +155,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case TickMsg:
-		return m, doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader, m.terminal)
+		return m, doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader, m.terminal, true)
+	case ScanRequestMsg:
+		return m, tea.Batch(
+			doScanCmd(context.Background(), m.scanner, m.stateUpdater, m.stateReader, m.terminal, false),
+			waitRescanCmd(m.rescan),
+		)
 	case ScanResultMsg:
 		// スキャン成功時は scanErr のみクリアし、操作系エラーは保持する。
 		if m.err != nil && m.scanErr != nil && m.err == m.scanErr {
@@ -171,7 +176,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.maybeUpdatePreview()
 		// 自動承認チェック
 		autoCmd := m.checkAutoApprove()
-		return m, tea.Batch(tickCmd(m.config.ScanInterval), cmd, autoCmd)
+		cmds := []tea.Cmd{cmd, autoCmd}
+		if msg.Periodic {
+			// 定期 tick 由来のスキャンのみ tick を再アームする。
+			// hook rescan 由来のスキャン（Periodic=false）では、まだ生きている
+			// 既存の tick タイマーを二重に走らせないよう再アームしない。
+			cmds = append(cmds, tickCmd(m.config.ScanInterval))
+		}
+		return m, tea.Batch(cmds...)
 	case PreviewResultMsg:
 		if msg.PaneID != "" && msg.PaneID != m.previewPaneID {
 			// 選択が変わった後の遅延レスポンスは破棄する。

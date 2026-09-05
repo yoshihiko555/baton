@@ -66,6 +66,15 @@ func TestDefault(t *testing.T) {
 	if got.AutoMode.RiskThreshold != "medium" {
 		t.Fatalf("unexpected AutoMode.RiskThreshold: got %q", got.AutoMode.RiskThreshold)
 	}
+	if !got.Hook.Enabled {
+		t.Fatal("Hook.Enabled should be true by default")
+	}
+	if got.Hook.SocketPath != "~/.local/state/baton/hook.sock" {
+		t.Fatalf("unexpected Hook.SocketPath: got %q", got.Hook.SocketPath)
+	}
+	if got.Hook.IdleCancelScans != 3 {
+		t.Fatalf("unexpected Hook.IdleCancelScans: got %d", got.Hook.IdleCancelScans)
+	}
 }
 
 func TestLoadValidYAML(t *testing.T) {
@@ -91,6 +100,10 @@ auto_mode:
   model: gpt-5.3-codex-spark
   timeout: 3s
   risk_threshold: low
+hook:
+  enabled: false
+  socket_path: ~/custom/hook.sock
+  idle_cancel_scans: 5
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
@@ -148,6 +161,15 @@ auto_mode:
 	if got.AutoMode.RiskThreshold != "low" {
 		t.Fatalf("unexpected AutoMode.RiskThreshold: got %q", got.AutoMode.RiskThreshold)
 	}
+	if got.Hook.Enabled {
+		t.Fatal("Hook.Enabled should be false from YAML")
+	}
+	if got.Hook.SocketPath != filepath.Join(home, "custom/hook.sock") {
+		t.Fatalf("unexpected Hook.SocketPath: got %q", got.Hook.SocketPath)
+	}
+	if got.Hook.IdleCancelScans != 5 {
+		t.Fatalf("unexpected Hook.IdleCancelScans: got %d", got.Hook.IdleCancelScans)
+	}
 }
 
 func TestLoadPartialYAML(t *testing.T) {
@@ -188,6 +210,41 @@ status_output_path: ~/tmp/baton-status.json
 	}
 	if !got.AutoMode.Enabled {
 		t.Fatal("AutoMode.Enabled should remain default true when omitted")
+	}
+	if !got.Hook.Enabled {
+		t.Fatal("Hook.Enabled should remain default true when omitted")
+	}
+}
+
+func TestHookIdleCancelScansExplicitZero(t *testing.T) {
+	// idle_cancel_scans: 0 が未指定扱いにならず、デフォルト値を上書きすることを確認する。
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `hook:
+  idle_cancel_scans: 0
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir failed: %v", err)
+	}
+
+	if got.Hook.IdleCancelScans != 0 {
+		t.Fatalf("unexpected Hook.IdleCancelScans: got %d, want 0", got.Hook.IdleCancelScans)
+	}
+	if !got.Hook.Enabled {
+		t.Fatal("Hook.Enabled should remain default true when omitted")
+	}
+	if got.Hook.SocketPath != filepath.Join(home, ".local/state/baton/hook.sock") {
+		t.Fatalf("unexpected Hook.SocketPath: got %q", got.Hook.SocketPath)
 	}
 }
 
