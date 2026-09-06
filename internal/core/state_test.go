@@ -1496,6 +1496,36 @@ func TestClassifyClaudePane(t *testing.T) {
 			wantOK:    true,
 		},
 		{
+			name:      "working with eight-spoked asterisk indicator",
+			input:     "previous\n✻ Perambulating… (37s · ↓ 933 tokens)\n\n────────────────────────\n❯\n────────────────────────\n  📁 proj\n",
+			wantState: Thinking,
+			wantOK:    true,
+		},
+		{
+			name:      "working with heavy teardrop asterisk indicator",
+			input:     "previous\n✽ Pondering… (1m 2s)\n\n────────────────────────\n❯\n────────────────────────\n  📁 proj\n",
+			wantState: Thinking,
+			wantOK:    true,
+		},
+		{
+			name:      "working with eight-pointed asterisk indicator",
+			input:     "previous\n✳ Composing… (4s)\n\n────────────────────────\n❯\n────────────────────────\n  📁 proj\n",
+			wantState: Thinking,
+			wantOK:    true,
+		},
+		{
+			name:      "idle with completed message using teardrop glyph",
+			input:     "output\n✽ Worked for 12s\n\n────────────────────────\n❯ \n────────────────────────\n  📁 proj\n",
+			wantState: Idle,
+			wantOK:    true,
+		},
+		{
+			name:      "idle with spinner glyph inside text is not working",
+			input:     "⏺ done ✻ decorated\n\n────────────────────────\n❯\n────────────────────────\n  📁 proj\n",
+			wantState: Idle,
+			wantOK:    true,
+		},
+		{
 			name:      "working with six-pointed star indicator",
 			input:     "previous\n✶ Envisioning… (2m 10s)\n\n────────────────────────\n❯\n────────────────────────\n  📁 proj\n",
 			wantState: Thinking,

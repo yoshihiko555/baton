@@ -759,13 +759,30 @@ func classifyClaudePane(text string) (state SessionState, ok bool) {
 	}
 	for i := start; i < promptIdx; i++ {
 		trimmed := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(trimmed, "· ") || strings.HasPrefix(trimmed, "✢ ") || strings.HasPrefix(trimmed, "✶ ") || strings.Contains(trimmed, "Running…") {
+		if isSpinnerLine(trimmed) || strings.Contains(trimmed, "Running…") {
 			return Thinking, true
 		}
 	}
 
 	// Step 5: Working シグナルなし + 入力プロンプト行あり → Idle
 	return Idle, true
+}
+
+// claudeSpinnerGlyphs は Claude Code のスピナーがフレームごとに切り替える記号。
+var claudeSpinnerGlyphs = []string{"·", "✢", "✳", "✶", "✻", "✽"}
+
+// isSpinnerLine は行が作業中スピナー（例: "✻ Perambulating… (37s)"）か返す。
+// 完了時の "✻ Worked for 4m 12s" も同じ記号で始まるため、進行中を示す "…" を必須にする。
+func isSpinnerLine(line string) bool {
+	if !strings.Contains(line, "…") {
+		return false
+	}
+	for _, g := range claudeSpinnerGlyphs {
+		if strings.HasPrefix(line, g+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 // projectNeedsAttention はプロジェクト内に Waiting または Error のセッションがあるか返す。
