@@ -87,7 +87,48 @@ baton --config ~/.config/baton/config.yaml
 
 # Version
 baton --version
+
+# List sessions without opening the TUI
+baton list
+
+# List only sessions waiting for approval, as JSON
+baton list --waiting --format json
+
+# Approve / deny a specific pane's prompt (tmux pane ID, e.g. %5)
+baton approve %5
+baton deny %5
 ```
+
+### Subcommands
+
+`list` / `approve` / `deny` let you inspect and respond to approval prompts without opening the TUI. They never write `/tmp/baton-status.json` (or the resident instance's status file) — they only run a local, read-only scan.
+
+```bash
+# List all sessions (table format by default)
+baton list [--waiting] [--format table|json] [--config <path>]
+
+# Send Enter to a waiting session's pane (approve)
+baton approve <pane> [--config <path>]
+
+# Send Escape to a waiting session's pane (deny)
+baton deny <pane> [--config <path>]
+```
+
+`<pane>` is the terminal's pane ID (tmux: `%5` form; WezTerm: numeric string). Find it via `baton list`.
+
+Exit codes for `approve`/`deny`:
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Internal error (config, terminal, or scan failure) |
+| 2 | Usage error (missing/extra arguments, unknown flag) |
+| 3 | Pane not found in the current scan |
+| 4 | Session is not currently approvable (not Waiting, unsupported tool, ambiguous pane mapping, or the pane ID matches two or more Waiting sessions) |
+
+A scan failure (e.g. the terminal backend errors out) is reported as exit code 1, same as other internal errors. `-h`/`--help` prints usage and exits 0.
+
+Since these subcommands are plain, non-interactive CLI calls, they also work over SSH, e.g. `ssh host baton approve %5`. A non-default tmux socket (`tmux -L <name>`) is not supported — `baton` always talks to the default tmux socket.
 
 ### tmux popup integration
 

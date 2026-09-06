@@ -27,8 +27,13 @@ import (
 var version = "dev"
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "hook" {
-		os.Exit(hook.RunHookCommand(os.Args[2:], os.Stdin, os.Getenv))
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "hook":
+			os.Exit(hook.RunHookCommand(os.Args[2:], os.Stdin, os.Getenv))
+		case "list", "approve", "deny":
+			os.Exit(runSubcommand(os.Args[1], os.Args[2:], os.Stdout, os.Stderr))
+		}
 	}
 
 	if err := run(); err != nil {
@@ -45,6 +50,17 @@ func run() error {
 	outputFormat := flag.String("format", "json", "output format for --once: json or tmux")
 	exitOnJump := flag.Bool("exit", false, "exit after pane jump")
 	showVersion := flag.Bool("version", false, "print version")
+
+	defaultUsage := flag.Usage
+	flag.Usage = func() {
+		defaultUsage()
+		fmt.Fprint(flag.CommandLine.Output(), `
+Subcommands:
+  list [--waiting] [--format table|json] [--config <path>]   List sessions without opening the TUI
+  approve <pane> [--config <path>]                            Send Enter to a waiting session's pane
+  deny <pane> [--config <path>]                                Send Escape to a waiting session's pane
+`)
+	}
 	flag.Parse()
 
 	if *showVersion {

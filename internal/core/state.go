@@ -543,6 +543,28 @@ func (s *StateManager) Panes() []terminal.Pane {
 	return s.panes
 }
 
+// FilterWaitingSessions は projects から Waiting 状態のセッションだけを残した
+// コピーを返す。セッションが 0 件になったプロジェクトは結果から除外する。
+// list --waiting のように、フィルタ後の結果を calcSummary（BuildStatusOutputFromProjects
+// 経由）へそのまま渡せるよう、ドメイン型（[]Project）の段階でフィルタする。
+func FilterWaitingSessions(projects []Project) []Project {
+	filtered := make([]Project, 0, len(projects))
+	for _, p := range projects {
+		sessions := make([]*Session, 0, len(p.Sessions))
+		for _, s := range p.Sessions {
+			if s != nil && s.State == Waiting {
+				sessions = append(sessions, s)
+			}
+		}
+		if len(sessions) == 0 {
+			continue
+		}
+		p.Sessions = sessions
+		filtered = append(filtered, p)
+	}
+	return filtered
+}
+
 // calcSummary は全プロジェクトのセッションを集計して Summary を返す。
 func calcSummary(projects []Project) Summary {
 	s := Summary{ByTool: make(map[string]int)}

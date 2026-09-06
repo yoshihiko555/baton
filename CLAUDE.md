@@ -43,6 +43,15 @@ go vet ./...
 # ワンショット（1回だけ状態出力して終了）
 ./baton --once
 
+# セッション一覧（TUI を開かない）
+./baton list --waiting
+
+# 承認待ちペインに Enter を送信
+./baton approve %5
+
+# 承認待ちペインに Escape を送信
+./baton deny %5
+
 # バージョン表示
 ./baton --version
 ```
@@ -54,6 +63,7 @@ go vet ./...
 ```
 .
 ├── main.go                          # エントリポイント（--no-tui/--once/--config フラグ）
+├── subcommand.go                    # list/approve/deny サブコマンド（TUI を開かない one-shot CLI）
 ├── internal/
 │   ├── core/
 │   │   ├── model.go                 # ドメイン型（SessionState, Session, Project, StatusOutput）
@@ -62,6 +72,7 @@ go vet ./...
 │   │   ├── scanner.go               # DefaultScanner（ペイン走査 + CurrentCommand フィルタ）
 │   │   ├── watcher.go               # fsnotify ファイルウォッチャー + デバウンス
 │   │   ├── state.go                 # 状態集約マネージャー（ResolveMultiple 方式）
+│   │   ├── approval.go              # 承認/拒否ゲート（CanRespondToApproval, SendApproval）
 │   │   └── exporter.go              # アトミック JSON 書き出し
 │   ├── terminal/
 │   │   ├── terminal.go              # Terminal インターフェース定義（Pane 構造体含む）
@@ -90,6 +101,7 @@ go vet ./...
 
 ## Notes
 
+- 承認ゲート `core.CanRespondToApproval` は TUI の `a`/`d` と CLI `approve`/`deny` で共用
 - 設定ファイル: `~/.config/baton/config.yaml`（オプション）
 - ステータス出力: `/tmp/baton-status.json`（アトミック書き込み）
 - デフォルトターミナル: tmux（config.yaml の `terminal` で "wezterm" に変更可能）
