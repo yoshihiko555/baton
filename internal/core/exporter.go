@@ -39,30 +39,42 @@ func (e *Exporter) SetHookListener(v bool) {
 
 // Write は StateReader から状態を読み取り、DTO に変換してアトミックに書き出す。
 func (e *Exporter) Write(sr StateReader) error {
-	// プロジェクト一覧を変換する。
-	rawProjects := sr.Projects()
-	projects := make([]ProjectOutput, 0, len(rawProjects))
-	for _, p := range rawProjects {
-		projects = append(projects, toProjectOutput(p))
-	}
-
-	// サマリーを変換する。
-	summary := toSummaryOutput(sr.Summary())
-
-	// FormattedStatus を生成する。
-	formatted := e.formatStatus(summary)
-
-	// StatusOutput を組み立てる。
-	status := StatusOutput{
-		Version:         2,
-		Timestamp:       time.Now().UTC().Format(time.RFC3339),
-		HookListener:    e.hookListener,
-		Projects:        projects,
-		Summary:         summary,
-		FormattedStatus: formatted,
-	}
+	status := BuildStatusOutput(sr, e.hookListener)
+	// FormattedStatus は Exporter に設定された template で上書きする
+	// （BuildStatusOutput のデフォルト書式ではなく、Statusbar.Format 設定を反映するため）。
+	status.FormattedStatus = FormatStatus(e.cfg.Format, status.Summary)
 
 	return writeAtomicJSON(status, e.destPath)
+}
+
+// BuildStatusOutput は StateReader から StatusOutput DTO を組み立てる。
+// FormattedStatus はデフォルト書式（"{{.Active}}/{{.TotalSessions}}" 相当）で設定される。
+// Exporter.Write はこれを呼び出した後、自身に設定された template で FormattedStatus を上書きする。
+func BuildStatusOutput(sr StateReader, hookListener bool) StatusOutput {
+	return BuildStatusOutputFromProjects(sr.Projects(), hookListener)
+}
+
+// BuildStatusOutputFromProjects は []Project から直接 StatusOutput DTO を組み立てる。
+// Summary は calcSummary(projects) で算出するため、呼び出し側が list --waiting のように
+// フィルタ済みの []Project を渡せば、フィルタ後の集計を calcSummary と同じルールで
+// 再現できる（文字列化した DTO の再集計を避けるための export）。
+// FormattedStatus はデフォルト書式（"{{.Active}}/{{.TotalSessions}}" 相当）で設定される。
+func BuildStatusOutputFromProjects(projects []Project, hookListener bool) StatusOutput {
+	outputs := make([]ProjectOutput, 0, len(projects))
+	for _, p := range projects {
+		outputs = append(outputs, toProjectOutput(p))
+	}
+
+	summary := toSummaryOutput(calcSummary(projects))
+
+	return StatusOutput{
+		Version:         2,
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		HookListener:    hookListener,
+		Projects:        outputs,
+		Summary:         summary,
+		FormattedStatus: fmt.Sprintf("%d/%d", summary.Active, summary.TotalSessions),
+	}
 }
 
 // ReadStatus reads and decodes a status JSON file previously written by Exporter.Write.
@@ -152,10 +164,12 @@ func toSummaryOutput(s Summary) SummaryOutput {
 	}
 }
 
-// formatStatus は Go template を使って FormattedStatus 文字列を生成する。
-// template パースまたは実行に失敗した場合はフォールバック文字列を返す。
-func (e *Exporter) formatStatus(summary SummaryOutput) string {
-	tmplStr := e.cfg.Format
+// FormatStatus は Go template（tmplStr）を使って summary から FormattedStatus 文字列を
+// 生成する。tmplStr が空、またはパース・実行に失敗した場合はデフォルト書式
+// "{{.Active}}/{{.TotalSessions}}" 相当のフォールバック文字列を返す。
+// Exporter.Write（Statusbar.Format 反映）と CLI サブコマンド（list --format json の
+// formatted_status 反映）の両方から共有される。
+func FormatStatus(tmplStr string, summary SummaryOutput) string {
 	if tmplStr == "" {
 		tmplStr = "{{.Active}}/{{.TotalSessions}}"
 	}

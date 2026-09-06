@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- TUI を開かずに承認プロンプトへ応答できる `baton list` / `baton approve <pane>` / `baton deny <pane>` サブコマンドを追加
+
 ## [0.1.3] - 2026-09-06
 
 ### Added

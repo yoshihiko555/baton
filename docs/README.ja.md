@@ -86,7 +86,48 @@ baton --config ~/.config/baton/config.yaml
 
 # バージョン表示
 baton --version
+
+# TUI を開かずにセッション一覧を表示
+baton list
+
+# 承認待ちセッションのみを JSON で表示
+baton list --waiting --format json
+
+# 特定ペインの承認プロンプトに応答（tmux ペイン ID、例: %5）
+baton approve %5
+baton deny %5
 ```
+
+### サブコマンド
+
+`list` / `approve` / `deny` を使うと、TUI を開かずにセッションの確認と承認プロンプトへの応答ができます。これらはいずれも `/tmp/baton-status.json`（常駐インスタンスの status ファイル）を書き換えません。ローカルで読み取り専用のスキャンを実行するだけです。
+
+```bash
+# 全セッション一覧（デフォルトは table 形式）
+baton list [--waiting] [--format table|json] [--config <path>]
+
+# 承認待ちペインに Enter を送信（承認）
+baton approve <pane> [--config <path>]
+
+# 承認待ちペインに Escape を送信（拒否）
+baton deny <pane> [--config <path>]
+```
+
+`<pane>` はターミナルのペイン ID（tmux: `%5` 形式、WezTerm: 数値文字列）です。`baton list` で確認できます。
+
+`approve`/`deny` の終了コード:
+
+| コード | 意味 |
+|------|------|
+| 0 | 成功 |
+| 1 | 内部エラー（設定・ターミナル・スキャン失敗） |
+| 2 | 引数エラー（引数不足/過多、未知のフラグ） |
+| 3 | 指定したペインが今回のスキャンに見つからない |
+| 4 | 承認可能な状態でない（Waiting でない、対応外ツール、ペイン対応が曖昧、または同一ペイン ID を持つ Waiting セッションが2件以上） |
+
+スキャン失敗（ターミナルバックエンドのエラー等）は他の内部エラーと同じく終了コード 1 になる。`-h`/`--help` はヘルプを表示して終了コード 0 を返す。
+
+これらのサブコマンドは単純な非対話 CLI 呼び出しのため、`ssh host baton approve %5` のように SSH 越しでも使えます。非デフォルトの tmux ソケット（`tmux -L <name>`）には対応していません（`baton` は常にデフォルトソケットに接続します）。
 
 ### tmux popup 連携
 

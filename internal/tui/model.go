@@ -281,7 +281,7 @@ func (m Model) canApprove() bool {
 	if sel == nil || sel.session == nil {
 		return false
 	}
-	return sel.session.State == core.Waiting && (sel.session.Tool == core.ToolClaude || sel.session.Tool == core.ToolCodex) && sel.session.PaneID != ""
+	return core.CanRespondToApproval(*sel.session)
 }
 
 // canToggleAutoApprove は選択中のセッションが安全オートモードを切替可能かを返す。
