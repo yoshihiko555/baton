@@ -401,14 +401,15 @@ func TestPipelineCodex_RefineToWaiting(t *testing.T) {
 	}
 }
 
-// TestPipelineMixedTools tests a multi-tool scenario with Claude, Codex, and agy
-// across different panes, verifying summary aggregation.
+// TestPipelineMixedTools tests a multi-tool scenario with Claude, Codex, agy, and
+// OpenCode across different panes, verifying summary aggregation.
 func TestPipelineMixedTools(t *testing.T) {
 	term := &mockTerminal{
 		panes: []terminal.Pane{
 			{ID: "%1", TTYName: "/dev/ttys001", WorkingDir: "/project-a", CurrentCommand: "claude"},
 			{ID: "%2", TTYName: "/dev/ttys002", WorkingDir: "/project-b", CurrentCommand: "codex"},
 			{ID: "%3", TTYName: "/dev/ttys003", WorkingDir: "/project-c", CurrentCommand: "agy"},
+			{ID: "%4", TTYName: "/dev/ttys004", WorkingDir: "/project-d", CurrentCommand: ".opencode-wrapp"},
 		},
 	}
 
@@ -417,6 +418,7 @@ func TestPipelineMixedTools(t *testing.T) {
 			"ttys001": psLine(1001, 500, "claude", "claude"),
 			"ttys002": psLine(2001, 500, "codex", "codex"),
 			"ttys003": psLine(4001, 500, "agy", "agy"),
+			"ttys004": psLine(5001, 500, "opencode", "opencode"),
 		},
 		nil, nil,
 	))
@@ -431,8 +433,8 @@ func TestPipelineMixedTools(t *testing.T) {
 	}
 
 	summary := sm.Summary()
-	if summary.TotalSessions != 3 {
-		t.Errorf("expected 3 total sessions, got %d", summary.TotalSessions)
+	if summary.TotalSessions != 4 {
+		t.Errorf("expected 4 total sessions, got %d", summary.TotalSessions)
 	}
 	if summary.ByTool["claude"] != 1 {
 		t.Errorf("expected 1 claude session, got %d", summary.ByTool["claude"])
@@ -442,6 +444,9 @@ func TestPipelineMixedTools(t *testing.T) {
 	}
 	if summary.ByTool["agy"] != 1 {
 		t.Errorf("expected 1 agy session, got %d", summary.ByTool["agy"])
+	}
+	if summary.ByTool["opencode"] != 1 {
+		t.Errorf("expected 1 opencode session, got %d", summary.ByTool["opencode"])
 	}
 }
 

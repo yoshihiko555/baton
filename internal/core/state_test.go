@@ -841,26 +841,250 @@ Do you want to proceed?
 esc to cancel                                                                            Gemini 3.8 Flash · high`
 )
 
+const (
+	openCodeIdlePaneText = `                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                              ▄                                                                 
+                                                             █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█                                                            
+                                                             █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀                                                            
+                                                             ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀                                                            
+                                                                                                                                                                
+                                                                                                                                                                
+                                           ┃                                                                                                                    
+                                           ┃  Ask anything... "Fix a TODO in the codebase"                                                                      
+                                           ┃                                                                                                                    
+                                           ┃  Build · GLM-5.2 OpenCode Go · high                                                                                
+                                           ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                          
+                                           tab agents  ctrl+p commands                                                                                          
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                     ● Tip Press ctrl+c when typing to clear the input field                                                    
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+  /private/tmp/claude-501/-Users-yoshihiko-ghq-github-com-yoshihiko555-baton/f6242811-35d2-4cf2-849a-af1d17002a9c/scratchpad/       ⊙ 1 MCP /status    1.18.25  
+  capture-work:main                                                                                                                                             
+                                                                                                                                                                `
+
+	openCodeWorkingPaneText = `                                                                                                                                                                
+  ┃                                                                                                                     New session - 2026-09-06T05:46:59.      
+  ┃  Count from 1 to 150, one number per line, each followed by a short comment. Do not use any tools.                  169Z                                    
+  ┃                                                                                                                     ses_f8abe8b1effe4WPm6VfO9MW9tF          
+                                                                                                                                                                
+     ▣  Build · GLM-5.2                                                                                                 Context                                 
+                                                                                                                        0 tokens                                
+                                                                                                                        0% used                                 
+                                                                                                                        $0.00 spent                             
+                                                                                                                                                                
+                                                                                                                        MCP                                     
+                                                                                                                        • pencil Connected                      
+                                                                                                                                                                
+                                                                                                                        LSP                                     
+                                                                                                                        LSPs are disabled                       
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                        /private/tmp/claude-501/-Users-         
+  ┃                                                                                                                     yoshihiko-ghq-github-com-yoshihiko555-  
+  ┃                                                                                                                     baton/f6242811-35d2-4cf2-849a-          
+  ┃                                                                                                                     af1d17002a9c/scratchpad/capture-work:   
+  ┃  Build · GLM-5.2 OpenCode Go · high                                                                                 main                                    
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                            
+   ⬝⬝■■■■■■  esc interrupt                                                               tab agents  ctrl+p commands    • OpenCode 1.18.25                      
+                                                                                                                                                                `
+
+	openCodeWorkingSecondPaneText = `                                                                                                                                                                
+  ┃                                                                                                                     Counting 1 to 150 with comments         
+  ┃  Count from 1 to 150, one number per line, each followed by a short comment. Do not use any tools.                  ses_f8abe8b1effe4WPm6VfO9MW9tF          
+  ┃                                                                                                                                                             
+                                                                                                                        Context                                 
+     + Thought: 852ms                                                                                                   0 tokens                                
+                                                                                                                        0% used                                 
+     1: the beginning                                                                                                   $0.00 spent                             
+     2: first prime                                                                                                                                             
+     3: three's company                                                                                                 MCP                                     
+     4: a square number                                                                                                 • pencil Connected                      
+     5: handy for counting                                                                                                                                      
+     6: half a dozen                                                                                                    LSP                                     
+     7: lucky for some                                                                                                  LSPs are disabled                       
+     8: octopus arms                                                                                                                                            
+     9: three squared                                                                                                                                           
+     10: base of our system                                                                                                                                     
+     11: double ones                                                                                                                                            
+     12: a dozen                                                                                                                                                
+     13: unlucky for some                                                                                                                                       
+     14: two weeks in days                                                                                                                                      
+     15: a quarter hour                                                                                                                                         
+     16: four squared                                                                                                                                           
+     17: prime and lonely                                                                                                                                       
+     18:                                                                                                                                                        
+                                                                                                                                                                
+     ▣  Build · GLM-5.2                                                                                                                                         
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                        /private/tmp/claude-501/-Users-         
+  ┃                                                                                                                     yoshihiko-ghq-github-com-yoshihiko555-  
+  ┃                                                                                                                     baton/f6242811-35d2-4cf2-849a-          
+  ┃                                                                                                                     af1d17002a9c/scratchpad/capture-work:   
+  ┃  Build · GLM-5.2 OpenCode Go · high                                                                                 main                                    
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                            
+   ⬝⬝⬝■■■■■  esc interrupt                                                               tab agents  ctrl+p commands    • OpenCode 1.18.25                      
+                                                                                                                                                                `
+
+	openCodeWaitingPaneText = `                                                                                                                                                                
+  ┃                                                                                                                     Creating probe2.txt via shell           
+  ┃  Run the shell command "touch probe2.txt" in the current directory using your shell/bash tool.                      command                                 
+  ┃                                                                                                                     ses_f8abb6ab4ffe3TCoSCHO7yjRy0          
+                                                                                                                                                                
+     + Thought: 369ms                                                                                                   Context                                 
+                                                                                                                        0 tokens                                
+     $ touch probe2.txt                                                                                                 0% used                                 
+                                                                                                                        $0.00 spent                             
+     ▣  Build · GLM-5.2                                                                                                                                         
+                                                                                                                        MCP                                     
+                                                                                                                        • pencil Connected                      
+                                                                                                                                                                
+                                                                                                                        LSP                                     
+                                                                                                                        LSPs are disabled                       
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+                                                                                                                                                                
+  ┃                                                                                                                                                             
+  ┃  △ Permission required                                                                                                                                      
+  ┃    # Shell command                                                                                                  /private/tmp/claude-501/-Users-         
+  ┃                                                                                                                     yoshihiko-ghq-github-com-yoshihiko555-  
+  ┃  $ touch probe2.txt                                                                                                 baton/f6242811-35d2-4cf2-849a-          
+  ┃                                                                                                                     af1d17002a9c/scratchpad/capture-work:   
+  ┃                                                                                                                     main                                    
+  ┃   Allow once   Allow always   Reject                               ctrl+f fullscreen  ⇆ select  enter confirm                                               
+  ┃                                                                                                                     • OpenCode 1.18.25                      
+                                                                                                                                                                `
+)
+
 func TestClassifyByRules(t *testing.T) {
 	tests := []struct {
 		name string
+		tool ToolType
 		text string
 		want SessionState
 	}{
-		{name: "agy idle", text: agyIdlePaneText, want: Idle},
-		{name: "agy working", text: agyWorkingPaneText, want: Thinking},
-		{name: "agy working 2", text: agyWorkingSecondPaneText, want: Thinking},
-		{name: "agy waiting", text: agyWaitingPaneText, want: Waiting},
+		{name: "agy idle", tool: ToolAntigravity, text: agyIdlePaneText, want: Idle},
+		{name: "agy working", tool: ToolAntigravity, text: agyWorkingPaneText, want: Thinking},
+		{name: "agy working 2", tool: ToolAntigravity, text: agyWorkingSecondPaneText, want: Thinking},
+		{name: "agy waiting", tool: ToolAntigravity, text: agyWaitingPaneText, want: Waiting},
 		{
 			name: "claude prompt screen does not false-positive as agy waiting/working",
+			tool: ToolAntigravity,
 			text: "────────────────────────────────\n❯ \n",
+			want: Idle,
+		},
+		{name: "opencode idle", tool: ToolOpenCode, text: openCodeIdlePaneText, want: Idle},
+		{name: "opencode working", tool: ToolOpenCode, text: openCodeWorkingPaneText, want: Thinking},
+		{name: "opencode working 2", tool: ToolOpenCode, text: openCodeWorkingSecondPaneText, want: Thinking},
+		{name: "opencode waiting", tool: ToolOpenCode, text: openCodeWaitingPaneText, want: Waiting},
+		{
+			name: "claude prompt screen does not false-positive as opencode waiting/working",
+			tool: ToolOpenCode,
+			text: "────────────────────────────────\n❯ \n",
+			want: Idle,
+		},
+		{
+			name: "agy waiting screen does not false-positive as opencode waiting/working",
+			tool: ToolOpenCode,
+			text: agyWaitingPaneText,
 			want: Idle,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classifyByRules(toolPaneRules[ToolAntigravity], tc.text)
+			got := classifyByRules(toolPaneRules[tc.tool], tc.text)
 			if got != tc.want {
 				t.Errorf("classifyByRules() = %v, want %v", got, tc.want)
 			}
@@ -890,6 +1114,51 @@ func TestRefineToolUseStateAntigravity(t *testing.T) {
 					Path: "/project",
 					Sessions: []*Session{
 						{PID: 500, Tool: ToolAntigravity, State: Thinking, PaneID: "%1", WorkingDir: "/project"},
+					},
+				},
+			}
+			manager.summary = calcSummary(manager.projects)
+
+			texts := make(map[string]string)
+			if tc.hasPaneText {
+				texts["%1"] = tc.paneText
+			}
+			manager.RefineToolUseState(&paneTextTerminal{texts: texts})
+
+			projects := manager.Projects()
+			if len(projects) != 1 || len(projects[0].Sessions) != 1 {
+				t.Fatalf("unexpected projects/sessions: %v", projects)
+			}
+			if got := projects[0].Sessions[0].State; got != tc.want {
+				t.Errorf("state = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRefineToolUseStateOpenCode(t *testing.T) {
+	tests := []struct {
+		name        string
+		paneText    string
+		hasPaneText bool
+		want        SessionState
+	}{
+		{name: "idle", paneText: openCodeIdlePaneText, hasPaneText: true, want: Idle},
+		{name: "waiting", paneText: openCodeWaitingPaneText, hasPaneText: true, want: Waiting},
+		{name: "working", paneText: openCodeWorkingPaneText, hasPaneText: true, want: Thinking},
+		{name: "working 2", paneText: openCodeWorkingSecondPaneText, hasPaneText: true, want: Thinking},
+		{name: "pane fetch error keeps current state", want: Thinking},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := NewStateManager(nil)
+			manager.projects = []Project{
+				{
+					Name: "proj",
+					Path: "/project",
+					Sessions: []*Session{
+						{PID: 600, Tool: ToolOpenCode, State: Thinking, PaneID: "%1", WorkingDir: "/project"},
 					},
 				},
 			}

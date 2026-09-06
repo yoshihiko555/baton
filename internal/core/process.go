@@ -10,9 +10,10 @@ import (
 
 // toolTypeMap は COMM 名から ToolType へのマッピング。完全一致のみ有効。
 var toolTypeMap = map[string]ToolType{
-	"claude": ToolClaude,
-	"codex":  ToolCodex,
-	"agy":    ToolAntigravity,
+	"claude":   ToolClaude,
+	"codex":    ToolCodex,
+	"agy":      ToolAntigravity,
+	"opencode": ToolOpenCode,
 }
 
 // ProcessScanner は特定の TTY に紐づく AI プロセスを検出する。
@@ -37,6 +38,14 @@ func NewProcessScannerWithExec(execFn func(ctx context.Context, name string, arg
 // normalizeTTY は WezTerm が返す TTY 名を ps コマンド向けに正規化する。
 func normalizeTTY(tty string) string {
 	return strings.TrimPrefix(tty, "/dev/")
+}
+
+// isOpenCodeServer は ARGS の2番目のトークンが "serve" かを判定する。
+// takt は "opencode serve --hostname=127.0.0.1 --port=N" で HTTP バックエンドを起動するが、
+// これは対話セッションではなく監視対象外とする（ADR-0016 Decision 2）。
+func isOpenCodeServer(args string) bool {
+	fields := strings.Fields(args)
+	return len(fields) >= 2 && fields[1] == "serve"
 }
 
 // detectFromArgs は ARGS 文字列から AI ツールを検出する。
@@ -84,16 +93,21 @@ func (s *ProcessScanner) parse(output []byte) []DetectedProcess {
 		}
 		ppid, _ := strconv.Atoi(fields[1])
 		comm := fields[2]
+		args := ""
+		if len(fields) >= 4 {
+			args = strings.Join(fields[3:], " ")
+		}
 		toolType, ok := toolTypeMap[comm]
 		if !ok {
 			// COMM がランタイム名（node 等）の場合、ARGS にフォールバック
-			if len(fields) >= 4 {
-				args := strings.Join(fields[3:], " ")
-				toolType, ok = detectFromArgs(args)
-			}
+			toolType, ok = detectFromArgs(args)
 			if !ok {
 				continue
 			}
+		}
+		if toolType == ToolOpenCode && isOpenCodeServer(args) {
+			// takt が起動する HTTP バックエンド（対話セッションではない）は監視対象外（ADR-0016）
+			continue
 		}
 		parsed = append(parsed, parsedProcess{pid: pid, ppid: ppid, toolType: toolType})
 	}
@@ -132,19 +146,19 @@ func (s *ProcessScanner) FindAIProcesses(ctx context.Context, tty string) ([]Det
 // backgroundCommands は Codex/Claude が常駐させる子プロセス名。
 // これらは「作業中」の判定から除外する。
 var backgroundCommands = map[string]bool{
-	"node":         true, // MCP サーバー
-	"npm":          true, // MCP サーバー起動
-	"uv":           true, // MCP サーバー起動（uvx 経由）
-	"caffeinate":   true, // スリープ防止
-	"gopls":        true, // LSP サーバー
-	"claude-tmux":  true, // tmux 統合プロセス
+	"node":        true, // MCP サーバー
+	"npm":         true, // MCP サーバー起動
+	"uv":          true, // MCP サーバー起動（uvx 経由）
+	"caffeinate":  true, // スリープ防止
+	"gopls":       true, // LSP サーバー
+	"claude-tmux": true, // tmux 統合プロセス
 }
 
 // backgroundPrefixes は常駐子プロセスのベース名プレフィックス。
 // MCP サーバー等のバイナリ名が環境によって異なるため、プレフィックスで除外する。
 var backgroundPrefixes = []string{
-	"mcp-server",  // MCP サーバー各種
-	"mcp-proxy",   // MCP プロキシ
+	"mcp-server", // MCP サーバー各種
+	"mcp-proxy",  // MCP プロキシ
 }
 
 // isBackgroundProcess はプロセス名が常駐プロセスかを判定する。

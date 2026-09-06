@@ -494,7 +494,7 @@ func (m Model) renderStatusBar(totalWidth int) string {
 
 	// ツール別の内訳
 	var toolParts []string
-	for _, tool := range []string{"claude", "codex", "agy"} {
+	for _, tool := range []string{"claude", "codex", "agy", "opencode"} {
 		if count, ok := s.ByTool[tool]; ok && count > 0 {
 			toolParts = append(toolParts, fmt.Sprintf("%s:%d", tool, count))
 		}

@@ -2,7 +2,7 @@
 
 [日本語](docs/README.ja.md)
 
-AI coding session monitor for tmux. Track Claude Code, Codex, and Antigravity CLI (agy) sessions in real-time with a TUI dashboard.
+AI coding session monitor for tmux. Track Claude Code, Codex, Antigravity CLI (agy), and OpenCode sessions in real-time with a TUI dashboard.
 
 ![baton TUI](docs/assets/preview.png)
 
@@ -21,7 +21,7 @@ Key design decisions:
 - Real-time status monitoring: `Thinking` / `ToolUse` / `Waiting` / `Idle` / `Error`
 - `Attention` section for waiting sessions plus a stable `project / tool / PID` ordered session list with terminal preview pane
 - Pane jump: select a session and switch to its tmux pane
-- Multi-tool support: Claude Code, Codex CLI, Antigravity CLI (agy)
+- Multi-tool support: Claude Code, Codex CLI, Antigravity CLI (agy), OpenCode
 - Incremental session filtering in TUI (`/`, text match, state filters like `waiting`, `!idle`)
 - In-TUI approval actions for Claude Code (`a`/`d`/`A`/`D`)
 - Approval prompt detection via `tmux capture-pane` screen scraping
@@ -178,6 +178,7 @@ statusbar:
     claude: ""
     codex: ""
     agy: ""
+    opencode: ""
     default: "●"
   state_icons:
     working: "🤔"
@@ -263,6 +264,9 @@ Ticker (2s)
 | Claude Code | Pane text indicators (`✢` / `·` / `✶`) with JSONL fallback | Prompt line (`❯` + divider) with JSONL fallback | Screen: approval prompt patterns |
 | Codex CLI | `pgrep -P`: child process exists | No child processes | Screen: numbered approval prompt |
 | Antigravity CLI (agy) | Screen: braille spinner line or `esc to cancel` | Screen: residual — none of the other patterns match (footer `? for shortcuts`) | Screen: `Requesting permission for:` + `Do you want to proceed?` |
+| OpenCode | Screen: `esc interrupt` or progress bar (`■`/`⬝`) | Screen: residual — none of the other patterns match (footer `tab agents  ctrl+p commands`) | Screen: `△ Permission required` |
+
+> **Note**: OpenCode auto-approves bash/edit tools by default. Unless `permission` in `opencode.json` is set to `ask`, `Waiting` will never be detected for OpenCode sessions.
 
 ## Project Structure
 

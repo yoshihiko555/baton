@@ -39,6 +39,7 @@ func deepSeaGlow() Theme {
 			core.ToolClaude:      lipgloss.Color("#F0F3FF"),
 			core.ToolCodex:       lipgloss.Color("#15F5BA"),
 			core.ToolAntigravity: lipgloss.Color("#836FFF"),
+			core.ToolOpenCode:    lipgloss.Color("#FF9A3C"),
 		},
 	}
 }
@@ -66,6 +67,7 @@ func synthwavePeach() Theme {
 			core.ToolClaude:      lipgloss.Color("#FFF0F5"),
 			core.ToolCodex:       lipgloss.Color("#C084FC"),
 			core.ToolAntigravity: lipgloss.Color("#FF6B9D"),
+			core.ToolOpenCode:    lipgloss.Color("#4ADE80"),
 		},
 	}
 }
@@ -93,6 +95,7 @@ func bioluminescent() Theme {
 			core.ToolClaude:      lipgloss.Color("#E0FFF0"),
 			core.ToolCodex:       lipgloss.Color("#00BBF9"),
 			core.ToolAntigravity: lipgloss.Color("#00F5D4"),
+			core.ToolOpenCode:    lipgloss.Color("#FEE440"),
 		},
 	}
 }
@@ -108,9 +111,10 @@ var stateKeyMap = map[string]core.SessionState{
 
 // toolKeyMap maps YAML tool key strings to core.ToolType values.
 var toolKeyMap = map[string]core.ToolType{
-	"claude": core.ToolClaude,
-	"codex":  core.ToolCodex,
-	"agy":    core.ToolAntigravity,
+	"claude":   core.ToolClaude,
+	"codex":    core.ToolCodex,
+	"agy":      core.ToolAntigravity,
+	"opencode": core.ToolOpenCode,
 }
 
 // ResolveTheme resolves the final Theme from a ThemeConfig.
