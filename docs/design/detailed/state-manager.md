@@ -199,6 +199,14 @@ for _, proc := range result.Processes {
 `ToolAntigravity` と `ToolOpenCode` はさらに子プロセスを生成しないため、`RefineToolUseState` で `toolPaneRules`/`classifyByRules`
 （manifest 型ルールテーブル、[ADR-0016](../../adr/0016-manifest-style-agent-detection.md)）による画面テキスト判定で Idle/Thinking/Waiting を精緻化する。
 
+**takt 配下セッションのラベル付け（ADR-0016 Decision 3）**: `proc.Via == ViaTakt`（takt が stdio=pipe
+で起動した非対話 claude -p / codex exec）のプロセスは、CWD ごとの Claude 束ね対象（`cwdClaudeProcs`）
+から除外する。同一 CWD の対話 Claude セッションと状態解決スロットを取り合わないようにするためで、
+除外されたセッションは既定の `Thinking` のまま返す（`isTaktPipe` 内部フラグを立てる）。
+takt の `claude-terminal` provider（別 tmux セッション `takt-claude-terminal-<uuid>`）の Claude セッションは
+pane の SessionName prefix で検出し、`Via` のみ付与する（`isTaktPipe` は立てず、CWD 束ね・pane 精緻化は
+通常通り継続する）。
+
 **Step 4: スナップショット照合**
 
 ```go
@@ -487,4 +495,5 @@ func (s *StateManager) ApplyHookStates()
   3. hook 由来の Waiting が確定しなかった Claude セッションは `StateSource="jsonl"`（`RefineToolUseState` が pane 判定に成功すれば `StateSource="pane"` に更新される）
   4. `hookStore == nil`（hooks 未設定/listen 失敗）の場合は Claude セッションの `StateSource` を `"jsonl"` にするだけの no-op
 - `RefineToolUseState` の Claude 分岐は、`sess.HookWaiting == true` の間 `classifyClaudePane` の判定結果で `State` を上書きしない。ただし判定結果自体は `hookStore.NoteScanResult(paneID, classified && newState == Idle)` に渡し、Idle 連続カウント（解除の安全網）だけを進める
+- `sess.isTaktPipe == true`（takt が pipe で起動した非対話 Claude セッション）は、Claude 分岐より前に処理を分岐し `classifyClaudePane` を含む pane テキスト取得自体を行わない（pane には takt 自身の出力しか映らないため）。`!sess.HookWaiting && sess.State == Waiting` の場合のみ `ToolUse` に降格する（ADR-0016 Decision 3）
 - 優先順位: hook (`PermissionRequest` による Waiting) > ペインテキスト（`classifyClaudePane`）> JSONL（初期値・判定不能時のフォールバック）

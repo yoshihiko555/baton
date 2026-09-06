@@ -86,8 +86,11 @@ type DetectedProcess struct {
     PaneID   string   // Pane.ID と同じ string 型（tmux: "%5", wezterm: "42"）
     TTY      string
     CWD      string   // Pane.WorkingDir からコピー（正規化済み）
+    Via      string   // 祖先探索で判明した起動元（例: "takt"）。空文字は非該当（ADR-0016 Decision 3）
 }
 ```
+
+**Via の解決（`ProcessScanner.parse`）**: `ps -t <tty> -o pid,ppid,comm,args` の全行から `pid → {ppid, args}` マップを構築し（AI ツール以外の行も含む）、検出済みプロセスごとに PPID を祖先方向へ辿る（循環ガード・最大32段）。ARGS に `node_modules/takt/` を含む node プロセスに行き着けば `Via = "takt"`。追加の exec は不要（同一 TTY の全プロセスが1回の `ps` 呼び出しに含まれるため）。
 
 ### ToolType
 

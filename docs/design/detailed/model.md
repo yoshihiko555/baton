@@ -107,6 +107,7 @@ v1 では `SessionState` が `MarshalJSON()` を持っていたが、v2 では�
 | （なし） | `OutputTokens int` | 任意フィールド（`omitempty`） |
 | （なし） | `Ambiguous bool` | 内部フィールド（JSON 出力対象外） |
 | （なし） | `CandidatePaneIDs []string` | 内部フィールド（JSON 出力対象外） |
+| （なし） | `Via string` | 任意フィールド（`omitempty`）。takt 等の別ツール配下から起動されたことを示す（ADR-0016 Decision 3、`ViaTakt = "takt"`） |
 
 #### Session.ID 削除の理由
 
@@ -179,8 +180,11 @@ WezTerm のワークスペース駆動運用（プロジェクト別ワークス
 | `PaneID` | `string` | 関連ペイン ID（tmux: "%5", wezterm: "42"。空文字 = 未関連） |
 | `TTY` | `string` | 端末デバイスパス（例: `/dev/ttys001`） |
 | `CWD` | `string` | プロセスの作業ディレクトリ（正規化済み） |
+| `Via` | `string` | 祖先プロセスの解析で判明した起動元（例: `ViaTakt = "takt"`）。空文字は非該当（ADR-0016 Decision 3） |
 
 **CWD 正規化**: `file://` プレフィックスは `ListPanes()` 内で除去する（WezTerm が `file:///Users/...` 形式で返す場合がある）。`DetectedProcess` に格納される時点では純粋なファイルシステムパスである。
+
+**Via の解決方法**: `ps -t <tty>` の結果全行から `pid → {ppid, args}` マップを構築し、検出済みプロセスの PPID を祖先方向へ辿る（循環ガード付き、最大32段）。ARGS に `node_modules/takt/` を含む node プロセスに行き着けば `Via = ViaTakt` とする。takt は claude/codex を stdio=pipe・非 detached で起動するため、env マーカーやペイン画面では判定できず、TTY 内の親子関係のみが手がかりになる。
 
 ---
 

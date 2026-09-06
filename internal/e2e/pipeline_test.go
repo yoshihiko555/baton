@@ -524,6 +524,110 @@ func TestPipelineExporterJSON(t *testing.T) {
 	}
 }
 
+// TestPipelineTaktLabel tests that a claude -p spawned by takt (stdio=pipe, ancestry via
+// node_modules/takt/) is labelled Via=takt, does not consume the CWD-bundled state slot of a
+// sibling interactive claude session in the same CWD, and that pane refinement is skipped for
+// it (screen text that would otherwise be misclassified as Waiting has no effect). It also
+// verifies that a genuinely interactive claude session in the same CWD is still refined
+// normally, and that "via" appears in the exported status JSON only for the takt session
+// (ADR-0016 Decision 3).
+func TestPipelineTaktLabel(t *testing.T) {
+	term := &mockTerminal{
+		panes: []terminal.Pane{
+			{ID: "%1", TTYName: "/dev/ttys001", WorkingDir: "/project-a", CurrentCommand: "claude"},
+			// takt 自身の stdout が pane に映る（claude の stdio は pipe のため見えない）。
+			{ID: "%2", TTYName: "/dev/ttys002", WorkingDir: "/project-a", CurrentCommand: "node"},
+		},
+		paneText: map[string]string{
+			"%1": "Done.\n──────────\n❯\n──────────\n",
+			// takt 配下セッションで pane 精緻化がスキップされないと誤って Waiting 判定されるテキスト。
+			"%2": "❯ 1. Yes, proceed\n  2. No\n",
+		},
+	}
+
+	ps := core.NewProcessScannerWithExec(buildExecFn(
+		map[string]string{
+			"ttys001": psLine(1001, 900, "claude", "claude"),
+			"ttys002": psLine(1000, 1, "zsh", "-zsh") + "\n" +
+				psLine(2000, 1000, "node", "node /Users/user/project-a/node_modules/takt/dist/app/cli/index.js run") + "\n" +
+				psLine(3000, 2000, "claude", "claude -p --verbose --output-format stream-json"),
+		},
+		nil, nil,
+	))
+
+	scanner := core.NewDefaultScanner(term, ps)
+	sm := core.NewStateManager(nil)
+	sm.SetProcessScanner(ps)
+
+	result := scanner.Scan(context.Background())
+	if err := sm.UpdateFromScan(result); err != nil {
+		t.Fatalf("UpdateFromScan error: %v", err)
+	}
+	sm.RefineToolUseState(term)
+
+	byPID := make(map[int]*core.Session)
+	for _, p := range sm.Projects() {
+		for _, s := range p.Sessions {
+			byPID[s.PID] = s
+		}
+	}
+
+	interactive, ok := byPID[1001]
+	if !ok {
+		t.Fatalf("interactive session (PID 1001) not found")
+	}
+	if interactive.Via != "" {
+		t.Errorf("interactive session Via = %q, want empty", interactive.Via)
+	}
+	if interactive.State != core.Idle {
+		t.Errorf("interactive session State = %v, want Idle (pane refinement must still run)", interactive.State)
+	}
+
+	taktSess, ok := byPID[3000]
+	if !ok {
+		t.Fatalf("takt-spawned claude session (PID 3000) not found")
+	}
+	if taktSess.Via != "takt" {
+		t.Errorf("takt session Via = %q, want %q", taktSess.Via, "takt")
+	}
+	if taktSess.State == core.Waiting {
+		t.Errorf("takt session State = %v, want not Waiting (pane refinement must be skipped, screen text must not leak in)", taktSess.State)
+	}
+
+	// Export と JSON 出力の確認
+	outPath := filepath.Join(t.TempDir(), "baton-status.json")
+	exporter := core.NewExporter(outPath, core.ExporterConfig{})
+	if err := exporter.Write(sm); err != nil {
+		t.Fatalf("Exporter.Write error: %v", err)
+	}
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("failed to read exported JSON: %v", err)
+	}
+	if !strings.Contains(string(data), `"via": "takt"`) {
+		t.Errorf(`exported JSON does not contain "via": "takt":\n%s`, data)
+	}
+
+	var status core.StatusOutput
+	if err := json.Unmarshal(data, &status); err != nil {
+		t.Fatalf("failed to unmarshal JSON: %v", err)
+	}
+	for _, p := range status.Projects {
+		for _, s := range p.Sessions {
+			switch s.PID {
+			case 1001:
+				if s.Via != "" {
+					t.Errorf("exported interactive session via = %q, want empty", s.Via)
+				}
+			case 3000:
+				if s.Via != "takt" {
+					t.Errorf("exported takt session via = %q, want %q", s.Via, "takt")
+				}
+			}
+		}
+	}
+}
+
 // TestPipelineParentChildDedup tests that parent-child process deduplication works
 // correctly in the full pipeline.
 func TestPipelineParentChildDedup(t *testing.T) {

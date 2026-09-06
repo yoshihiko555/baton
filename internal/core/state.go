@@ -25,6 +25,11 @@ var statePriority = map[SessionState]int{
 	Idle:     4,
 }
 
+// taktTerminalSessionPrefix は takt の claude-terminal provider が開く tmux セッション名の prefix
+// （"takt-claude-terminal-<uuid>"）。このセッション名の pane 上の Claude セッションは本物の TUI
+// （対話可能）なので、Via のみラベル付けし CWD 束ね・pane 精緻化は従来通り動かす（ADR-0016 Decision 3）。
+const taktTerminalSessionPrefix = "takt-claude-terminal-"
+
 // projectKey はプロセスのグルーピングキー。
 // Workspace が設定されている場合はワークスペース優先、それ以外は CWD 使用。
 type projectKey struct {
@@ -172,6 +177,11 @@ func (s *StateManager) UpdateFromScan(result ScanResult) error {
 		if proc.ToolType != ToolClaude {
 			continue
 		}
+		if proc.Via == ViaTakt {
+			// takt が stdio=pipe で起動した非対話セッションは CWD 束ねに参加させない
+			// （同一 CWD の対話 Claude セッションのスロットを消費してしまうため。ADR-0016 Decision 3）。
+			continue
+		}
 
 		var pinPath, pinSessionID string
 		if s.hookStore != nil {
@@ -225,6 +235,12 @@ func (s *StateManager) UpdateFromScan(result ScanResult) error {
 			sess = s.buildSessionFromPinned(proc, resolved, pinnedTranscript[i], pinnedSessionID[i])
 		} else {
 			sess = s.buildSessionFromStates(proc, cwdStates, cwdStateIndex)
+		}
+		// takt の claude-terminal provider は別 tmux セッション "takt-claude-terminal-<uuid>" に
+		// 本物の TUI を開く（ADR-0016 Decision 3）。こちらは pane 判定・CWD 束ねとも従来通り動かし、
+		// ラベル表示用に Via のみ付与する（isTaktPipe は立てない）。
+		if sess.Tool == ToolClaude && strings.HasPrefix(paneWorkspaceMap[proc.PaneID], taktTerminalSessionPrefix) {
+			sess.Via = ViaTakt
 		}
 		entries = append(entries, sessionEntry{key: key, session: &sess})
 	}
@@ -320,7 +336,10 @@ func (s *StateManager) ApplyHookStates() {
 			if state.TranscriptPath != "" {
 				sess.TranscriptPath = state.TranscriptPath
 			}
-			if state.Waiting {
+			if state.Waiting && !sess.isTaktPipe {
+				// takt pipe 配下には hook Waiting を載せない。headless claude -p は TMUX_PANE を
+				// takt の pane から継承するため hook が届き得るが、Waiting にすると承認操作や
+				// 自動承認モードが takt の pane に Enter を送ってしまう（ADR-0016 Decision 3）。
 				sess.State = Waiting
 				sess.HookWaiting = true
 				sess.StateSource = SourceHook
@@ -399,7 +418,8 @@ func (s *StateManager) applyHookStatusOverlayLocked(status StatusOutput) {
 			if so.TranscriptPath != "" {
 				sess.TranscriptPath = so.TranscriptPath
 			}
-			if so.StateSource == SourceHook {
+			if so.StateSource == SourceHook && !sess.isTaktPipe {
+				// ApplyHookStates と同じ理由で takt pipe 配下には Waiting を載せない。
 				sess.State = Waiting
 				sess.HookWaiting = true
 				sess.StateSource = SourceHook
@@ -423,6 +443,8 @@ func (s *StateManager) buildSessionFromPinned(proc DetectedProcess, resolved Res
 		OutputTokens:   resolved.OutputTokens,
 		TranscriptPath: transcriptPath,
 		SessionID:      sessionID,
+		Via:            proc.Via,
+		isTaktPipe:     proc.Via == ViaTakt,
 	}
 }
 
@@ -437,6 +459,8 @@ func (s *StateManager) buildSessionFromStates(proc DetectedProcess, cwdStates ma
 		WorkingDir: proc.CWD,
 		State:      Thinking,
 		PaneID:     proc.PaneID,
+		Via:        proc.Via,
+		isTaktPipe: proc.Via == ViaTakt,
 	}
 
 	if proc.ToolType == ToolCodex && s.processScanner != nil {
@@ -448,6 +472,12 @@ func (s *StateManager) buildSessionFromStates(proc DetectedProcess, cwdStates ma
 	}
 
 	if proc.ToolType != ToolClaude {
+		return sess
+	}
+
+	if sess.isTaktPipe {
+		// CWD 束ねから除外済み（cwdClaudeProcs に含まれない）のため cwdStates を消費しない。
+		// State は既定の Thinking のまま返し、承認待ちの誤判定は RefineToolUseState 側で降格する。
 		return sess
 	}
 
@@ -645,6 +675,18 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 	for i := range s.projects {
 		for j, sess := range s.projects[i].Sessions {
 			if sess == nil {
+				continue
+			}
+			if sess.isTaktPipe {
+				// takt が stdio=pipe で起動した非対話 claude -p / codex exec は pane に takt 自身の
+				// 出力しか映らないため、ツール種別を問わず画面判定をスキップする（ADR-0016 Decision 3）。
+				// Codex を除外しないのは、takt のログが番号付き行を含むと codexApprovalPattern が
+				// 誤って Waiting にし、自動承認モードが takt の pane に Enter を送りかねないため。
+				// JSONL 由来の Waiting は --permission-mode 固定のため誤検知とみなし ToolUse に降格する
+				// （hook Waiting は保護）。
+				if !sess.HookWaiting && sess.State == Waiting {
+					s.projects[i].Sessions[j].State = ToolUse
+				}
 				continue
 			}
 			// Claude / Codex を toolPaneRules に登録してはならない。登録すると下の hasRules 分岐が

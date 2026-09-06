@@ -72,12 +72,61 @@ type parsedProcess struct {
 	toolType ToolType
 }
 
+// psRow は ps 出力の1行分の親子関係・ARGS を保持する（AI ツール以外の行も含む）。
+// takt 等の祖先プロセスを辿るために、AI ツールとして検出されなかった行（zsh, node など）も必要になる。
+type psRow struct {
+	ppid int
+	args string
+}
+
+// taktModulePathMarker は ARGS に含まれていれば takt の node プロセスとみなすマーカー文字列。
+const taktModulePathMarker = "node_modules/takt/"
+
+// maxAncestorDepth は祖先探索の最大段数。循環参照や壊れた ps 出力での無限ループを防ぐ（ADR-0016）。
+const maxAncestorDepth = 32
+
+// isTaktProcess は ARGS が takt の node プロセスかを判定する。
+func isTaktProcess(args string) bool {
+	return strings.Contains(args, taktModulePathMarker)
+}
+
+// resolveVia は pid の祖先を辿り、takt の node プロセスに行き着くかを判定する。
+//
+// なぜ env やペイン画面ではなく親子関係で判定するか（ADR-0016 Decision 3）:
+// takt は claude/codex を stdio=pipe・detached なしで起動するため、子プロセスにマーカー環境変数は
+// 付与されず、ペイン画面にも takt 自身の出力しか映らない。一方 `ps -t <tty>` は同一 TTY の全プロセスを
+// 返すため、追加の exec なしに PPID を辿って起動元を特定できる。
+func resolveVia(pid int, byPID map[int]psRow) string {
+	row, ok := byPID[pid]
+	if !ok {
+		return ""
+	}
+	visited := map[int]bool{pid: true}
+	ancestorPID := row.ppid
+	for depth := 0; depth < maxAncestorDepth; depth++ {
+		if ancestorPID == 0 || visited[ancestorPID] {
+			return ""
+		}
+		visited[ancestorPID] = true
+		ancestor, ok := byPID[ancestorPID]
+		if !ok {
+			return ""
+		}
+		if isTaktProcess(ancestor.args) {
+			return ViaTakt
+		}
+		ancestorPID = ancestor.ppid
+	}
+	return ""
+}
+
 // parse は ps コマンドの出力を解析して DetectedProcess の一覧に変換する。
 // COMM で AI ツールを直接検出し、失敗した場合は ARGS からフォールバック検出する。
 // 同一ツールの親子プロセス（例: node が AI ツールを起動）は親のみを採用する。
 func (s *ProcessScanner) parse(output []byte) []DetectedProcess {
 	lines := strings.Split(string(output), "\n")
 	var parsed []parsedProcess
+	byPID := make(map[int]psRow, len(lines))
 
 	for i, line := range lines {
 		if i == 0 {
@@ -97,6 +146,9 @@ func (s *ProcessScanner) parse(output []byte) []DetectedProcess {
 		if len(fields) >= 4 {
 			args = strings.Join(fields[3:], " ")
 		}
+		// 祖先探索用に全行分の pid → ppid/ARGS を保持する（AI ツール以外も含む）。
+		byPID[pid] = psRow{ppid: ppid, args: args}
+
 		toolType, ok := toolTypeMap[comm]
 		if !ok {
 			// COMM がランタイム名（node 等）の場合、ARGS にフォールバック
@@ -128,6 +180,7 @@ func (s *ProcessScanner) parse(output []byte) []DetectedProcess {
 			PID:      p.pid,
 			Name:     p.toolType.String(),
 			ToolType: p.toolType,
+			Via:      resolveVia(p.pid, byPID),
 		})
 	}
 	return results

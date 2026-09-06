@@ -119,3 +119,6 @@ go vet ./...
 - 自動承認モード: TUI で `t` キーによるセッション単位トグル。Waiting 検出 → 即座に Enter 送信（多重送信防止付き）
 - Hook セッション除外: tmux の `claude-*-<digits>` パターン（unattached）を自動除外
 - --no-tui モード: 起動メッセージと初回スキャン結果を標準出力に表示
+- takt 配下セッションのラベル付け（`DetectedProcess.Via` / `Session.Via`、ADR-0016 Decision 3）: `ps -t <tty>` の結果を PPID 方向に祖先探索し（循環ガード付き、最大32段）、ARGS に `node_modules/takt/` を含む node プロセスに行き着けば `Via = "takt"`。takt は claude/codex を stdio=pipe・非 detached で起動するため env マーカーも承認 UI も出ず、TTY 内の親子関係でしか判定できない
+- takt 配下（pipe）セッションは CWD 束ね（ResolveMultiple）から除外し、`RefineToolUseState` の pane 精緻化もスキップする（pane には takt 自身の出力しか映らないため）。JSONL 由来の Waiting は ToolUse に降格する（hook 由来の Waiting は保護）。この pipe / terminal の区別は `Session` の内部フラグ（`isTaktPipe`）で行い、`Via` 単体では判定しない
+- takt の `claude-terminal` provider は別 tmux セッション `takt-claude-terminal-<uuid>` に本物の TUI を開く。pane の SessionName の prefix で検出し `Via = "takt"` のみ付与する（CWD 束ね・pane 精緻化は通常の Claude セッションと同様に継続）

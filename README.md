@@ -268,6 +268,22 @@ Ticker (2s)
 
 > **Note**: OpenCode auto-approves bash/edit tools by default. Unless `permission` in `opencode.json` is set to `ask`, `Waiting` will never be detected for OpenCode sessions.
 
+### Sessions launched by takt
+
+[takt](https://www.npmjs.com/package/takt) spawns `claude -p` / `codex exec` as non-interactive
+child processes (stdio piped, no visible pane output). baton detects this via the process
+ancestry (`ps -t <tty>`, walking PPID up to a `node_modules/takt/` process) and labels the
+session `claude (takt)` / `codex (takt)` in the TUI, with `"via": "takt"` in the status JSON.
+These headless sessions:
+
+- Do not consume the CWD-bundled state slot of a sibling interactive Claude session in the same
+  directory (previously they could crowd out the real session's JSONL-derived state)
+- Skip pane-text refinement entirely, since the pane only shows takt's own output, not the
+  child's conversation — `Waiting` never appears for them
+- takt's `claude-terminal` provider opens a real interactive TUI in a separate tmux session
+  (`takt-claude-terminal-<uuid>`); those sessions are also labelled `via: takt` but are refined
+  normally like any other Claude session
+
 ## Project Structure
 
 ```

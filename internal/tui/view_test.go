@@ -242,6 +242,37 @@ func TestPreviewShowsSessionInfo(t *testing.T) {
 	}
 }
 
+func TestViewShowsTaktViaLabel(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+
+	projects := []core.Project{
+		{
+			Path: "/my-proj",
+			Name: "my-proj",
+			Sessions: []*core.Session{
+				{
+					ID:     "s1",
+					PID:    12345,
+					State:  core.Thinking,
+					Tool:   core.ToolClaude,
+					PaneID: "pane-1",
+					Via:    "takt",
+				},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+	m.previewText = "some preview content"
+
+	view := m.View()
+	if !strings.Contains(view, "claude (takt)") {
+		t.Error("view should show tool label 'claude (takt)' for takt-labelled session")
+	}
+}
+
 func TestStatusBarShowsToolBreakdown(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 

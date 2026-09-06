@@ -136,6 +136,9 @@ func toSessionOutput(s Session) SessionOutput {
 	if s.StateSource != "" {
 		out.StateSource = s.StateSource
 	}
+	if s.Via != "" {
+		out.Via = s.Via
+	}
 	return out
 }
 

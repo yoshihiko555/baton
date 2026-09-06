@@ -265,6 +265,21 @@ Ticker (2s)
 
 > **注記**: OpenCode は既定設定で bash/edit ツールが自動承認されます。`opencode.json` の `permission` を `ask` にしていない環境では、OpenCode セッションの `Waiting` は検出されません。
 
+### takt 配下のセッション
+
+[takt](https://www.npmjs.com/package/takt) は `claude -p` / `codex exec` を stdio=pipe の非対話子
+プロセスとして起動する（ペインには何も出力されない）。baton はプロセスの親子関係（`ps -t <tty>` の
+結果を PPID 方向に辿り、`node_modules/takt/` を含む node プロセスに行き着くか）でこれを検知し、
+TUI には `claude (takt)` / `codex (takt)` のように表示、status JSON には `"via": "takt"` を出力する。
+これらの非対話セッションは:
+
+- 同一ディレクトリの対話 Claude セッションの CWD 束ねスロットを消費しない（従来は取り合いになり、
+  対話セッションの JSONL 由来の状態が正しく反映されないことがあった）
+- pane テキストによる精緻化を行わない（pane には takt 自身の出力しか映らず、子の会話は見えないため）。
+  そのため `Waiting`（承認待ち）にはならない
+- takt の `claude-terminal` provider は別 tmux セッション（`takt-claude-terminal-<uuid>`）に本物の
+  対話 TUI を開く。こちらも `via: takt` は付くが、通常の Claude セッションと同様に精緻化される
+
 ## プロジェクト構成
 
 ```

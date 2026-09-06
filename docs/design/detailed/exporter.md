@@ -66,6 +66,7 @@ type SessionOutput struct {
     FirstPrompt  string `json:"first_prompt,omitempty"`  // タスク概要
     InputTokens  int    `json:"input_tokens,omitempty"`  // 入力トークン数
     OutputTokens int    `json:"output_tokens,omitempty"` // 出力トークン数
+    Via          string `json:"via,omitempty"`           // 起動元ラベル（例: "takt"）。ADR-0016 Decision 3
 }
 ```
 

@@ -2763,6 +2763,37 @@ func TestFilterMatchesToolName(t *testing.T) {
 	}
 }
 
+func TestFilterMatchesTaktVia(t *testing.T) {
+	m, _, _, _, _ := newTestModel()
+	projects := []core.Project{
+		{
+			Path: "/project-a",
+			Name: "alpha",
+			Sessions: []*core.Session{
+				{PID: 100, State: core.Idle, Tool: core.ToolClaude, PaneID: "%1"},
+				{PID: 200, State: core.Idle, Tool: core.ToolClaude, PaneID: "%2", Via: "takt"},
+			},
+		},
+	}
+	m = feedProjects(m, projects)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("takt")})
+	m = updated.(Model)
+
+	if got := visibleSessionCount(m.entries); got != 1 {
+		t.Fatalf("visible sessions = %d, want 1 by via filter", got)
+	}
+	sel := m.selectedSession()
+	if sel == nil || sel.session == nil {
+		t.Fatal("expected selected session after via filter")
+	}
+	if sel.session.PID != 200 {
+		t.Fatalf("selected PID = %d, want 200 (takt-labelled session)", sel.session.PID)
+	}
+}
+
 func TestFilterWorkingStateAlias(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 	projects := []core.Project{

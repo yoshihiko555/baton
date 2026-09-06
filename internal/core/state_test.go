@@ -726,6 +726,214 @@ func (m *paneTextTerminal) SendKeys(paneID string, keys ...string) error { retur
 func (m *paneTextTerminal) IsAvailable() bool                            { return true }
 func (m *paneTextTerminal) Name() string                                 { return "mock" }
 
+// countingPaneTextTerminal は paneTextTerminal をラップし、GetPaneText の呼び出し回数を
+// paneID ごとに記録する。takt 配下の pipe セッションで pane 精緻化がスキップされることを確認するために使う。
+type countingPaneTextTerminal struct {
+	paneTextTerminal
+	calls map[string]int
+}
+
+func newCountingPaneTextTerminal(texts map[string]string) *countingPaneTextTerminal {
+	return &countingPaneTextTerminal{
+		paneTextTerminal: paneTextTerminal{texts: texts},
+		calls:            make(map[string]int),
+	}
+}
+
+func (m *countingPaneTextTerminal) GetPaneText(paneID string) (string, error) {
+	m.calls[paneID]++
+	return m.paneTextTerminal.GetPaneText(paneID)
+}
+
+// TestUpdateFromScanExcludesTaktPipeFromCWDBundling は takt が stdio=pipe で起動した非対話
+// claude -p（Via=ViaTakt）が同一 CWD の対話 Claude セッションの状態解決スロットを奪わないことを
+// 確認する（ADR-0016 Decision 3）。プロセス順序を [takt, 対話] にして、束ね除外が走査順に依存しない
+// ことも合わせて確認する。
+func TestUpdateFromScanExcludesTaktPipeFromCWDBundling(t *testing.T) {
+	projectDir := t.TempDir()
+	cwd := "/workspace/shared-cwd"
+	slugDir := filepath.Join(projectDir, cwdToSlug(cwd))
+	writeTestJSONL(t, filepath.Join(slugDir, "interactive.jsonl"), waitingJSONL)
+	resolver := NewStateResolver(NewIncrementalReader(), projectDir, projectDir, time.Second)
+
+	manager := NewStateManager(resolver)
+
+	result := ScanResult{
+		Panes: []terminal.Pane{
+			{ID: "%1", WorkingDir: cwd},
+			{ID: "%2", WorkingDir: cwd},
+		},
+		Processes: []DetectedProcess{
+			{PID: 200, ToolType: ToolClaude, CWD: cwd, PaneID: "%2", Via: ViaTakt},
+			{PID: 100, ToolType: ToolClaude, CWD: cwd, PaneID: "%1"},
+		},
+	}
+
+	if err := manager.UpdateFromScan(result); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	byPane := sessionsByPaneID(t, manager.Projects())
+
+	interactive, ok := byPane["%1"]
+	if !ok {
+		t.Fatalf("interactive session (pane %%1) not found")
+	}
+	if interactive.State != Waiting {
+		t.Errorf("interactive session State = %v, want %v (JSONL 由来の状態を消費できていない)", interactive.State, Waiting)
+	}
+	if interactive.Via != "" {
+		t.Errorf("interactive session Via = %q, want empty", interactive.Via)
+	}
+
+	taktSess, ok := byPane["%2"]
+	if !ok {
+		t.Fatalf("takt session (pane %%2) not found")
+	}
+	if taktSess.State != Thinking {
+		t.Errorf("takt session State = %v, want %v (CWD 束ねに参加せず既定値を維持すべき)", taktSess.State, Thinking)
+	}
+	if taktSess.Via != ViaTakt {
+		t.Errorf("takt session Via = %q, want %q", taktSess.Via, ViaTakt)
+	}
+}
+
+// TestUpdateFromScanLabelsTaktTerminalPaneWithoutSkippingRefinement は takt の
+// claude-terminal provider（別 tmux セッション "takt-claude-terminal-<uuid>"）が Via=takt で
+// ラベル付けされつつ、pane 精緻化は従来通り実行されることを確認する（ADR-0016 Decision 3）。
+func TestUpdateFromScanLabelsTaktTerminalPaneWithoutSkippingRefinement(t *testing.T) {
+	manager := NewStateManager(nil)
+
+	result := ScanResult{
+		Panes: []terminal.Pane{
+			{ID: "%9", WorkingDir: "/project", SessionName: "takt-claude-terminal-abc123"},
+		},
+		Processes: []DetectedProcess{
+			{PID: 300, ToolType: ToolClaude, CWD: "/project", PaneID: "%9"},
+		},
+	}
+
+	if err := manager.UpdateFromScan(result); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	byPane := sessionsByPaneID(t, manager.Projects())
+	sess, ok := byPane["%9"]
+	if !ok {
+		t.Fatalf("session for pane %%9 not found")
+	}
+	if sess.Via != ViaTakt {
+		t.Errorf("Via = %q, want %q (takt-claude-terminal-* pane)", sess.Via, ViaTakt)
+	}
+	if sess.isTaktPipe {
+		t.Error("isTaktPipe = true, want false (claude-terminal provider is a real TUI; pane refinement must still run)")
+	}
+
+	term := newCountingPaneTextTerminal(map[string]string{
+		"%9": "Done.\n──────────\n❯\n──────────\n",
+	})
+	manager.RefineToolUseState(term)
+
+	if term.calls["%9"] == 0 {
+		t.Error("expected GetPaneText to be called for takt-claude-terminal pane (refinement must run)")
+	}
+	updated := sessionsByPaneID(t, manager.Projects())["%9"]
+	if updated.State != Idle {
+		t.Errorf("State after refine = %v, want %v", updated.State, Idle)
+	}
+}
+
+// TestRefineToolUseStateSkipsPaneTextForTaktPipe は takt 配下 pipe セッション（isTaktPipe）で
+// GetPaneText が呼ばれないことを確認する。同じ呼び出しで通常の対話 Claude セッションは従来通り
+// pane テキストを取得することも合わせて確認する（選択的スキップであることの担保）。
+func TestRefineToolUseStateSkipsPaneTextForTaktPipe(t *testing.T) {
+	manager := NewStateManager(nil)
+	manager.projects = []Project{
+		{
+			Name: "proj",
+			Path: "/project",
+			Sessions: []*Session{
+				{PID: 100, Tool: ToolClaude, State: Idle, PaneID: "%1", WorkingDir: "/project"},
+				{PID: 200, Tool: ToolClaude, State: Thinking, PaneID: "%2", WorkingDir: "/project", Via: ViaTakt, isTaktPipe: true},
+				// takt 配下の codex exec: takt のログに番号付き行があっても codexApprovalPattern で Waiting にしてはならない
+				{PID: 300, Tool: ToolCodex, State: Idle, PaneID: "%3", WorkingDir: "/project", Via: ViaTakt, isTaktPipe: true},
+			},
+		},
+	}
+	manager.summary = calcSummary(manager.projects)
+
+	term := newCountingPaneTextTerminal(map[string]string{
+		"%1": "Done.\n──────────\n❯\n──────────\n",
+		"%2": "takt's own headless stdout, irrelevant to claude state",
+		"%3": "1. Yes, run the command\n2. No, cancel\n",
+	})
+
+	manager.RefineToolUseState(term)
+
+	if term.calls["%1"] == 0 {
+		t.Error("expected GetPaneText to be called for the interactive session pane %1")
+	}
+	if got := term.calls["%2"]; got != 0 {
+		t.Errorf("GetPaneText call count for takt pipe pane %%2 = %d, want 0 (pane refinement must be skipped)", got)
+	}
+	if got := term.calls["%3"]; got != 0 {
+		t.Errorf("GetPaneText call count for takt pipe codex pane %%3 = %d, want 0 (pane refinement must be skipped)", got)
+	}
+	if got := manager.projects[0].Sessions[2].State; got != Idle {
+		t.Errorf("takt pipe codex state = %v, want Idle (takt stdout must not be classified as approval prompt)", got)
+	}
+}
+
+// TestRefineToolUseStateDowngradesTaktPipeWaitingToToolUse は takt 配下 pipe セッションの
+// JSONL 由来 Waiting が ToolUse に降格すること、hook 由来の Waiting（HookWaiting）は保護されることを
+// 確認する（--permission-mode 固定のため承認待ちは発生し得ない。ADR-0016 Decision 3）。
+func TestRefineToolUseStateDowngradesTaktPipeWaitingToToolUse(t *testing.T) {
+	tests := []struct {
+		name        string
+		hookWaiting bool
+		want        SessionState
+	}{
+		{name: "jsonl waiting downgrades to tool_use", hookWaiting: false, want: ToolUse},
+		{name: "hook waiting is preserved", hookWaiting: true, want: Waiting},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := NewStateManager(nil)
+			manager.projects = []Project{
+				{
+					Name: "proj",
+					Path: "/project",
+					Sessions: []*Session{
+						{
+							PID:         200,
+							Tool:        ToolClaude,
+							State:       Waiting,
+							PaneID:      "%2",
+							WorkingDir:  "/project",
+							Via:         ViaTakt,
+							isTaktPipe:  true,
+							HookWaiting: tc.hookWaiting,
+						},
+					},
+				},
+			}
+			manager.summary = calcSummary(manager.projects)
+
+			term := newCountingPaneTextTerminal(nil)
+			manager.RefineToolUseState(term)
+
+			if term.calls["%2"] != 0 {
+				t.Errorf("GetPaneText call count = %d, want 0 (pane refinement must be skipped)", term.calls["%2"])
+			}
+			projects := manager.Projects()
+			if got := projects[0].Sessions[0].State; got != tc.want {
+				t.Errorf("state = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRefineCodexThinkingToWaiting(t *testing.T) {
 	// Codex が子プロセスありで Thinking 判定されても、承認UIがあれば Waiting に補正されることを確認する。
 	manager := NewStateManager(nil)
@@ -1860,6 +2068,40 @@ func TestApplyHookStatesSetsWaitingAndTranscript(t *testing.T) {
 	}
 	if session.TranscriptPath != "/path/to/transcript.jsonl" {
 		t.Errorf("TranscriptPath = %q, want %q", session.TranscriptPath, "/path/to/transcript.jsonl")
+	}
+}
+
+// TestApplyHookStatesKeepsTaktPipeOutOfWaiting は takt pipe 配下のセッションに hook 由来の
+// Waiting が載らないこと（承認操作・自動承認が takt の pane に Enter を送らないため）、
+// ただし SessionID / TranscriptPath は取り込まれることを確認する（ADR-0016 Decision 3）。
+func TestApplyHookStatesKeepsTaktPipeOutOfWaiting(t *testing.T) {
+	manager := NewStateManager(nil)
+	session := &Session{Tool: ToolClaude, State: Thinking, PaneID: "%1", Via: ViaTakt, isTaktPipe: true}
+	manager.projects = []Project{{Sessions: []*Session{session}}}
+	manager.panes = []terminal.Pane{{ID: "%1"}}
+
+	store := hook.NewStore(3)
+	store.Apply(hook.Event{
+		PaneID:         "%1",
+		HookEventName:  "PermissionRequest",
+		SessionID:      "sess-takt",
+		TranscriptPath: "/path/to/takt.jsonl",
+	})
+	manager.SetHookStore(store)
+
+	manager.ApplyHookStates()
+
+	if session.State != Thinking {
+		t.Errorf("State = %v, want Thinking (hook Waiting must not apply to takt pipe sessions)", session.State)
+	}
+	if session.HookWaiting {
+		t.Error("HookWaiting = true, want false")
+	}
+	if session.SessionID != "sess-takt" {
+		t.Errorf("SessionID = %q, want %q", session.SessionID, "sess-takt")
+	}
+	if session.TranscriptPath != "/path/to/takt.jsonl" {
+		t.Errorf("TranscriptPath = %q, want %q", session.TranscriptPath, "/path/to/takt.jsonl")
 	}
 }
 

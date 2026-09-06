@@ -322,6 +322,91 @@ func TestParseOpenCode(t *testing.T) {
 	}
 }
 
+func TestParseDetectsTaktViaAncestry(t *testing.T) {
+	// zsh(1000) → node .../node_modules/takt/dist/app/cli/index.js run(2000, ppid 1000)
+	//   → claude -p --verbose --output-format stream-json(3000, ppid 2000)
+	// 同一 TTY の対話 claude(4000, ppid 1000) は takt の子孫ではないため Via は空。
+	output := "  PID  PPID COMM     ARGS\n" +
+		" 1000     1 zsh      -zsh\n" +
+		" 2000  1000 node     node /Users/user/project/node_modules/takt/dist/app/cli/index.js run\n" +
+		" 3000  2000 claude   claude -p --verbose --output-format stream-json --input-format stream-json\n" +
+		" 4000  1000 claude   claude\n"
+
+	ps := NewProcessScannerWithExec(nil)
+	got := ps.parse([]byte(output))
+
+	byPID := make(map[int]DetectedProcess, len(got))
+	for _, p := range got {
+		byPID[p.PID] = p
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("parse() returned %d results, want 2 (takt-spawned claude + interactive claude): %+v", len(got), got)
+	}
+	if via := byPID[3000].Via; via != ViaTakt {
+		t.Errorf("PID 3000 Via = %q, want %q (spawned by takt)", via, ViaTakt)
+	}
+	if via := byPID[4000].Via; via != "" {
+		t.Errorf("PID 4000 Via = %q, want empty (interactive session)", via)
+	}
+}
+
+func TestParseDetectsTaktViaAncestryForCodex(t *testing.T) {
+	// takt は codex exec も同じ方式（stdio=pipe、同一 TTY）で起動する。
+	output := "  PID  PPID COMM     ARGS\n" +
+		" 1000     1 zsh      -zsh\n" +
+		" 2000  1000 node     node /Users/user/project/node_modules/takt/dist/app/cli/index.js run\n" +
+		" 3000  2000 codex    codex exec --experimental-json\n"
+
+	ps := NewProcessScannerWithExec(nil)
+	got := ps.parse([]byte(output))
+	if len(got) != 1 {
+		t.Fatalf("parse() returned %d results, want 1: %+v", len(got), got)
+	}
+	if got[0].Via != ViaTakt {
+		t.Errorf("Via = %q, want %q", got[0].Via, ViaTakt)
+	}
+}
+
+func TestResolveViaHandlesCyclicPPID(t *testing.T) {
+	// 循環参照や壊れた ps 出力でも無限ループせずに空文字を返すこと。
+	byPID := map[int]psRow{
+		100: {ppid: 200, args: "claude -p"},
+		200: {ppid: 100, args: "node something-unrelated"},
+	}
+	if got := resolveVia(100, byPID); got != "" {
+		t.Errorf("resolveVia() = %q, want empty (cycle guard)", got)
+	}
+}
+
+func TestResolveViaMissingAncestorReturnsEmpty(t *testing.T) {
+	byPID := map[int]psRow{
+		100: {ppid: 999, args: "claude -p"},
+	}
+	if got := resolveVia(100, byPID); got != "" {
+		t.Errorf("resolveVia() = %q, want empty (ancestor not found)", got)
+	}
+}
+
+func TestIsTaktProcess(t *testing.T) {
+	tests := []struct {
+		args string
+		want bool
+	}{
+		{"node /Users/user/project/node_modules/takt/dist/app/cli/index.js run", true},
+		{"node /Users/user/project/node_modules/.bin/some-other-tool", false},
+		{"claude -p --verbose", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.args, func(t *testing.T) {
+			if got := isTaktProcess(tc.args); got != tc.want {
+				t.Errorf("isTaktProcess(%q) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestIsOpenCodeServer(t *testing.T) {
 	tests := []struct {
 		args string

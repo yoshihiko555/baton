@@ -18,6 +18,12 @@ const (
 	ToolUnknown
 )
 
+// Via はセッションが別のツール配下で起動されたことを示す値。
+// 現状は takt（node スクリプト）配下のセッション検知にのみ使用する（ADR-0016 Decision 3）。
+const (
+	ViaTakt = "takt"
+)
+
 // String は ToolType の文字列表現を返す。
 func (t ToolType) String() string {
 	switch t {
@@ -94,6 +100,8 @@ type Session struct {
 	OutputTokens     int
 	Ambiguous        bool
 	CandidatePaneIDs []string
+	// Via はセッションが別ツール配下で起動されたことを示す（例: ViaTakt）。TUI 表示・status JSON 出力用。
+	Via string
 
 	// 共通フィールド
 	State        SessionState
@@ -104,6 +112,12 @@ type Session struct {
 	TranscriptPath string // hook 由来のパス。設定時は StateResolver.ResolvePath の1対1ピン留めにも使用
 	StateSource    string // "hook" / "pane" / "jsonl" のいずれか（Claude セッションのみ設定）
 	HookWaiting    bool   // true の間、RefineToolUseState は State を上書きしない（hook 由来の Waiting を保護）
+
+	// isTaktPipe は takt が stdio=pipe で起動した非対話 Claude セッションであることを示す内部フラグ
+	// （ADR-0016 Decision 3）。Via（表示用）とは別に持つ理由: takt-claude-terminal-* pane 由来の
+	// セッションも Via=ViaTakt になるが、あちらは本物の TUI で pane 精緻化を継続する必要があるため、
+	// 「pane 精緻化をスキップすべきか」を Via 単体では判定できない。
+	isTaktPipe bool
 
 	// v1 互換フィールド（watcher / tui が参照。v2 完全移行後に削除予定）
 	ID          string `json:"id,omitempty"`
@@ -133,6 +147,8 @@ type DetectedProcess struct {
 	PaneID   string
 	TTY      string
 	CWD      string
+	// Via は祖先プロセスの解析で判明した起動元（例: ViaTakt）。空文字は非該当を表す。
+	Via string
 }
 
 // ScanResult はプロセススキャンの結果を表す。
@@ -212,6 +228,7 @@ type SessionOutput struct {
 	SessionID      string `json:"session_id,omitempty"`
 	TranscriptPath string `json:"transcript_path,omitempty"`
 	StateSource    string `json:"state_source,omitempty"`
+	Via            string `json:"via,omitempty"`
 }
 
 // SummaryOutput は集計情報の出力 DTO。
