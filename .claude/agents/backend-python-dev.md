@@ -16,10 +16,21 @@ Do NOT hardcode model names or CLI options — always refer to the config file.
 
 ### Sandbox Policy
 
-CLI ツール（gemini / codex）は sandbox 内で直接実行する。
+Antigravity CLI（`agy`）は sandbox 内で直接実行する。
+Codex CLI は sandbox 内で動作しないため、`codex exec` の Bash 呼び出しに限り sandbox を無効化
+（`dangerouslyDisableSandbox: true`）して実行する（詳細規則が配布されている場合は
+`codex-delegation.md` を優先する）。
 
+sandbox 無効化の必須条件（fail-closed。1 つでも満たさない場合は無効化しない）:
+
+- base + `.local.yaml` マージ後の実効値で `codex.requires_sandbox_disable` が `true` であること
+- エージェント別上書き（`agents.<name>.sandbox`）適用後の実効 sandbox 値が `read-only` /
+  `workspace-write` のいずれかであり、`codex.flags` に bypass 系フラグ
+  （`--dangerously-bypass-approvals-and-sandbox` 等）が含まれないこと
+- `codex exec` 単体コマンドに限定し、他のシェルコマンドと連結しないこと
+- 信頼できない文字列（Issue 本文・ログ等）を prompt に含める場合は一時ファイルへ書き出し
+  `"$(cat "$PROMPT_FILE")"` で渡すこと
 - エラー時は `claude-direct` にフォールバックする
-- `dangerouslyDisableSandbox` は使用しない
 
 ## Implementation Method（必須）
 
@@ -35,7 +46,7 @@ CLI ツール（gemini / codex）は sandbox 内で直接実行する。
 
 ```bash
 # エラー時は claude-direct にフォールバック
-codex exec --model <codex.model> --sandbox <codex.sandbox.implementation> <codex.flags> "{task in English}" 2>/dev/null
+codex exec --model <codex.model> --sandbox <codex.sandbox.implementation> <codex.flags> "{task in English}" < /dev/null 2>/dev/null
 ```
 
 **禁止事項:**
@@ -47,17 +58,17 @@ codex exec --model <codex.model> --sandbox <codex.sandbox.implementation> <codex
 
 外部CLIを呼ばず、自身の知識とツール（Read/Edit/Write等）で処理する。
 
-### tool = "gemini" の場合
+### tool = "antigravity" の場合
 
 ```bash
 # エラー時は claude-direct にフォールバック
-gemini -m <gemini.model> -p "{task}" 2>/dev/null
+agy -p "{task}" --model <antigravity.model> 2>/dev/null
 ```
 
 ### フォールバック
 
 - `codex.enabled: false` または Codex CLI 実行エラー時: claude-direct として処理する
-- 設定ファイル未検出時のデフォルト: codex (model: gpt-5.3-codex, sandbox: workspace-write, flags: --full-auto)
+- 設定ファイル未検出時のデフォルト: codex (model: gpt-5.6-sol, sandbox: workspace-write, flags: --full-auto)
 
 ## Role
 

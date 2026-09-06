@@ -1,6 +1,6 @@
 ---
 name: ai-architect
-description: AI/ML architecture agent using Codex and Gemini for model selection, cost/quality/performance evaluation, and AI system design.
+description: AI/ML architecture agent using Codex and Antigravity for model selection, cost/quality/performance evaluation, and AI system design.
 tools: Read, Glob, Grep, Bash, WebSearch
 model: sonnet
 ---
@@ -19,21 +19,21 @@ Do NOT hardcode model names or CLI options — always refer to the config file.
 1. `agents.<agent-name>.tool` を読む
 2. tool に応じてCLIコマンドを構築:
    - `"codex"` → Codex CLI を使用
-   - `"gemini"` → Gemini CLI を使用
+   - `"antigravity"` → Antigravity CLI（agy）を使用（旧値 `"gemini"` は読み替え）
    - `"claude-direct"` → 外部CLIを呼ばず自身で処理
    - `"auto"` → タスクに応じて使い分け
 3. model/sandbox/flags の解決順: `agents.<agent-name>.*` → 該当ツールの設定 → フォールバック
 
 ### フォールバックデフォルト（設定ファイルが見つからない場合）
 - Tool: auto
-- Codex model: gpt-5.3-codex
-- Gemini model: (omit -m flag, use CLI default)
+- Codex model: gpt-5.6-sol
+- Antigravity model: (omit --model flag, use CLI default)
 - Codex sandbox: read-only
 - Codex flags: --full-auto
 
 ## Role
 
-You design AI systems using Codex and Gemini:
+You design AI systems using Codex and Antigravity:
 
 - LLM model selection and comparison
 - Cost/quality/performance trade-offs
@@ -41,24 +41,42 @@ You design AI systems using Codex and Gemini:
 - Prompt strategy design
 - Evaluation framework design
 
+## Sandbox Policy
+
+Antigravity CLI（`agy`）は sandbox 内で直接実行する。
+Codex CLI は sandbox 内で動作しないため、`codex exec` の Bash 呼び出しに限り sandbox を無効化
+（`dangerouslyDisableSandbox: true`）して実行する（詳細規則が配布されている場合は
+`codex-delegation.md` を優先する）。
+
+sandbox 無効化の必須条件（fail-closed。1 つでも満たさない場合は無効化しない）:
+
+- base + `.local.yaml` マージ後の実効値で `codex.requires_sandbox_disable` が `true` であること
+- エージェント別上書き（`agents.<name>.sandbox`）適用後の実効 sandbox 値が `read-only` /
+  `workspace-write` のいずれかであり、`codex.flags` に bypass 系フラグ
+  （`--dangerously-bypass-approvals-and-sandbox` 等）が含まれないこと
+- `codex exec` 単体コマンドに限定し、他のシェルコマンドと連結しないこと
+- 信頼できない文字列（Issue 本文・ログ等）を prompt に含める場合は一時ファイルへ書き出し
+  `"$(cat "$PROMPT_FILE")"` で渡すこと
+- エラー時は `claude-direct` にフォールバックする
+
 ## CLI Usage
 
 cli-tools.yaml の `agents.<agent-name>.tool` に基づいてコマンドを構築する。
 
 ### tool = "auto" の場合（デフォルト）
 
-タスクに応じて codex / gemini / claude-direct を使い分ける。
+タスクに応じて codex / antigravity / claude-direct を使い分ける。
 
 #### 設計・分析には Codex
 
 ```bash
-codex exec --model <model> --sandbox <sandbox> <flags> "{AI architecture question}" 2>/dev/null
+codex exec --model <model> --sandbox <sandbox> <flags> "{AI architecture question}" < /dev/null 2>/dev/null
 ```
 
-#### リサーチには Gemini
+#### リサーチには Antigravity（agy）
 
 ```bash
-gemini -m <model> -p "{AI research question}" 2>/dev/null
+agy -p "{AI research question}" --model <antigravity.model> 2>/dev/null
 ```
 
 #### 簡易タスクは claude-direct
@@ -68,13 +86,13 @@ gemini -m <model> -p "{AI research question}" 2>/dev/null
 ### tool = "codex" の場合
 
 ```bash
-codex exec --model <model> --sandbox <sandbox> <flags> "{AI architecture question}" 2>/dev/null
+codex exec --model <model> --sandbox <sandbox> <flags> "{AI architecture question}" < /dev/null 2>/dev/null
 ```
 
-### tool = "gemini" の場合
+### tool = "antigravity" の場合
 
 ```bash
-gemini -m <model> -p "{AI architecture question}" 2>/dev/null
+agy -p "{AI architecture question}" --model <antigravity.model> 2>/dev/null
 ```
 
 ### tool = "claude-direct" の場合
@@ -133,5 +151,5 @@ gemini -m <model> -p "{AI architecture question}" 2>/dev/null
 
 ## Language
 
-- Ask Codex/Gemini: English
+- Ask Codex/Antigravity: English
 - Output to user: Japanese

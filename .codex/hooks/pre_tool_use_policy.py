@@ -29,6 +29,7 @@ rely on this hook alone to prevent a determined bypass.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from typing import Any
@@ -43,6 +44,7 @@ COMMAND_LIKE_KEYS = ("command", "cmd", "script")
 # options (start with ``-``), not arbitrary subcommands, to avoid
 # matching across unrelated command chains (e.g. ``git log | grep push``).
 _OPTION_TOKENS = r"(?:-\S+(?:\s+(?!-)\S+)?\s+){0,4}"
+_OPTION_TOKENS_REQUIRED = r"(?:-\S+(?:\s+(?!-)\S+)?\s+){1,4}"
 
 # Spelling/ordering variants of the `-rf` flag pair that a plain `-rf`
 # literal would miss: `-fr` (reversed short flags), `-r -f` / `-f -r`
@@ -51,9 +53,47 @@ _OPTION_TOKENS = r"(?:-\S+(?:\s+(?!-)\S+)?\s+){0,4}"
 # broader `rm -rf` (any target) prefix policy lives in
 # `.codex/rules/codex-harness.rules`.
 _RM_RF_FLAGS = r"(?:-rf|-fr|-r\s+-f|-f\s+-r|--recursive\s+--force|--force\s+--recursive)"
+_SENSITIVE_PATH = (
+    r"(?:^|[\s\"'=])(?:"
+    r"\.env(?:$|[\s\"'/])"
+    r"|[^\s\"']+\.env(?:$|[\s\"'])"
+    r"|\.ssh(?:$|[\s\"'/])"
+    r"|\.aws(?:$|[\s\"'/])"
+    r"|[^\s\"']+\.(?:pem|key)(?:$|[\s\"'])"
+    r")"
+)
 
+# NOTE: Plain `git push`, PR creation, and its `new` alias are deliberately NOT
+# hard-blocked here.
+# They are governed by `.codex/rules/codex-harness.rules` with a `prompt`
+# decision (allowed after explicit human approval in interactive Codex). This
+# hook only knows allow (exit 0) / block (exit 2) — it cannot express "prompt"
+# — so a broad `git push` entry here would hard-block it and defeat the
+# rules-layer `prompt`.
+#
+# Codex prefix rules match exact argv prefixes and do not normalize option
+# insertion or aliases. Variants that would bypass the prompt rule are
+# hard-blocked here so users must use the plain prompt-covered form instead.
+# Force-push is also always forbidden, including cases where the force flag is
+# not an immediate prefix token.
 FORBIDDEN_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("git push", re.compile(rf"\bgit\s+{_OPTION_TOKENS}push\b")),
+    (
+        "git force-push",
+        re.compile(
+            rf"\bgit\s+{_OPTION_TOKENS}push\b[^\n]*\s"
+            r"(?:--force(?:=|\s|$)|--force-with-lease(?:=|\s|$)|"
+            r"--force-if-includes(?:=|\s|$)|-f(?:\s|$))"
+        ),
+    ),
+    ("git option-prefixed push", re.compile(rf"\bgit\s+{_OPTION_TOKENS_REQUIRED}push\b")),
+    (
+        "gh option-prefixed PR creation",
+        re.compile(
+            rf"\bgh\s+(?:{_OPTION_TOKENS_REQUIRED}pr\s+{_OPTION_TOKENS}"
+            rf"|{_OPTION_TOKENS}pr\s+{_OPTION_TOKENS_REQUIRED})(?:create|new)\b"
+        ),
+    ),
+    ("sensitive file path", re.compile(_SENSITIVE_PATH)),
     ("gh pr merge", re.compile(rf"\bgh\s+{_OPTION_TOKENS}pr\s+merge\b")),
     ("gh release create", re.compile(rf"\bgh\s+{_OPTION_TOKENS}release\s+create\b")),
     ("npm publish", re.compile(r"\bnpm\s+publish\b")),
@@ -122,5 +162,66 @@ def main() -> int:
     return 2
 
 
+def _reexec_under_target_interpreter() -> None:
+    """Re-exec this hook under $AI_ORCHESTRA_PYTHON if set (Issue #345).
+
+    Codex CLI spawns this hook via a literal ``python3 <path>`` command in
+    ``.codex/hooks.json``. Which interpreter ``python3`` resolves to depends
+    on the spawn environment's PATH (e.g. a version-manager shim vs. the
+    system interpreter in a non-interactive shell), which is out of this
+    hook's control. When ``AI_ORCHESTRA_PYTHON`` is set to a known-good
+    interpreter (``codex_run.py`` / ``codex_review.py`` set it to their own
+    ``sys.executable`` before invoking ``codex exec``), re-exec under it so
+    the hook body runs with a predictable interpreter regardless of how
+    ``python3`` resolved.
+
+    No-op (no behavior change) when the variable is unset, already the
+    running interpreter, the target path is missing, or a re-exec already
+    happened once (guarded by the sentinel below).
+
+    The "already the running interpreter" check compares the raw executable
+    paths (``target == sys.executable``), not ``os.path.realpath()`` of
+    each. A venv's ``bin/python`` is commonly a symlink to a base
+    interpreter; comparing resolved paths would make the venv and its base
+    interpreter look identical even though ``sys.prefix`` and site
+    configuration differ, silently skipping the intended re-exec into the
+    venv (Issue #345 follow-up). Comparing raw paths means any mismatch
+    (including a venv symlink case) triggers a re-exec; the sentinel above
+    still prevents infinite re-exec loops.
+
+    LIMITATIONS: this is a self-referential trust bootstrap, not a hardening
+    guarantee. The decision of whether to switch interpreter runs inside the
+    very PATH-resolved ``python3`` process it is trying to route around. If
+    that interpreter is attacker-influenced (a version-manager shim,
+    ``.python-version``, a malicious ``sitecustomize.py``, etc. -- none of
+    which are covered by the ``.claude/orchestra.json`` ``codex_file_hashes``
+    ledger), the attacker can patch ``os.execv``, strip
+    ``AI_ORCHESTRA_PYTHON`` from the environment, or otherwise run arbitrary
+    code before this function is ever reached, defeating the re-exec before
+    it happens. This is not a new privilege escalation
+    (``AI_ORCHESTRA_PYTHON`` sits at the same trust level as PATH; the
+    PATH-hijack exposure predates this re-exec), but it does not make the
+    hook robust against a deliberately substituted interpreter -- it only
+    narrows the common case of an unexpected/stale PATH resolution. Pinning
+    an absolute interpreter path directly inside ``.codex/hooks.json``
+    (which *is* covered by the hash ledger) would close this remaining gap,
+    but trades away the current machine-independent distribution/sync
+    model; that is a follow-up trade-off decision, not part of this fix.
+    """
+    target = os.environ.get("AI_ORCHESTRA_PYTHON")
+    if not target or os.environ.get("_AI_ORCHESTRA_HOOK_REEXECED"):
+        return
+    if not os.path.isfile(target):
+        return
+    if target == sys.executable:
+        return
+    os.environ["_AI_ORCHESTRA_HOOK_REEXECED"] = "1"
+    try:
+        os.execv(target, [target, *sys.argv])
+    except OSError:
+        pass
+
+
 if __name__ == "__main__":
+    _reexec_under_target_interpreter()
     sys.exit(main())

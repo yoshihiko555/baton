@@ -30,20 +30,25 @@ codd:
 `node_id` は `<kind>:<file-slug>`（file-slug = 拡張子を除いたファイル名 or 安定スラッグ）。
 
 | kind        | node_id 例                  | 由来                     |
-| ----------- | --------------------------- | ------------------------ |
+| ----------- | ---------------------------- | ------------------------ |
 | requirement | `req:feature-list`          | `docs/requirements/*.md` |
 | design      | `design:architecture`       | `docs/architecture/*.md` |
 | adr         | `adr:ADR-20260624-010`      | `docs/adr/ADR-*.md`      |
 | plan        | `plan:codd-coherence-layer` | `.claude/Plans.md`       |
 | rule        | `rule:config-loading`       | `.claude/rules/*.md`     |
 | instruction | `instruction:claude-md`     | `templates/context/*.md` |
+| code        | `code:codd-scan`            | `code_scope.include` 内のソースファイル（opt-in、Issue #98） |
+| test        | `test:test-codd-cli`        | `code_scope.include` 内のテストファイル（opt-in、Issue #98） |
+
+> `code` / `test` は 1行の軽量注釈（`codd:<key> <value>`）で宣言する。詳細は
+> `docs/design/codd-coherence-layer.md` §4.3.1 を参照。
 
 ## status 語彙（kind 依存）
 
-| kind                                             | status 語彙                                                        |
-| ------------------------------------------------ | ------------------------------------------------------------------ |
-| adr                                              | `proposed` / `accepted` / `rejected` / `superseded` / `deprecated` |
-| requirement / design / plan / rule / instruction | `draft` / `active` / `deprecated`                                  |
+| kind                                                    | status 語彙                                                        |
+| -------------------------------------------------------- | ------------------------------------------------------------------ |
+| adr                                                       | `proposed` / `accepted` / `rejected` / `superseded` / `deprecated` |
+| requirement / design / plan / rule / instruction / code / test | `draft` / `active` / `deprecated`                                  |
 
 ## relation（関係種別）
 
@@ -62,4 +67,4 @@ codd:
 - 依存は循環させないこと（循環は error）。
 - `roots`（requirement / instruction）以外で参照ゼロのノードは孤立 warning になる。
 - 上流ノードを更新したら、下流ノードも追従して更新する（drift warning の回避）。
-- `off` を YAML に直接書くと boolean False と解釈されるため、検査レベルは引用符付き `"off"` で書く。
+- 検査レベルに `off` を書く場合、YAML 1.1 仕様では bare `off` が boolean `False` と解釈されるが、`normalize_check_level`（`packages/codd/lib/codd_common.py`）が `False` を含め `off` の大文字小文字違いも自動的に `LEVEL_OFF` へ正規化するため、引用符なしの bare `off` と引用符付き `"off"` はどちらも同じ扱いになる。

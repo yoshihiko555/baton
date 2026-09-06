@@ -45,7 +45,11 @@ CLI ツールの利用可否と設定は `cli-tools.yaml` で一元管理する�
 
 ## サンドボックス実行
 
-外部 CLI（Codex / Antigravity）は sandbox 内で直接実行する。
+Antigravity CLI（`agy`）は sandbox 内で直接実行する。
+Codex CLI は sandbox 内で動作しないため、base + `.local.yaml` マージ後の実効値で
+`codex.requires_sandbox_disable` が `true`（既定値）の場合に限り、呼び出し側で sandbox を
+無効化して実行する。`false` に上書きされた環境では sandbox 内で実行する
+（安全条件の詳細は `codex-delegation.md` 参照）。
 エラー時は `claude-direct` にフォールバックする。
 
 ---
@@ -203,6 +207,20 @@ BASE=$(python3 "$AI_ORCHESTRA_DIR/packages/git-workflow/scripts/resolve_base_bra
 - [{reviewer}] `{file}:{line}` - {1行サマリ}
 ```
 
+## Refuted Findings セクション（指摘検証フェーズを実施した場合のみ）
+
+指摘検証フェーズ（例: `/review` の Phase 3.5）を実施したスキルでは、上記フォーマット末尾に以下を追加する:
+
+```markdown
+### Refuted Findings ({count})
+- [{reviewer}] `{file}:{line}` - **{Issue}**（元 severity: {Critical|High}）
+  {反証理由（finding-verifier の verdict 根拠）}
+```
+
+- `verdict: refuted` となった指摘を、反証理由を添えて掲載する（除外の透明性確保のため）
+- severity 格下げ（`effective_severity`）が適用された指摘は、格下げ後の severity セクションに掲載し「元 severity: {original} → 検証後: {effective}」を付記する
+- 指摘検証フェーズを持たないスキル、検証を無効化した場合（`verify_findings: false`）、または該当指摘がない場合はこのセクションを出力しない
+
 ## 重要度の定義
 
 | 重要度 | 基準 | 対応 |
@@ -297,7 +315,14 @@ Issue の内容から関連するコードを Grep/Glob で調査する:
 ### リスク・注意点
 
 - {潜在的な問題と対策}
+
+### 受け入れ条件
+
+- [ ] {機械検証可能な条件} — verify: `{コマンド}`
+- [ ] {主観的な条件} — judge: {判定基準}
 ```
+
+Issue 本文に受け入れ条件（Acceptance Criteria）が記載されている場合はそのまま転記する。記載されていない場合は、Issue の内容から補完案を提示し、1-4 のユーザー承認と合わせて合意を得てから確定する。
 
 #### 1-4. ユーザー承認
 
@@ -412,6 +437,12 @@ pytest
 - [ ] Issue に記載された条件を満たしているか
 - [ ] テストが通るか（テストがある場合）
 - [ ] 既存の機能を壊していないか
+
+Issue 本文の受け入れ条件は次の手順で検証する:
+
+- `— verify: \`コマンド\`` 付きの条件は、**そのコマンドを実際に実行して pass を確認する**（未実行のままチェック済み扱いにしない）
+- `— judge:` 付きの条件は、判定基準と照合して確認する
+- 検証対象は Phase 1（1-3「受け入れ条件」）でユーザーと合意した受け入れ条件とする
 
 NG の場合は Phase 2 に戻って修正する。
 

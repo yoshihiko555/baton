@@ -43,7 +43,11 @@ CLI ツールの利用可否と設定は `cli-tools.yaml` で一元管理する�
 
 ## サンドボックス実行
 
-外部 CLI（Codex / Antigravity）は sandbox 内で直接実行する。
+Antigravity CLI（`agy`）は sandbox 内で直接実行する。
+Codex CLI は sandbox 内で動作しないため、base + `.local.yaml` マージ後の実効値で
+`codex.requires_sandbox_disable` が `true`（既定値）の場合に限り、呼び出し側で sandbox を
+無効化して実行する。`false` に上書きされた環境では sandbox 内で実行する
+（安全条件の詳細は `codex-delegation.md` 参照）。
 エラー時は `claude-direct` にフォールバックする。
 
 ---
@@ -64,7 +68,6 @@ CLI ツールの利用可否と設定は `cli-tools.yaml` で一元管理する�
 - `/preflight` で事前計画済みの場合は、Phase 2 で差分確認を中心に進める
 - Phase 6 完了時点で **最小テストゲート**（changed tests + smoke）を通す
 - `/tdd` は軽量必須（最低 1 サイクル）。Phase 7 前後で実施する
-- セッションが重い場合は `/checkpointing --full` を実行してからレビューへ進む
 
 ## Workflow
 

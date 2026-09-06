@@ -32,7 +32,11 @@ CLI ツールの利用可否と設定は `cli-tools.yaml` で一元管理する�
 
 ## サンドボックス実行
 
-外部 CLI（Codex / Antigravity）は sandbox 内で直接実行する。
+Antigravity CLI（`agy`）は sandbox 内で直接実行する。
+Codex CLI は sandbox 内で動作しないため、base + `.local.yaml` マージ後の実効値で
+`codex.requires_sandbox_disable` が `true`（既定値）の場合に限り、呼び出し側で sandbox を
+無効化して実行する。`false` に上書きされた環境では sandbox 内で実行する
+（安全条件の詳細は `codex-delegation.md` 参照）。
 エラー時は `claude-direct` にフォールバックする。
 
 ---
@@ -86,16 +90,17 @@ agy -p "{質問}" --model <antigravity.model> --add-dir . 2>/dev/null
 ### レビュー実行
 
 ```
-/review              # スマート選定（code + 変更内容に応じた専門レビュアー）
-/review all          # 全 6 レビュアー並列実行
+/review              # スマート選定（code + adversarial + 変更内容に応じた専門レビュアー）
+/review all          # 全 7 レビュアー並列実行
 /review code         # コードレビューのみ
 /review security     # セキュリティレビューのみ
-/review impl         # 実装系（code + security + performance）
+/review adversarial  # 敵対的検証（堅牢性）レビューのみ
+/review impl         # 実装系（code + security + performance + adversarial）
 /review design       # 設計系（spec + architecture）
 /release-readiness   # マージ前最終チェック（テスト/レビュー/blocked確認）
 ```
 
-**スマート選定**: `/review` はパスパターン + diff コンテンツスキャンでレビュアーを自動選定（平均 2-3 名）。全レビュアーが必要な場合は `/review all` を使用。
+**スマート選定**: `/review` はベースライン 2 名（code + adversarial）に加え、パスパターン + diff コンテンツスキャンで専門レビュアーを自動選定（最大 4 名）。全レビュアーが必要な場合は `/review all` を使用。
 
 ---
 
@@ -173,6 +178,8 @@ codex exec --model <codex.model> --sandbox <codex.sandbox.analysis> <codex.flags
 | `spec-reviewer`         | 仕様との整合性           |
 | `architecture-reviewer` | アーキテクチャ妥当性     |
 | `ux-reviewer`           | UX・アクセシビリティ     |
+| `adversarial-reviewer`  | 堅牢性の敵対的検証       |
+| `finding-verifier`      | レビュー指摘の反証検証   |
 | `docs-writer`           | ドキュメント作成         |
 
 ### Utility
@@ -252,6 +259,6 @@ codex exec --model <codex.model> --sandbox <codex.sandbox.analysis> <codex.flags
 ## 有効化方法
 
 ```bash
-python3 "$AI_ORCHESTRA_DIR/scripts/orchestra-manager.py" init --project /path/to/project
-python3 "$AI_ORCHESTRA_DIR/scripts/orchestra-manager.py" install <package> --project /path/to/project
+orchex init --project /path/to/project
+orchex install <package> --project /path/to/project
 ```

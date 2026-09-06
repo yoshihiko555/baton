@@ -48,7 +48,11 @@ CLI ツールの利用可否と設定は `cli-tools.yaml` で一元管理する�
 
 ## サンドボックス実行
 
-外部 CLI（Codex / Antigravity）は sandbox 内で直接実行する。
+Antigravity CLI（`agy`）は sandbox 内で直接実行する。
+Codex CLI は sandbox 内で動作しないため、base + `.local.yaml` マージ後の実効値で
+`codex.requires_sandbox_disable` が `true`（既定値）の場合に限り、呼び出し側で sandbox を
+無効化して実行する。`false` に上書きされた環境では sandbox 内で実行する
+（安全条件の詳細は `codex-delegation.md` 参照）。
 エラー時は `claude-direct` にフォールバックする。
 
 ---
@@ -56,14 +60,6 @@ CLI ツールの利用可否と設定は `cli-tools.yaml` で一元管理する�
 # Handoff — Codex CLI タスク引き継ぎ
 
 **Claude Code のレート制限時に、作業中タスクのコンテキストを Codex CLI が引き継げる指示書ファイルを生成する。**
-
-## checkpointing との違い
-
-|        | checkpointing              | handoff                     |
-| ------ | -------------------------- | --------------------------- |
-| 目的   | 過去の作業を記録           | 未完了タスクを Codex に委譲 |
-| 視点   | 過去（何をやったか）       | 未来（何をやるべきか）      |
-| 消費者 | 次セッションの Claude/人間 | Codex CLI                   |
 
 ## 使い方
 
@@ -81,7 +77,7 @@ CLI ツールの利用可否と設定は `cli-tools.yaml` で一元管理する�
 `scripts/handoff.py` を実行して構造化データを収集する:
 
 ```bash
-python .claude/skills/handoff/scripts/handoff.py
+python3 .claude/skills/handoff/scripts/handoff.py
 ```
 
 スクリプトが JSON を stdout に出力する。内容:
