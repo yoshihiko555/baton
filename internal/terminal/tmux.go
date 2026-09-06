@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"fmt"
+	"log"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -19,9 +20,22 @@ type TmuxTerminal struct {
 
 // NewTmuxTerminal は tmux CLI を利用する実装を生成する。
 func NewTmuxTerminal() *TmuxTerminal {
+	return newTmuxTerminalWithRunner(func(name string, args ...string) ([]byte, error) {
+		return exec.Command(name, args...).Output()
+	})
+}
+
+// newTmuxTerminalWithRunner は run 経由で tmux を実行する TmuxTerminal を生成し、
+// 常にグローバルフラグ "-u" を先頭に付与する。テストから fake runner を注入して
+// 実際の argv（"-u" を含む）を検証できるよう NewTmuxTerminal と分離している。
+func newTmuxTerminalWithRunner(run func(name string, args ...string) ([]byte, error)) *TmuxTerminal {
 	return &TmuxTerminal{
 		execFn: func(args ...string) ([]byte, error) {
-			return exec.Command("tmux", args...).Output()
+			// -u は LANG/LC_* に関わらずクライアントを UTF-8 として扱わせる。
+			// これがないと非 UTF-8 ロケール（ロケールを転送しない SSH クライアント等）では
+			// tmux が "-F" 出力中の制御文字（ListPanes が区切りに使うタブを含む）を
+			// "_" に置換し、全行が黙って壊れる。
+			return run("tmux", append([]string{"-u"}, args...)...)
 		},
 	}
 }
@@ -51,6 +65,8 @@ func (t *TmuxTerminal) ListPanes() ([]Pane, error) {
 	}
 
 	var panes []Pane
+	skipped := 0
+	var firstSkippedLine string
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -59,6 +75,10 @@ func (t *TmuxTerminal) ListPanes() ([]Pane, error) {
 
 		fields := strings.Split(line, "\t")
 		if len(fields) < 9 {
+			skipped++
+			if firstSkippedLine == "" {
+				firstSkippedLine = line
+			}
 			continue
 		}
 
@@ -89,6 +109,17 @@ func (t *TmuxTerminal) ListPanes() ([]Pane, error) {
 			WindowIndex:     windowIndex,
 			PaneIndex:       paneIndex,
 		})
+	}
+
+	if skipped > 0 {
+		preview := firstSkippedLine
+		if len(preview) > 80 {
+			preview = preview[:80]
+		}
+		// 通常は tmux がクライアントを非 UTF-8 と判定し、タブ区切りを "_" に置換した場合に起きる
+		// （LANG / LC_ALL / LC_CTYPE 未設定など）。NewTmuxTerminal の "-u" で防いでいるが、
+		// 残るケースをサイレント失敗にしないため警告を出す。
+		log.Printf("tmux: ListPanes skipped %d line(s) with unexpected field count (first: %q)", skipped, preview)
 	}
 
 	return panes, nil

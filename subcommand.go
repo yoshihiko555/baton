@@ -73,6 +73,7 @@ func newSubcommandDeps(configPath string, errOut io.Writer) (subcommandDeps, err
 	if err != nil {
 		return subcommandDeps{}, fmt.Errorf("load config: %w", err)
 	}
+	core.SetDebugLogging(cfg.LogLevel == "debug")
 
 	term, err := initTerminal(cfg.Terminal)
 	if err != nil {

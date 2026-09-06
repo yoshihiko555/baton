@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - TUI を開かずに承認プロンプトへ応答できる `baton list` / `baton approve <pane>` / `baton deny <pane>` サブコマンドを追加
 
+### Fixed
+
+- `LANG` / `LC_ALL` / `LC_CTYPE` が未設定・非 UTF-8 な環境（SSH 経由など）で tmux セッションが 0 件と表示される問題を修正
+
 ## [0.1.3] - 2026-09-06
 
 ### Added
