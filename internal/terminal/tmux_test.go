@@ -1,8 +1,10 @@
 package terminal
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"log"
 	"reflect"
 	"strings"
 	"testing"
@@ -260,6 +262,36 @@ func TestTmuxNewTerminalExecFn(t *testing.T) {
 	}
 }
 
+func TestTmuxNewTerminalPrependsGlobalUFlag(t *testing.T) {
+	// NewTmuxTerminal must always prefix "-u" ahead of the subcommand, so
+	// tmux treats the client as UTF-8 regardless of LANG/LC_* — otherwise a
+	// non-UTF-8-locale client (e.g. SSH without a forwarded locale) makes
+	// tmux replace control characters (our tab field separator) with "_" in
+	// "-F" format output, and ListPanes silently returns zero panes.
+	var capturedName string
+	var capturedArgs []string
+
+	tmx := newTmuxTerminalWithRunner(func(name string, args ...string) ([]byte, error) {
+		capturedName = name
+		capturedArgs = append([]string{}, args...)
+		return []byte(""), nil
+	})
+
+	if _, err := tmx.ListPanes(); err != nil {
+		t.Fatalf("ListPanes returned error: %v", err)
+	}
+
+	if capturedName != "tmux" {
+		t.Fatalf("expected command name %q, got %q", "tmux", capturedName)
+	}
+	if len(capturedArgs) < 2 || capturedArgs[0] != "-u" {
+		t.Fatalf("expected args to start with [-u ...], got %v", capturedArgs)
+	}
+	if capturedArgs[1] != "list-panes" {
+		t.Fatalf("expected \"-u\" to be followed by the subcommand, got %v", capturedArgs)
+	}
+}
+
 func TestTmuxGetPaneText80LineLimit(t *testing.T) {
 	// Arrange: generate 100 lines "line 1" ... "line 100"
 	var sb strings.Builder
@@ -378,6 +410,49 @@ func TestTmuxListPanesShortLine(t *testing.T) {
 	}
 }
 
+func TestTmuxListPanesShortLineLogsWarning(t *testing.T) {
+	// When tmux replaces our tab field separator with "_" (non-UTF-8 client
+	// locale), every line collapses to a single field and gets skipped by
+	// ListPanes. That failure must not be silent: a warning should surface it.
+	sampleOutput := strings.Join([]string{
+		"main_1_0_0_%0_editor_claude_/home/user/project_/dev/ttys001",
+		"main_1_0_1_%1_logs_bash_/home/user/project_/dev/ttys002",
+		"",
+	}, "\n")
+
+	tmx := &TmuxTerminal{
+		execFn: func(args ...string) ([]byte, error) {
+			return []byte(sampleOutput), nil
+		},
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	prevFlags := log.Flags()
+	log.SetOutput(&logBuf)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(prevOutput)
+		log.SetFlags(prevFlags)
+	}()
+
+	got, err := tmx.ListPanes()
+	if err != nil {
+		t.Fatalf("ListPanes returned unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected 0 panes (all lines corrupted), got %d", len(got))
+	}
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "skipped 2 line") {
+		t.Errorf("expected warning to report 2 skipped lines, got: %q", logOutput)
+	}
+	if !strings.Contains(logOutput, "main_1_0_0_%0_editor_claude") {
+		t.Errorf("expected warning to include a preview of the first skipped line, got: %q", logOutput)
+	}
+}
+
 func TestTmuxListPanesEmptyOutput(t *testing.T) {
 	tmx := &TmuxTerminal{
 		execFn: func(args ...string) ([]byte, error) {
@@ -401,7 +476,7 @@ func TestHookSessionPattern(t *testing.T) {
 		match bool
 	}{
 		{"typical hook session", "claude-hook-12345", true},
-		{"short digits", "claude-test-999", false},       // < 4 digits
+		{"short digits", "claude-test-999", false}, // < 4 digits
 		{"four digits", "claude-test-1234", true},
 		{"normal session", "main", false},
 		{"work session", "dev-server", false},
@@ -454,4 +529,3 @@ func TestTmuxSendKeysNilExec(t *testing.T) {
 		t.Fatal("expected error for nil execFn")
 	}
 }
-
