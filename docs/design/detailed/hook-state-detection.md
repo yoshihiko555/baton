@@ -187,7 +187,51 @@ flowchart TD
 
 - `SessionStart` イベント受信時に `session_id` / `transcript_path` を `HookStateStore` へ記録する（herdr の現行設計と同じ用途）
 - `PermissionRequest` にも `session_id` / `transcript_path` が含まれるため、`SessionStart` を経由していない場合でも取得できる
-- 本設計では取得・保持のみを行い、resolver への活用（1:1 化）は Phase 4 の別タスクとする（下記「今後の拡張」参照）
+- 取得した `transcript_path` は resolver の 1:1 化（下記「resolver の 1:1 化」参照）に使用する
+
+---
+
+## resolver の 1:1 化（Phase 4, 実装済み）
+
+hook 由来の `transcript_path`（pin）を持つ Claude プロセスは、`ADR-0006` の CWD 束ね方式
+（`StateResolver.ResolveMultiple`）を経由せず、その JSONL ファイルを直接読んで状態を確定する。
+
+### フロー
+
+```mermaid
+flowchart TD
+    A[Claude プロセスごとに pin 解決] --> B{hookStore が設定済み?}
+    B -- Yes --> C[hookStore.Get pane_id の TranscriptPath]
+    B -- No --> D{status JSON overlay が有効?}
+    D -- Yes --> E[overlay の該当 pane の transcript_path]
+    D -- No --> F[pin なし]
+    C --> G{pin path が空でない?}
+    E --> G
+    G -- No --> F
+    G -- Yes --> H[StateResolver.ResolvePath で直接解決]
+    H -- 成功 --> I[Session に State/Branch/CurrentTool/FirstPrompt/\nInputTokens/OutputTokens/TranscriptPath/SessionID を反映\nCWD 束ねの対象から除外]
+    H -- 失敗（未生成など） --> F
+    F --> J[従来どおり CWD 束ね\nResolveMultipleExcluding へ]
+```
+
+- pin が解決できたプロセスの transcript_path は、同一 CWD の他プロセス向け
+  `ResolveMultipleExcluding(cwd, count, exclude)` の `exclude` 集合に加え、二重割り当てを防ぐ
+- pin 解決に失敗した場合（JSONL 未生成など一時的な状態）は、そのプロセスだけ従来どおり
+  CWD 束ねにフォールバックする
+- `StateSource`（`hook`/`pane`/`jsonl`）は本フローでは設定しない。従来どおり
+  `ApplyHookStates` が hook 状態の有無に応じて確定させる（pin されていても JSONL 由来なら
+  `jsonl`、hook Waiting が確定していれば `hook`）
+- work プロファイル（`claude_projects_dir` 外の JSONL、例 `~/.claude-work/projects/...`）の
+  transcript_path も、絶対パスであれば `ResolvePath` でそのまま解決できる（CWD スラグ経由の
+  ディレクトリ列挙に依存しないため）
+
+### 実装
+
+| コンポーネント | 追加内容 |
+|-------------|---------|
+| `StateResolver.ResolvePath(path string) (ResolvedSession, string, error)` | 単一 JSONL ファイルを直接解決する。絶対パス必須、symlink を実体パスに正規化し、通常ファイル以外や `.jsonl` 以外は error。第 2 返り値の正規化済みパスを exclude 集合に使う |
+| `StateResolver.ResolveMultipleExcluding(cwd, count, exclude)` | `ResolveMultiple` 相当に、pin 済みパスの除外集合を追加した版。`ResolveMultiple` はこれを `exclude=nil` で呼ぶ薄いラッパーに変更 |
+| `StateManager.UpdateFromScan` | Claude プロセスごとに pin を解決し、成功したものは `buildSessionFromPinned` で Session を構築。overlay の読み込みはロック取得前に 1 回だけ行い、`scanOverlayStatus` / `scanOverlayValid` として保持する（`ApplyHookStates` も同じスキャン結果を再利用し、二重読みしない） |
 
 ---
 
@@ -325,9 +369,10 @@ hook:
 
 ## 今後の拡張（本設計のスコープ外）
 
+resolver の 1:1 化は Phase 4 として実装済み（上記「resolver の 1:1 化（Phase 4, 実装済み）」参照）。
+
 | 拡張 | 内容 | 備考 |
 |------|------|------|
-| resolver の 1:1 化 | hook 由来の `transcript_path` を持つセッションは `ResolveMultiple` の CWD 束ねを経由せず、`resolveOneJSONL`（新設予定）で直接解決する | Phase 4 の別タスク。`state-resolver.md` の Ambiguous 判定を置き換える可能性がある |
 | 自動承認モードでの `tool_input` 活用 | `PermissionRequest` の `tool_input` を自動承認の安全判定（ADR-0014）のリスク判定材料として使う | 別タスク。本設計では hook payload の保持のみ行い、判定ロジックには使わない |
 | Codex / Gemini / WezTerm 対応 | 本設計は Claude Code + tmux のみが対象 | 別タスク |
 
@@ -340,7 +385,7 @@ hook:
 | PR 1 | `log_file` 追加、降格分岐・`classifyClaudePane` 判定不能時の debug ログ追加（`log_level: debug` 限定。内容は pane ID・JSONL 状態・ペイン末尾 30 行）。取りこぼし例を Notion タスクに 1 件以上記録（目安 1 週間） |
 | PR 2 | `baton hook` サブコマンド、`HookServer` / `HookStateStore`、`ApplyHookStates` 注入、`session_id` / `transcript_path` 保持、status JSON 拡張、TUI 表示。README の `Hook-free status` 記述を「hooks はオプション。承認待ちの精度向上に使い、未設定なら従来の画面判定で動く」に改訂 |
 | PR 3 | dotfiles 側: 薄いラッパー `~/.claude/hooks/baton-hook.sh`（`command -v baton` が見つからない場合は exit 0）を追加し、`claude/settings.json` / `claude-work/settings.json`（nix 管理の実ファイル。直接編集禁止）に hook 定義を登録する |
-| PR 4 | resolver の 1:1 化（上記「今後の拡張」参照） |
+| PR 4（実装済み） | resolver の 1:1 化（上記「resolver の 1:1 化（Phase 4, 実装済み）」参照） |
 
 ---
 

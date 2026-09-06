@@ -53,3 +53,9 @@ PID と JSONL の1対1対応は行わず、同一 CWD のセッション群に�
 - セッション行（右ペイン）の個別 PID と状態の対応が不正確になる可能性がある
 - TUI で Enter → ペインジャンプした先が、表示された状態と異なるセッションである可能性がある
 - PID と JSONL の対応付けが将来的に Claude Code の公開 API で可能になった場合、設計の見直しが必要
+
+## 追記（2026-09-06）
+
+Claude Code hooks 有効時は [ADR-0015](0015-hook-based-waiting-detection.md) の transcript pin
+（`StateResolver.ResolvePath`）により JSONL が1:1に紐付けられる。hook 無しの経路（hook 未設定・
+status JSON overlay 未取得など）では本 ADR の状態分布方式を引き続き使用する。

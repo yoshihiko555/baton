@@ -578,6 +578,137 @@ func TestStateManagerGeminiIgnoresChildProcesses(t *testing.T) {
 	}
 }
 
+func TestStateManagerUpdateFromScanPinsClaudeTranscript(t *testing.T) {
+	projectDir := t.TempDir()
+	cwd := "/workspace/shared"
+	slugDir := filepath.Join(projectDir, cwdToSlug(cwd))
+	pinnedPath := filepath.Join(slugDir, "session-a.jsonl")
+	unpinnedPath := filepath.Join(slugDir, "session-b.jsonl")
+	writeTestJSONL(t, pinnedPath, idleJSONL)
+	writeTestJSONL(t, unpinnedPath, waitingJSONL)
+
+	resolver := NewStateResolver(NewIncrementalReader(), projectDir, projectDir, time.Second)
+	manager := NewStateManager(resolver)
+	store := hook.NewStore(3)
+	store.Apply(hook.Event{
+		PaneID:         "%1",
+		HookEventName:  "SessionStart",
+		TranscriptPath: pinnedPath,
+		SessionID:      "sess-a",
+	})
+	manager.SetHookStore(store)
+
+	procs := []DetectedProcess{
+		{PID: 100, ToolType: ToolClaude, PaneID: "%1", CWD: cwd},
+		{PID: 200, ToolType: ToolClaude, PaneID: "%2", CWD: cwd},
+	}
+	if err := manager.UpdateFromScan(newScanResult(procs...)); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	byPane := sessionsByPaneID(t, manager.Projects())
+	pinned := byPane["%1"]
+	if pinned.TranscriptPath != pinnedPath {
+		t.Errorf("pinned TranscriptPath = %q, want %q", pinned.TranscriptPath, pinnedPath)
+	}
+	if pinned.SessionID != "sess-a" {
+		t.Errorf("pinned SessionID = %q, want sess-a", pinned.SessionID)
+	}
+	if pinned.State != Idle {
+		t.Errorf("pinned State = %v, want %v", pinned.State, Idle)
+	}
+	if got := byPane["%2"].State; got != Waiting {
+		t.Errorf("unpinned State = %v, want %v", got, Waiting)
+	}
+}
+
+func TestStateManagerUpdateFromScanPinnedMissingFallsBack(t *testing.T) {
+	projectDir := t.TempDir()
+	cwd := "/workspace/shared"
+	slugDir := filepath.Join(projectDir, cwdToSlug(cwd))
+	writeTestJSONL(t, filepath.Join(slugDir, "session-a.jsonl"), idleJSONL)
+	writeTestJSONL(t, filepath.Join(slugDir, "session-b.jsonl"), waitingJSONL)
+
+	resolver := NewStateResolver(NewIncrementalReader(), projectDir, projectDir, time.Second)
+	manager := NewStateManager(resolver)
+	store := hook.NewStore(3)
+	store.Apply(hook.Event{
+		PaneID:         "%1",
+		HookEventName:  "SessionStart",
+		TranscriptPath: filepath.Join(projectDir, "missing.jsonl"),
+		SessionID:      "sess-missing",
+	})
+	manager.SetHookStore(store)
+
+	procs := []DetectedProcess{
+		{PID: 100, ToolType: ToolClaude, PaneID: "%1", CWD: cwd},
+		{PID: 200, ToolType: ToolClaude, PaneID: "%2", CWD: cwd},
+	}
+	if err := manager.UpdateFromScan(newScanResult(procs...)); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	pinned := sessionsByPaneID(t, manager.Projects())["%1"]
+	if pinned.State == Thinking {
+		t.Errorf("missing pin fallback State = %v, want a state resolved from the CWD bundle", pinned.State)
+	}
+}
+
+func TestStateManagerUpdateFromScanPinsClaudeTranscriptFromOverlay(t *testing.T) {
+	projectDir := t.TempDir()
+	cwd := "/workspace/shared"
+	bundledPath := filepath.Join(projectDir, cwdToSlug(cwd), "bundled.jsonl")
+	pinnedPath := filepath.Join(projectDir, "work-profile", "pinned.jsonl")
+	writeTestJSONL(t, bundledPath, waitingJSONL)
+	writeTestJSONL(t, pinnedPath, idleJSONL)
+
+	resolver := NewStateResolver(NewIncrementalReader(), projectDir, projectDir, time.Second)
+	manager := NewStateManager(resolver)
+	statusPath := filepath.Join(t.TempDir(), "status.json")
+	writeHookStatusOverlay(t, statusPath, StatusOutput{
+		Version:      2,
+		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		HookListener: true,
+		Projects: []ProjectOutput{
+			{Sessions: []SessionOutput{{
+				PaneID:         "%1",
+				SessionID:      "sess-overlay",
+				TranscriptPath: pinnedPath,
+			}}},
+		},
+	})
+	manager.SetHookStatusOverlay(statusPath, time.Minute)
+
+	proc := DetectedProcess{PID: 100, ToolType: ToolClaude, PaneID: "%1", CWD: cwd}
+	if err := manager.UpdateFromScan(newScanResult(proc)); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+
+	session := sessionsByPaneID(t, manager.Projects())["%1"]
+	if session.TranscriptPath != pinnedPath {
+		t.Errorf("TranscriptPath = %q, want %q", session.TranscriptPath, pinnedPath)
+	}
+	if session.SessionID != "sess-overlay" {
+		t.Errorf("SessionID = %q, want sess-overlay", session.SessionID)
+	}
+	if session.State != Idle {
+		t.Errorf("State = %v, want %v", session.State, Idle)
+	}
+}
+
+func sessionsByPaneID(t *testing.T, projects []Project) map[string]*Session {
+	t.Helper()
+	byPane := make(map[string]*Session)
+	for _, project := range projects {
+		for _, session := range project.Sessions {
+			if session != nil {
+				byPane[session.PaneID] = session
+			}
+		}
+	}
+	return byPane
+}
+
 // paneTextTerminal は GetPaneText の戻り値を制御できるテスト用 Terminal。
 type paneTextTerminal struct {
 	texts map[string]string
@@ -1512,6 +1643,14 @@ func writeHookStatusOverlay(t *testing.T, path string, status StatusOutput) {
 	}
 }
 
+func applyHookStatesWithScanOverlay(t *testing.T, manager *StateManager) {
+	t.Helper()
+	if err := manager.UpdateFromScan(ScanResult{Err: errDummy}); err != nil {
+		t.Fatalf("UpdateFromScan: %v", err)
+	}
+	manager.ApplyHookStates()
+}
+
 func TestApplyHookStatesStatusOverlayWaiting(t *testing.T) {
 	manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
 	statusPath := filepath.Join(t.TempDir(), "status.json")
@@ -1532,7 +1671,7 @@ func TestApplyHookStatesStatusOverlayWaiting(t *testing.T) {
 	})
 	manager.SetHookStatusOverlay(statusPath, time.Minute)
 
-	manager.ApplyHookStates()
+	applyHookStatesWithScanOverlay(t, manager)
 
 	if session.State != Waiting {
 		t.Errorf("State = %v, want Waiting", session.State)
@@ -1564,7 +1703,7 @@ func TestApplyHookStatesStatusOverlayStale(t *testing.T) {
 	})
 	manager.SetHookStatusOverlay(statusPath, 10*time.Second)
 
-	manager.ApplyHookStates()
+	applyHookStatesWithScanOverlay(t, manager)
 
 	if session.State != Thinking {
 		t.Errorf("State = %v, want Thinking", session.State)
@@ -1585,7 +1724,7 @@ func TestApplyHookStatesStatusOverlayCorruptedJSON(t *testing.T) {
 	}
 	manager.SetHookStatusOverlay(statusPath, time.Minute)
 
-	manager.ApplyHookStates()
+	applyHookStatesWithScanOverlay(t, manager)
 
 	if session.State != Thinking {
 		t.Errorf("State = %v, want Thinking", session.State)
@@ -1611,7 +1750,7 @@ func TestApplyHookStatesStatusOverlayWrongVersion(t *testing.T) {
 	})
 	manager.SetHookStatusOverlay(statusPath, time.Minute)
 
-	manager.ApplyHookStates()
+	applyHookStatesWithScanOverlay(t, manager)
 
 	if session.State != Thinking {
 		t.Errorf("State = %v, want Thinking", session.State)
@@ -1637,7 +1776,7 @@ func TestApplyHookStatesStatusOverlayUnparsableTimestamp(t *testing.T) {
 	})
 	manager.SetHookStatusOverlay(statusPath, time.Minute)
 
-	manager.ApplyHookStates()
+	applyHookStatesWithScanOverlay(t, manager)
 
 	if session.State != Thinking {
 		t.Errorf("State = %v, want Thinking", session.State)
@@ -1669,7 +1808,7 @@ func TestApplyHookStatesStatusOverlayRejectsNonListener(t *testing.T) {
 	}
 	manager.SetHookStatusOverlay(statusPath, time.Minute)
 
-	manager.ApplyHookStates()
+	applyHookStatesWithScanOverlay(t, manager)
 
 	if session.State != Thinking {
 		t.Errorf("State = %v, want Thinking", session.State)
@@ -1695,7 +1834,7 @@ func TestApplyHookStatesStatusOverlayIgnoresUnmatchedPane(t *testing.T) {
 	})
 	manager.SetHookStatusOverlay(statusPath, time.Minute)
 
-	manager.ApplyHookStates()
+	applyHookStatesWithScanOverlay(t, manager)
 
 	if session.State != Thinking || session.HookWaiting || session.StateSource != SourceJSONL {
 		t.Errorf("session = %#v, want unchanged state with JSONL source", session)
@@ -1722,7 +1861,7 @@ func TestApplyHookStatesStatusOverlayCopiesCorrelationWithoutHookState(t *testin
 	})
 	manager.SetHookStatusOverlay(statusPath, time.Minute)
 
-	manager.ApplyHookStates()
+	applyHookStatesWithScanOverlay(t, manager)
 
 	if session.SessionID != "session-from-pane-source" {
 		t.Errorf("SessionID = %q, want session-from-pane-source", session.SessionID)

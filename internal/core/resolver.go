@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -59,10 +60,68 @@ type jsonlFile struct {
 	mod  time.Time
 }
 
+// normalizeTranscriptPath validates and normalizes a transcript path pinned by a hook.
+// It requires an absolute path, resolves symlinks to the real underlying path, requires
+// the resolved path to be a regular file (rejecting directories, FIFOs, devices, sockets),
+// and requires a .jsonl extension on the resolved path. It returns the normalized
+// (symlink-resolved) absolute path.
+func normalizeTranscriptPath(path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("transcript path %q must be absolute", path)
+	}
+
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve transcript path %q: %w", path, err)
+	}
+
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("stat transcript path %q: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("transcript path %q is not a regular file", path)
+	}
+	if filepath.Ext(resolved) != ".jsonl" {
+		return "", fmt.Errorf("transcript path %q must have a .jsonl extension", path)
+	}
+
+	return resolved, nil
+}
+
+// ResolvePath は hook でピン留めされた transcript_path を直接解決し、
+// CWD 単位のバンドルを経由せず1対1のセッション状態を返す。
+func (r *StateResolver) ResolvePath(path string) (ResolvedSession, string, error) {
+	fallback := ResolvedSession{State: Thinking}
+	if r == nil || r.reader == nil {
+		return fallback, "", fmt.Errorf("state resolver is not initialized")
+	}
+	if path == "" {
+		return fallback, "", fmt.Errorf("transcript path is empty")
+	}
+
+	normalizedPath, err := normalizeTranscriptPath(path)
+	if err != nil {
+		return fallback, "", err
+	}
+
+	f := jsonlFile{
+		name: filepath.Base(normalizedPath),
+		path: normalizedPath,
+	}
+	return r.resolveOneJSONL(f), normalizedPath, nil
+}
+
 // ResolveMultiple は同一 CWD に対して、ModTime が新しい順に最大 count 個の JSONL から
 // 状態を解決して返す。返却スライスは重要度順（Waiting > Error > Thinking > ToolUse > Idle）。
 // PID との1対1対応はできないが、プロジェクト内の状態分布として利用する。
 func (r *StateResolver) ResolveMultiple(cwd string, count int) ([]ResolvedSession, error) {
+	return r.ResolveMultipleExcluding(cwd, count, nil)
+}
+
+// ResolveMultipleExcluding は ResolveMultiple と同じ状態分布を返すが、同一 CWD 内で
+// 別セッションにピン留め済みのパスを除外する（Phase 4 / ADR-0015 拡張）。
+func (r *StateResolver) ResolveMultipleExcluding(cwd string, count int, exclude map[string]bool) ([]ResolvedSession, error) {
 	if r == nil || r.reader == nil || count <= 0 {
 		return nil, nil
 	}
@@ -79,6 +138,16 @@ func (r *StateResolver) ResolveMultiple(cwd string, count int) ([]ResolvedSessio
 
 	if len(files) == 0 {
 		return nil, nil
+	}
+	if len(exclude) > 0 {
+		filtered := files[:0]
+		for _, f := range files {
+			if exclude[filepath.Clean(f.path)] {
+				continue
+			}
+			filtered = append(filtered, f)
+		}
+		files = filtered
 	}
 
 	// ModTime 降順でソートし、上位 count 個を取得する
@@ -117,7 +186,14 @@ func (r *StateResolver) ResolveState(proc DetectedProcess) (ResolvedSession, err
 
 // listJSONL は指定スラグディレクトリ内の JSONL ファイル一覧を返す。
 func (r *StateResolver) listJSONL(slug string) ([]jsonlFile, error) {
-	dirPath := filepath.Join(r.projectDir, slug)
+	resolvedProjectDir, err := filepath.EvalSymlinks(r.projectDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	dirPath := filepath.Join(resolvedProjectDir, slug)
 	dirEntries, err := os.ReadDir(dirPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -184,11 +260,15 @@ func (r *StateResolver) resolveOneJSONL(f jsonlFile) ResolvedSession {
 		return resolved
 	}
 
-	slug := filepath.Base(filepath.Dir(f.path))
-	metaPath := filepath.Join(r.metaDir, slug, uuid+".json")
-	metaRaw, err := os.ReadFile(metaPath)
+	siblingMetaPath := filepath.Join(filepath.Dir(f.path), uuid+".json")
+	metaRaw, err := os.ReadFile(siblingMetaPath)
 	if err != nil {
-		return resolved
+		slug := filepath.Base(filepath.Dir(f.path))
+		fallbackMetaPath := filepath.Join(r.metaDir, slug, uuid+".json")
+		metaRaw, err = os.ReadFile(fallbackMetaPath)
+		if err != nil {
+			return resolved
+		}
 	}
 
 	var meta sessionMeta
