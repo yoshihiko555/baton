@@ -1,7 +1,7 @@
 
 # baton - AI Session Monitor
 
-**概要**: Claude Code, Codex, Gemini のセッション状態をリアルタイム監視し、TUI ダッシュボードと tmux (デフォルト) / WezTerm ステータスバーに表示する Go アプリケーション
+**概要**: Claude Code, Codex, Antigravity CLI (agy) のセッション状態をリアルタイム監視し、TUI ダッシュボードと tmux (デフォルト) / WezTerm ステータスバーに表示する Go アプリケーション
 
 ---
 
@@ -89,4 +89,4 @@ go vet ./...
 - ステータス出力: `/tmp/baton-status.json`（アトミック書き込み）
 - デフォルト terminal: `tmux`（`terminal: wezterm` でレガシー切り替え可能）
 - データフロー: `ticker` → `Scanner.Scan()` → `StateManager.UpdateFromScan()` → `RefineToolUseState()` → TUI / Exporter
-- 状態判定: Claude は pane text 優先 + JSONL 補助、Codex は子プロセス検査、Gemini は pane text で `Idle` / `Waiting` を精緻化
+- 状態判定: Claude は pane text 優先 + JSONL 補助、Codex は子プロセス検査、Antigravity CLI (agy) は pane text の `toolPaneRules`/`classifyByRules`（ADR-0016）で `Idle` / `Working` / `Waiting` を判定

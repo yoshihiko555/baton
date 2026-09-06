@@ -15,12 +15,13 @@ baton プロジェクトのアーキテクチャ上の意思決定を記録す�
 | [ADR-0007](0007-pane-jump-workspace-switch.md) | ペインジャンプの別ワークスペース切り替え方式 | 2026-03-16 | Accepted |
 | [ADR-0008](0008-tmux-terminal-migration.md) | WezTerm から tmux への Terminal 実装移行 | 2026-03-20 | Accepted |
 | [ADR-0009](0009-exit-on-jump-option.md) | ペインジャンプ後の自動終了をオプション化 | 2026-03-20 | Accepted |
-| [ADR-0010](0010-gemini-state-detection.md) | Gemini CLI の状態検出方式 | 2026-03-21 | Accepted |
+| [ADR-0010](0010-gemini-state-detection.md) | Gemini CLI の状態検出方式 | 2026-03-21 | Superseded by [ADR-0016](0016-manifest-style-agent-detection.md) |
 | [ADR-0011](0011-pane-text-authoritative-state-detection.md) | ペインテキスト優先の Claude Code 状態判定 | 2026-03-29 | Accepted |
 | [ADR-0012](0012-attention-first-stable-session-list.md) | Attention セクションと安定順セッション一覧 | 2026-04-19 | Accepted |
 | [ADR-0013](0013-release-version-build-metadata.md) | リリースバージョンをビルドメタデータから解決する | 2026-07-06 | Accepted |
 | [ADR-0014](0014-safe-auto-mode-reviewer.md) | 自動承認を安全判定 reviewer 経由にする | 2026-07-07 | Accepted |
 | [ADR-0015](0015-hook-based-waiting-detection.md) | Claude Code hooks による Waiting 検知の確定と session 相関 | 2026-09-05 | Accepted |
+| [ADR-0016](0016-manifest-style-agent-detection.md) | Antigravity CLI / OpenCode / takt の検知方式（manifest 型ルールテーブル） | 2026-09-06 | Accepted |
 
 ## ADR の書き方
 

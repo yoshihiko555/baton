@@ -286,7 +286,7 @@ statusbar:
   tool_icons:
     claude:  ""
     codex:   ""
-    gemini:  ""
+    agy:     ""
     default: "●"
 ```
 

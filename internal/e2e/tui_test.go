@@ -171,7 +171,7 @@ func TestTUILifecycle_NavigateAndJump(t *testing.T) {
 			Sessions: []*core.Session{
 				{PID: 100, Tool: core.ToolClaude, State: core.Waiting, PaneID: "%1"},
 				{PID: 200, Tool: core.ToolCodex, State: core.Thinking, PaneID: "%2"},
-				{PID: 300, Tool: core.ToolGemini, State: core.Idle, PaneID: "%3"},
+				{PID: 300, Tool: core.ToolAntigravity, State: core.Idle, PaneID: "%3"},
 			},
 		},
 	}
@@ -179,7 +179,7 @@ func TestTUILifecycle_NavigateAndJump(t *testing.T) {
 		TotalSessions: 3,
 		Active:        2,
 		Waiting:       1,
-		ByTool:        map[string]int{"claude": 1, "codex": 1, "gemini": 1},
+		ByTool:        map[string]int{"claude": 1, "codex": 1, "agy": 1},
 	}
 	m = feedScanResult(m, projects, summary)
 

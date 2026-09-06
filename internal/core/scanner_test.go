@@ -82,7 +82,7 @@ func TestScanCurrentCommandNode(t *testing.T) {
 	sc.Scan(context.Background())
 
 	if !called["ttys005"] {
-		t.Error("expected FindAIProcesses to be called for ttys005 (node is an AI runtime for Gemini CLI), but it was not")
+		t.Error("expected FindAIProcesses to be called for ttys005 (node is an AI runtime for node-based AI tool wrappers), but it was not")
 	}
 }
 
@@ -127,7 +127,7 @@ func TestIsAICommand(t *testing.T) {
 	}{
 		{"claude", true},
 		{"codex", true},
-		{"gemini", true},
+		{"agy", true},
 		{"Claude", true},
 		{"bash", false},
 		{"node", true},

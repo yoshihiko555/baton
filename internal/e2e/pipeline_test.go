@@ -249,19 +249,22 @@ func TestPipelineCodex_IdleAndThinking(t *testing.T) {
 	}
 }
 
-// TestPipelineGemini_DetectedViaArgs tests Gemini detection via ARGS fallback
-// when COMM is "node".
-func TestPipelineGemini_DetectedViaArgs(t *testing.T) {
+// TestPipelineAntigravity_DetectedViaArgs tests agy detection via ARGS fallback
+// when COMM is truncated to an unrecognizable string (e.g. macOS's 15-char comm
+// truncation for a nix-wrapped binary such as "/etc/profiles/per-user/x/bin/agy").
+func TestPipelineAntigravity_DetectedViaArgs(t *testing.T) {
 	term := &mockTerminal{
 		panes: []terminal.Pane{
-			{ID: "%1", TTYName: "/dev/ttys001", WorkingDir: "/project-a", CurrentCommand: "node"},
+			// CurrentCommand は tmux 由来の別シグナルなので "agy" のまま
+			// （isAICommand の事前フィルタが ps 呼び出し自体をスキップしないようにする）。
+			{ID: "%1", TTYName: "/dev/ttys001", WorkingDir: "/project-a", CurrentCommand: "agy"},
 		},
 	}
 
 	ps := core.NewProcessScannerWithExec(buildExecFn(
 		map[string]string{
-			// COMM=node but ARGS contains gemini → detected as Gemini
-			"ttys001": psLine(4001, 500, "node", "/usr/local/bin/gemini -m gemini-2.5-pro"),
+			// COMM が truncate されて不明な文字列になっても ARGS から agy を検出する
+			"ttys001": psLine(4001, 500, "/etc/profiles/pe", "/etc/profiles/per-user/x/bin/agy"),
 		},
 		nil, nil,
 	))
@@ -281,29 +284,29 @@ func TestPipelineGemini_DetectedViaArgs(t *testing.T) {
 	}
 
 	sess := projects[0].Sessions[0]
-	if sess.Tool != core.ToolGemini {
-		t.Errorf("expected ToolGemini, got %v", sess.Tool)
+	if sess.Tool != core.ToolAntigravity {
+		t.Errorf("expected ToolAntigravity, got %v", sess.Tool)
 	}
 	if sess.State != core.Thinking {
-		t.Errorf("expected Thinking (default for Gemini), got %v", sess.State)
+		t.Errorf("expected Thinking (default for agy), got %v", sess.State)
 	}
 }
 
-// TestPipelineGemini_RefineToIdle tests that Gemini Thinking → Idle
-// when pane text contains the idle prompt pattern.
-func TestPipelineGemini_RefineToIdle(t *testing.T) {
+// TestPipelineAntigravity_RefineToIdle tests that agy Thinking → Idle
+// when pane text contains the idle footer pattern.
+func TestPipelineAntigravity_RefineToIdle(t *testing.T) {
 	term := &mockTerminal{
 		panes: []terminal.Pane{
-			{ID: "%1", TTYName: "/dev/ttys001", WorkingDir: "/project-a", CurrentCommand: "node"},
+			{ID: "%1", TTYName: "/dev/ttys001", WorkingDir: "/project-a", CurrentCommand: "agy"},
 		},
 		paneText: map[string]string{
-			"%1": "workspace (default)   sandbox on",
+			"%1": "────────────────────────────────────────────────────────────────\n>\n────────────────────────────────────────────────────────────────\n? for shortcuts",
 		},
 	}
 
 	ps := core.NewProcessScannerWithExec(buildExecFn(
 		map[string]string{
-			"ttys001": psLine(4001, 500, "node", "/usr/local/bin/gemini -m gemini-2.5-pro"),
+			"ttys001": psLine(4001, 500, "agy", "agy"),
 		},
 		nil, nil,
 	))
@@ -321,25 +324,25 @@ func TestPipelineGemini_RefineToIdle(t *testing.T) {
 	projects := sm.Projects()
 	sess := projects[0].Sessions[0]
 	if sess.State != core.Idle {
-		t.Errorf("expected Idle after refine (idle prompt detected), got %v", sess.State)
+		t.Errorf("expected Idle after refine (idle footer detected), got %v", sess.State)
 	}
 }
 
-// TestPipelineGemini_RefineToWaiting tests that Gemini Thinking → Waiting
-// when pane text contains an approval prompt.
-func TestPipelineGemini_RefineToWaiting(t *testing.T) {
+// TestPipelineAntigravity_RefineToWaiting tests that agy Thinking → Waiting
+// when pane text contains the permission approval prompt.
+func TestPipelineAntigravity_RefineToWaiting(t *testing.T) {
 	term := &mockTerminal{
 		panes: []terminal.Pane{
-			{ID: "%1", TTYName: "/dev/ttys001", WorkingDir: "/project-a", CurrentCommand: "node"},
+			{ID: "%1", TTYName: "/dev/ttys001", WorkingDir: "/project-a", CurrentCommand: "agy"},
 		},
 		paneText: map[string]string{
-			"%1": "Do you want to allow this tool execution? (y/n)",
+			"%1": "Requesting permission for:\n   touch probe3.txt\n\nDo you want to proceed?\n> 1. Yes\n  2. No\nesc to cancel",
 		},
 	}
 
 	ps := core.NewProcessScannerWithExec(buildExecFn(
 		map[string]string{
-			"ttys001": psLine(4001, 500, "node", "/usr/local/bin/gemini -m gemini-2.5-pro"),
+			"ttys001": psLine(4001, 500, "agy", "agy"),
 		},
 		nil, nil,
 	))
@@ -357,7 +360,7 @@ func TestPipelineGemini_RefineToWaiting(t *testing.T) {
 	projects := sm.Projects()
 	sess := projects[0].Sessions[0]
 	if sess.State != core.Waiting {
-		t.Errorf("expected Waiting after refine (approval prompt detected), got %v", sess.State)
+		t.Errorf("expected Waiting after refine (permission prompt detected), got %v", sess.State)
 	}
 }
 
@@ -398,14 +401,14 @@ func TestPipelineCodex_RefineToWaiting(t *testing.T) {
 	}
 }
 
-// TestPipelineMixedTools tests a multi-tool scenario with Claude, Codex, and Gemini
+// TestPipelineMixedTools tests a multi-tool scenario with Claude, Codex, and agy
 // across different panes, verifying summary aggregation.
 func TestPipelineMixedTools(t *testing.T) {
 	term := &mockTerminal{
 		panes: []terminal.Pane{
 			{ID: "%1", TTYName: "/dev/ttys001", WorkingDir: "/project-a", CurrentCommand: "claude"},
 			{ID: "%2", TTYName: "/dev/ttys002", WorkingDir: "/project-b", CurrentCommand: "codex"},
-			{ID: "%3", TTYName: "/dev/ttys003", WorkingDir: "/project-c", CurrentCommand: "node"},
+			{ID: "%3", TTYName: "/dev/ttys003", WorkingDir: "/project-c", CurrentCommand: "agy"},
 		},
 	}
 
@@ -413,7 +416,7 @@ func TestPipelineMixedTools(t *testing.T) {
 		map[string]string{
 			"ttys001": psLine(1001, 500, "claude", "claude"),
 			"ttys002": psLine(2001, 500, "codex", "codex"),
-			"ttys003": psLine(4001, 500, "node", "/usr/local/bin/gemini"),
+			"ttys003": psLine(4001, 500, "agy", "agy"),
 		},
 		nil, nil,
 	))
@@ -437,8 +440,8 @@ func TestPipelineMixedTools(t *testing.T) {
 	if summary.ByTool["codex"] != 1 {
 		t.Errorf("expected 1 codex session, got %d", summary.ByTool["codex"])
 	}
-	if summary.ByTool["gemini"] != 1 {
-		t.Errorf("expected 1 gemini session, got %d", summary.ByTool["gemini"])
+	if summary.ByTool["agy"] != 1 {
+		t.Errorf("expected 1 agy session, got %d", summary.ByTool["agy"])
 	}
 }
 
@@ -521,16 +524,16 @@ func TestPipelineExporterJSON(t *testing.T) {
 func TestPipelineParentChildDedup(t *testing.T) {
 	term := &mockTerminal{
 		panes: []terminal.Pane{
-			{ID: "%1", TTYName: "/dev/ttys001", WorkingDir: "/project-a", CurrentCommand: "node"},
+			{ID: "%1", TTYName: "/dev/ttys001", WorkingDir: "/project-a", CurrentCommand: "agy"},
 		},
 	}
 
-	// node (parent, PID=4000) spawns gemini (child, PID=4001)
+	// agy (parent, PID=4000) spawns agy (child, PID=4001)
 	// Only the parent should be kept after dedup.
 	ps := core.NewProcessScannerWithExec(buildExecFn(
 		map[string]string{
-			"ttys001": psLine(4000, 500, "node", "/usr/local/bin/gemini") + "\n" +
-				psLine(4001, 4000, "node", "/usr/local/bin/gemini worker"),
+			"ttys001": psLine(4000, 500, "agy", "agy") + "\n" +
+				psLine(4001, 4000, "agy", "agy worker"),
 		},
 		nil, nil,
 	))

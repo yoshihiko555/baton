@@ -7,7 +7,7 @@
 - `PermissionRequest` イベントによる `Waiting` 状態の確定（画面判定より優先）
 - `session_id` / `transcript_path` の pane への紐付け（相関情報の保持）
 
-**スコープ外**: working / idle の判定は本設計の対象外であり、引き続き `classifyClaudePane`（`state-manager.md` 参照）が権威を持つ。Codex / Gemini / WezTerm は対象外（Claude Code + tmux のみ）。
+**スコープ外**: working / idle の判定は本設計の対象外であり、引き続き `classifyClaudePane`（`state-manager.md` 参照）が権威を持つ。Codex / Antigravity CLI (agy) / WezTerm は対象外（Claude Code + tmux のみ）。
 
 ---
 
@@ -374,7 +374,7 @@ resolver の 1:1 化は Phase 4 として実装済み（上記「resolver の 1:
 | 拡張 | 内容 | 備考 |
 |------|------|------|
 | 自動承認モードでの `tool_input` 活用 | `PermissionRequest` の `tool_input` を自動承認の安全判定（ADR-0014）のリスク判定材料として使う | 別タスク。本設計では hook payload の保持のみ行い、判定ロジックには使わない |
-| Codex / Gemini / WezTerm 対応 | 本設計は Claude Code + tmux のみが対象 | 別タスク |
+| Codex / Antigravity CLI (agy) / WezTerm 対応 | 本設計は Claude Code + tmux のみが対象 | 別タスク |
 
 ---
 

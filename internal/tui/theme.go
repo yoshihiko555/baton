@@ -36,9 +36,9 @@ func deepSeaGlow() Theme {
 			core.Error:    lipgloss.Color("#FF4444"),
 		},
 		Tools: map[core.ToolType]lipgloss.Color{
-			core.ToolClaude: lipgloss.Color("#F0F3FF"),
-			core.ToolCodex:  lipgloss.Color("#15F5BA"),
-			core.ToolGemini: lipgloss.Color("#836FFF"),
+			core.ToolClaude:      lipgloss.Color("#F0F3FF"),
+			core.ToolCodex:       lipgloss.Color("#15F5BA"),
+			core.ToolAntigravity: lipgloss.Color("#836FFF"),
 		},
 	}
 }
@@ -63,9 +63,9 @@ func synthwavePeach() Theme {
 			core.Error:    lipgloss.Color("#FF4444"),
 		},
 		Tools: map[core.ToolType]lipgloss.Color{
-			core.ToolClaude: lipgloss.Color("#FFF0F5"),
-			core.ToolCodex:  lipgloss.Color("#C084FC"),
-			core.ToolGemini: lipgloss.Color("#FF6B9D"),
+			core.ToolClaude:      lipgloss.Color("#FFF0F5"),
+			core.ToolCodex:       lipgloss.Color("#C084FC"),
+			core.ToolAntigravity: lipgloss.Color("#FF6B9D"),
 		},
 	}
 }
@@ -90,9 +90,9 @@ func bioluminescent() Theme {
 			core.Error:    lipgloss.Color("#FF4444"),
 		},
 		Tools: map[core.ToolType]lipgloss.Color{
-			core.ToolClaude: lipgloss.Color("#E0FFF0"),
-			core.ToolCodex:  lipgloss.Color("#00BBF9"),
-			core.ToolGemini: lipgloss.Color("#00F5D4"),
+			core.ToolClaude:      lipgloss.Color("#E0FFF0"),
+			core.ToolCodex:       lipgloss.Color("#00BBF9"),
+			core.ToolAntigravity: lipgloss.Color("#00F5D4"),
 		},
 	}
 }
@@ -110,7 +110,7 @@ var stateKeyMap = map[string]core.SessionState{
 var toolKeyMap = map[string]core.ToolType{
 	"claude": core.ToolClaude,
 	"codex":  core.ToolCodex,
-	"gemini": core.ToolGemini,
+	"agy":    core.ToolAntigravity,
 }
 
 // ResolveTheme resolves the final Theme from a ThemeConfig.

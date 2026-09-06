@@ -10,10 +10,10 @@ import (
 )
 
 // aiCommands は AI ツールの CurrentCommand 名。
-var aiCommands = []string{"claude", "codex", "gemini"}
+var aiCommands = []string{"claude", "codex", "agy"}
 
 // isAICommand は CurrentCommand が AI ツールかを判定する（大文字小文字無視）。
-// "node" は nodeBasedAI ツール（Gemini 等）の可能性があるため通過させる。
+// "node" は Node.js ベースの AI ツールラッパーの可能性があるため通過させる。
 func isAICommand(cmd string) bool {
 	lower := strings.ToLower(cmd)
 	for _, ai := range aiCommands {

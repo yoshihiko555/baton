@@ -13,7 +13,7 @@ type ToolType int
 const (
 	ToolClaude ToolType = iota
 	ToolCodex
-	ToolGemini
+	ToolAntigravity
 	ToolUnknown
 )
 
@@ -24,8 +24,8 @@ func (t ToolType) String() string {
 		return "claude"
 	case ToolCodex:
 		return "codex"
-	case ToolGemini:
-		return "gemini"
+	case ToolAntigravity:
+		return "agy"
 	default:
 		return "unknown"
 	}

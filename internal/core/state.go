@@ -100,7 +100,7 @@ func (s *StateManager) SetHookStatusOverlay(path string, maxAge time.Duration) {
 //  1. ScanResult.Err != nil → 前回スナップショットを保持して return nil
 //  2. Panes からワークスペースマップを構築
 //  3. Processes をワークスペース優先でグルーピング
-//  4. 各プロセスをセッションに変換（Claude は StateResolver 経由、Codex/Gemini は最小構成）
+//  4. 各プロセスをセッションに変換（Claude は StateResolver 経由、その他のツールは最小構成）
 //  5. Summary 再計算 + panes/prevPIDSet を更新
 func (s *StateManager) UpdateFromScan(result ScanResult) error {
 	s.mu.RLock()
@@ -429,7 +429,7 @@ func (s *StateManager) buildSessionFromPinned(proc DetectedProcess, resolved Res
 // buildSessionFromStates はプロセス情報と事前解決済みの状態分布からセッションを構築する。
 // Claude セッションは cwdStates から重要度順に状態を割り当てる。
 // Codex はプロセスツリー検査で Working(Thinking)/Idle を判定する。
-// Gemini はプロセス存在＝Thinking として最小構成を返す（承認待ちは RefineToolUseState で検出）。
+// Codex 以外の非 Claude ツール（agy 等）はプロセス存在＝Thinking として最小構成を返す（詳細な状態は RefineToolUseState のルールテーブルで判定する）。
 func (s *StateManager) buildSessionFromStates(proc DetectedProcess, cwdStates map[string][]ResolvedSession, cwdStateIndex map[string]int) Session {
 	sess := Session{
 		PID:        proc.PID,
@@ -561,16 +561,51 @@ var claudeApprovalPattern = regexp.MustCompile(
 // 単独の "1. Yes" ではなく後続行も確認することで誤検知を防ぐ。
 var codexApprovalPattern = regexp.MustCompile(`(?im)^\s*[›>❯]?\s*1\.\s+(?:yes|allow)\b.*\n\s*[›>❯]?\s*2\.\s+`)
 
-// geminiIdlePattern は Gemini CLI の入力待ちプロンプトを検出する正規表現。
-// Gemini はアイドル時にステータスバーに "workspace" と "sandbox" を表示する。
-// このパターンは Gemini 固有の UI 要素であり、他のツールとの誤検知リスクが低い。
-var geminiIdlePattern = regexp.MustCompile(`(?m)workspace\s+\(.+\)\s+.*sandbox`)
+// paneRules は子プロセスを持たない TUI ツール向けの画面テキスト判定ルール（ADR-0016）。
+// waiting → working の順に評価し、いずれにも一致しなければ Idle（herdr の残余 idle 方式）。
+type paneRules struct {
+	waiting []*regexp.Regexp
+	working []*regexp.Regexp
+}
+
+// toolPaneRules はツールごとの画面テキスト判定ルールテーブル。
+// 子プロセスを生成しない TUI ツール（agy 等）を対象とし、Claude/Codex は対象外
+// （Claude は classifyClaudePane、Codex は HasChildProcesses + codexApprovalPattern を使う）。
+var toolPaneRules = map[ToolType]paneRules{
+	ToolAntigravity: {
+		waiting: []*regexp.Regexp{
+			// "Requesting permission for:" と "Do you want to proceed?" が両方画面にあることを
+			// 1本の正規表現で要求する（(?s) で改行跨ぎを許容）。
+			regexp.MustCompile(`(?is)requesting permission for:.*do you want to proceed\?`),
+		},
+		working: []*regexp.Regexp{
+			regexp.MustCompile(`(?m)^\s*[\x{2800}-\x{28FF}]+\s+\p{L}`), // braille スピナー行（例: "⣻  Generating..."）
+			regexp.MustCompile(`(?i)esc to cancel`),
+		},
+	},
+}
+
+// classifyByRules は rules に基づいて画面テキストを判定する。
+// waiting を最優先、次に working、いずれにも一致しなければ Idle を返す（残余 idle 方式）。
+func classifyByRules(rules paneRules, text string) SessionState {
+	for _, re := range rules.waiting {
+		if re.MatchString(text) {
+			return Waiting
+		}
+	}
+	for _, re := range rules.working {
+		if re.MatchString(text) {
+			return Thinking
+		}
+	}
+	return Idle
+}
 
 // RefineToolUseState はペインテキストから状態を精緻化する。
 //   - Claude: 全状態でペインテキストをチェック。classifyClaudePane が権威的ソース。
 //     判定できた場合はその状態を採用。判定不能かつ JSONL=Waiting → ToolUse に降格。
 //   - Codex: プロセス由来の Thinking/Idle → Waiting（承認待ち検出）
-//   - Gemini Thinking → Waiting（承認待ち）または Idle（入力プロンプト検出）
+//   - ルールテーブル対象ツール（agy 等）: 画面テキストから Waiting/Thinking/Idle を判定
 func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -602,13 +637,16 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 			if sess == nil {
 				continue
 			}
+			// Claude / Codex を toolPaneRules に登録してはならない。登録すると下の hasRules 分岐が
+			// classifyClaudePane や hook Waiting 保護（ADR-0015）を迂回してしまう。
+			rules, hasRules := toolPaneRules[sess.Tool]
 			switch {
 			case sess.Tool == ToolClaude && sess.PaneID != "":
 				// Claude: 全状態でペインテキストをチェック
 			case sess.Tool == ToolCodex:
 				// Codex: 子プロセス有無で Thinking/Idle 判定後、承認待ちなら Waiting に上書きする
-			case sess.State == Thinking && sess.Tool == ToolGemini:
-				// Gemini: 子プロセス検査不可 → ペインテキストで状態判定
+			case hasRules && sess.PaneID != "":
+				// ルールテーブルにエントリのあるツール（agy 等）: 子プロセス検査ができないため画面テキストで判定する
 			default:
 				continue
 			}
@@ -617,13 +655,9 @@ func (s *StateManager) RefineToolUseState(term terminal.Terminal) {
 				continue
 			}
 
-			if sess.Tool == ToolGemini {
-				// Gemini: 承認待ち → Waiting、入力プロンプト → Idle、それ以外 → Thinking 維持
-				if containsApprovalPrompt(text) {
-					s.projects[i].Sessions[j].State = Waiting
-				} else if geminiIdlePattern.MatchString(text) {
-					s.projects[i].Sessions[j].State = Idle
-				}
+			if hasRules {
+				// pane テキストが取得できた場合はそのまま採用する（取得失敗時は既存の Thinking を維持）。
+				s.projects[i].Sessions[j].State = classifyByRules(rules, text)
 				continue
 			}
 

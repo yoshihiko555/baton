@@ -12,7 +12,7 @@ import (
 var toolTypeMap = map[string]ToolType{
 	"claude": ToolClaude,
 	"codex":  ToolCodex,
-	"gemini": ToolGemini,
+	"agy":    ToolAntigravity,
 }
 
 // ProcessScanner は特定の TTY に紐づく AI プロセスを検出する。
@@ -65,7 +65,7 @@ type parsedProcess struct {
 
 // parse は ps コマンドの出力を解析して DetectedProcess の一覧に変換する。
 // COMM で AI ツールを直接検出し、失敗した場合は ARGS からフォールバック検出する。
-// 同一ツールの親子プロセス（例: node が gemini を起動）は親のみを採用する。
+// 同一ツールの親子プロセス（例: node が AI ツールを起動）は親のみを採用する。
 func (s *ProcessScanner) parse(output []byte) []DetectedProcess {
 	lines := strings.Split(string(output), "\n")
 	var parsed []parsedProcess
