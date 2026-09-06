@@ -336,7 +336,10 @@ func (s *StateManager) ApplyHookStates() {
 			if state.TranscriptPath != "" {
 				sess.TranscriptPath = state.TranscriptPath
 			}
-			if state.Waiting {
+			if state.Waiting && !sess.isTaktPipe {
+				// takt pipe 配下には hook Waiting を載せない。headless claude -p は TMUX_PANE を
+				// takt の pane から継承するため hook が届き得るが、Waiting にすると承認操作や
+				// 自動承認モードが takt の pane に Enter を送ってしまう（ADR-0016 Decision 3）。
 				sess.State = Waiting
 				sess.HookWaiting = true
 				sess.StateSource = SourceHook
@@ -415,7 +418,8 @@ func (s *StateManager) applyHookStatusOverlayLocked(status StatusOutput) {
 			if so.TranscriptPath != "" {
 				sess.TranscriptPath = so.TranscriptPath
 			}
-			if so.StateSource == SourceHook {
+			if so.StateSource == SourceHook && !sess.isTaktPipe {
+				// ApplyHookStates と同じ理由で takt pipe 配下には Waiting を載せない。
 				sess.State = Waiting
 				sess.HookWaiting = true
 				sess.StateSource = SourceHook

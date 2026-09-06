@@ -2071,6 +2071,40 @@ func TestApplyHookStatesSetsWaitingAndTranscript(t *testing.T) {
 	}
 }
 
+// TestApplyHookStatesKeepsTaktPipeOutOfWaiting は takt pipe 配下のセッションに hook 由来の
+// Waiting が載らないこと（承認操作・自動承認が takt の pane に Enter を送らないため）、
+// ただし SessionID / TranscriptPath は取り込まれることを確認する（ADR-0016 Decision 3）。
+func TestApplyHookStatesKeepsTaktPipeOutOfWaiting(t *testing.T) {
+	manager := NewStateManager(nil)
+	session := &Session{Tool: ToolClaude, State: Thinking, PaneID: "%1", Via: ViaTakt, isTaktPipe: true}
+	manager.projects = []Project{{Sessions: []*Session{session}}}
+	manager.panes = []terminal.Pane{{ID: "%1"}}
+
+	store := hook.NewStore(3)
+	store.Apply(hook.Event{
+		PaneID:         "%1",
+		HookEventName:  "PermissionRequest",
+		SessionID:      "sess-takt",
+		TranscriptPath: "/path/to/takt.jsonl",
+	})
+	manager.SetHookStore(store)
+
+	manager.ApplyHookStates()
+
+	if session.State != Thinking {
+		t.Errorf("State = %v, want Thinking (hook Waiting must not apply to takt pipe sessions)", session.State)
+	}
+	if session.HookWaiting {
+		t.Error("HookWaiting = true, want false")
+	}
+	if session.SessionID != "sess-takt" {
+		t.Errorf("SessionID = %q, want %q", session.SessionID, "sess-takt")
+	}
+	if session.TranscriptPath != "/path/to/takt.jsonl" {
+		t.Errorf("TranscriptPath = %q, want %q", session.TranscriptPath, "/path/to/takt.jsonl")
+	}
+}
+
 func TestApplyHookStatesNoHookMatchSetsJSONLSource(t *testing.T) {
 	manager := NewStateManager(nil)
 	session := &Session{Tool: ToolClaude, State: Thinking, PaneID: "%9"}
