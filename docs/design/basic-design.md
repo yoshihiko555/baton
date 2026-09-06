@@ -169,17 +169,17 @@ type ToolType int
 const (
     ToolClaude ToolType = iota
     ToolCodex
-    ToolGemini
+    ToolAntigravity
     ToolUnknown
 )
 
 // String は FR-06 の JSON スキーマで要求される文字列表現を返す。
 func (t ToolType) String() string {
     switch t {
-    case ToolClaude:  return "claude"
-    case ToolCodex:   return "codex"
-    case ToolGemini:  return "gemini"
-    default:          return "unknown"
+    case ToolClaude:      return "claude"
+    case ToolCodex:       return "codex"
+    case ToolAntigravity: return "agy"
+    default:              return "unknown"
     }
 }
 ```
@@ -253,7 +253,7 @@ type Session struct {
     WorkingDir string       `json:"working_dir"`
 
     // --- 内部フィールド（JSON 出力には含めない） ---
-    LastActivity     time.Time `json:"-"` // JSONL 最終エントリの timestamp。Codex/Gemini はスキャン時刻
+    LastActivity     time.Time `json:"-"` // JSONL 最終エントリの timestamp。Codex/agy はスキャン時刻
     Ambiguous        bool      `json:"-"` // true: 同一CWDに複数Claudeがあり、JSONL対応が不確定
     CandidatePaneIDs []int     `json:"-"` // Ambiguous==true の場合、候補となる全ペインID（Pane.ID と同じ int 型）
 
@@ -269,7 +269,7 @@ type Session struct {
 **Ambiguous フラグの設定条件**:
 - 同一 CWD に Claude プロセスが **2 つ以上**存在する場合、該当する全セッションの `Ambiguous` を `true` に設定
 - `CandidatePaneIDs` にはその CWD の全 Claude ペイン ID を格納
-- 単一 Claude、Codex、Gemini のセッションでは常に `Ambiguous == false`
+- 単一 Claude、Codex、Antigravity CLI (agy) のセッションでは常に `Ambiguous == false`
 
 **TUI での利用**:
 - `Ambiguous == true` のセッション行には `~` マークを表示し、状態/補助情報が推定値であることを示す
@@ -458,7 +458,7 @@ UpdateFromScan(result ScanResult):
           → 各 JSONL の最終エントリから状態判定
           → session-meta から補助情報を取得
         - 判定結果で Session を構築
-     b. ToolType == ToolCodex / ToolGemini の場合:
+     b. ToolType == ToolCodex / ToolAntigravity の場合:
         - State = Thinking（プロセス存在 = 動作中）
         - 必須フィールドのみで Session を構築
   4. 前回のスナップショットと比較:
@@ -633,7 +633,7 @@ TUI で Waiting セッションを選択して Enter を押した場合:
 **パース方法**:
 1. ヘッダ行をスキップ
 2. 各行を空白分割で PID, PPID, COMM を抽出
-3. COMM が `claude` / `codex` / `gemini` に完全一致するものを返却
+3. COMM が `claude` / `codex` / `agy` に完全一致するものを返却
 
 ### 6.3 JSON ステータス出力
 
@@ -757,7 +757,7 @@ statusbar:
   tool_icons:
     claude: "⚡"
     codex: "📦"
-    gemini: "🔮"
+    agy: "🔮"
 ```
 
 ### 8.2 コマンドラインフラグ

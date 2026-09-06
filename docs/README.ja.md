@@ -1,6 +1,6 @@
 # baton
 
-tmux 上の AI コーディングセッション (Claude Code / Codex / Gemini) をリアルタイム監視する TUI ダッシュボード。
+tmux 上の AI コーディングセッション (Claude Code / Codex / Antigravity CLI (agy)) をリアルタイム監視する TUI ダッシュボード。
 
 ![baton TUI](assets/preview.png)
 
@@ -19,7 +19,7 @@ baton は tmux ペイン上で動作している AI コーディングセッシ�
 - リアルタイム状態監視: `Thinking` / `ToolUse` / `Waiting` / `Idle` / `Error`
 - `Attention` セクションと、`project / tool / PID` の安定順セッションリスト + ターミナルプレビューペイン
 - ペインジャンプ: セッションを選択して対象 tmux ペインに移動
-- マルチツール対応: Claude Code, Codex CLI, Gemini CLI
+- マルチツール対応: Claude Code, Codex CLI, Antigravity CLI (agy)
 - TUI セッションフィルタ: `/` でインクリメンタル絞り込み（`waiting`, `!idle` など）
 - Claude Code 承認操作: `a` / `d` / `A` / `D` で承認・拒否
 - 承認プロンプト検出: `tmux capture-pane` による画面スクレイピング
@@ -176,7 +176,7 @@ statusbar:
   tool_icons:
     claude: ""
     codex: ""
-    gemini: ""
+    agy: ""
     default: "●"
   state_icons:
     working: "🤔"
@@ -259,7 +259,7 @@ Ticker (2s)
 |--------|---------|------|---------|
 | Claude Code | ペインテキストのインジケーター (`✢` / `·` / `✶`) と JSONL フォールバック | 待機プロンプト (`❯` + 区切り線) と JSONL フォールバック | 画面: 承認プロンプトパターン |
 | Codex CLI | `pgrep -P`: 子プロセスあり | 子プロセスなし | 画面: 番号付き承認プロンプト |
-| Gemini CLI | プロセス実行中（デフォルト） | 画面: `workspace (...) ... sandbox` | 画面: 承認プロンプトパターン |
+| Antigravity CLI (agy) | 画面: braille スピナー行 または `esc to cancel` | 画面: 残余（他のパターン不一致。実画面ではフッター `? for shortcuts`） | 画面: `Requesting permission for:` + `Do you want to proceed?` |
 
 ## プロジェクト構成
 

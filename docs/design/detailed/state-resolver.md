@@ -8,7 +8,7 @@ StateResolver は baton v2 の新規コンポーネントであり、以下の�
 - JSONL の末尾エントリを解析し、詳細状態（Idle / Thinking / ToolUse / Waiting / Error）を判定する
 - gitBranch・currentTool・session-meta などの補助情報を取得する
 
-**スコープ外**: Codex / Gemini プロセスはプロセス存在のみで `Thinking` に固定されるため、StateResolver は関与しない。
+**スコープ外**: Codex / Antigravity CLI (agy) プロセスはプロセス存在のみで `Thinking` に固定されるため、StateResolver は関与しない。
 
 **Phase 4 拡張（実装済み）**: Claude Code hooks（[ADR-0015](../../adr/0015-hook-based-waiting-detection.md)）由来の `transcript_path` を持つプロセスは、下記の CWD 束ね方式ではなく `ResolvePath` で JSONL を直接1:1解決する。詳細は [`hook-state-detection.md`](hook-state-detection.md) の「resolver の 1:1 化」を参照。
 

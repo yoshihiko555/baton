@@ -1,6 +1,6 @@
 # baton - AI Session Monitor
 
-**概要**: AI コーディングセッション（Claude Code / Codex / Gemini）の状態をリアルタイム監視し、TUI ダッシュボードとステータスバーに表示する Go アプリケーション
+**概要**: AI コーディングセッション（Claude Code / Codex / Antigravity CLI (agy)）の状態をリアルタイム監視し、TUI ダッシュボードとステータスバーに表示する Go アプリケーション
 
 ---
 
@@ -98,9 +98,9 @@ go vet ./...
 - 同一 CWD の複数セッション: ResolveMultiple 方式で ModTime 上位 N 件から状態分布を取得（JSONL → PID の1対1対応は不可）。hook 有効時（`transcript_path` 取得済み）は `StateResolver.ResolvePath` で該当 JSONL を1:1に直接紐付け、CWD 束ねの対象から除外する
 - slug 生成: CWD の "/" と "." を "-" に変換（Claude Code のディレクトリ命名規則に準拠）
 - Pane.ID は string 型（tmux: "%5" 形式、WezTerm: "42" 形式）
-- Scanner 最適化: tmux の `CurrentCommand` で AI ペインのみ `ps` 実行（不要な呼び出しを削減）。`node` も通過させる（Gemini 検出用）
+- Scanner 最適化: tmux の `CurrentCommand` で AI ペインのみ `ps` 実行（不要な呼び出しを削減）。`node` も通過させる（takt 等の node ベースツール用）
 - Codex 状態検出: `pgrep -P` で子プロセス有無を検査（子プロセスあり → Thinking、なし → Idle）
-- Gemini 状態検出: COMM が `node` のため ARGS basename 完全一致でフォールバック検出。子プロセス検査は不可（MCP サーバーのみ）。`capture-pane` でステータスバー（`workspace ... sandbox`）を検出して Idle、承認パターンで Waiting に精緻化
+- Antigravity CLI (agy) 状態検出: native バイナリ（COMM `agy`）で子プロセスを生成しないため Codex 方式の `pgrep -P` 検査は使えない。`capture-pane` 全文に対する `toolPaneRules`/`classifyByRules`（manifest 型ルールテーブル、ADR-0016）で判定する — Waiting は `Requesting permission for:` + `Do you want to proceed?`、Working は行頭 braille スピナーまたは `esc to cancel`、Idle は残余（実画面ではフッター `? for shortcuts`）
 - ペインジャンプ:
   - tmux: switch-client → select-window → select-pane（同期的、sleep 不要）
   - WezTerm: 同一 WS → `wezterm cli activate-pane`、別 WS → トリガーファイル経由

@@ -171,12 +171,12 @@ func TestParseARGSFallback(t *testing.T) {
 		wantName string
 	}{
 		{
-			name: "gemini detected via ARGS",
+			name: "agy detected via ARGS",
 			output: "  PID  PPID COMM                                       ARGS\n" +
-				" 10235  7338 node                                       node --no-warnings=DEP0040 /opt/homebrew/bin/gemini\n",
+				" 10235  7338 node                                       node --no-warnings=DEP0040 /opt/homebrew/bin/agy\n",
 			wantLen:  1,
-			wantTool: ToolGemini,
-			wantName: "gemini",
+			wantTool: ToolAntigravity,
+			wantName: "agy",
 		},
 		{
 			name: "claude detected via COMM (no fallback needed)",
@@ -193,12 +193,12 @@ func TestParseARGSFallback(t *testing.T) {
 			wantLen: 0,
 		},
 		{
-			name: "gemini with mise path",
+			name: "agy with mise path",
 			output: "  PID  PPID COMM                                                                ARGS\n" +
-				" 12554 10235 /Users/user/.local/share/mise/installs/node/24.14.0/bin/node   /Users/user/.local/share/mise/installs/node/24.14.0/bin/node --no-warnings=DEP0040 /opt/homebrew/bin/gemini\n",
+				" 12554 10235 /Users/user/.local/share/mise/installs/node/24.14.0/bin/node   /Users/user/.local/share/mise/installs/node/24.14.0/bin/node --no-warnings=DEP0040 /opt/homebrew/bin/agy\n",
 			wantLen:  1,
-			wantTool: ToolGemini,
-			wantName: "gemini",
+			wantTool: ToolAntigravity,
+			wantName: "agy",
 		},
 	}
 
@@ -222,10 +222,10 @@ func TestParseARGSFallback(t *testing.T) {
 }
 
 func TestParseDeduplicatesParentChild(t *testing.T) {
-	// 親子の node プロセスが両方 gemini を含む場合、親のみ採用されることを確認する。
+	// 親子の node プロセスが両方 agy を含む場合、親のみ採用されることを確認する。
 	output := "  PID  PPID COMM   ARGS\n" +
-		" 10235  7338 node   node --no-warnings=DEP0040 /opt/homebrew/bin/gemini\n" +
-		" 12554 10235 node   node --no-warnings=DEP0040 /opt/homebrew/bin/gemini\n"
+		" 10235  7338 node   node --no-warnings=DEP0040 /opt/homebrew/bin/agy\n" +
+		" 12554 10235 node   node --no-warnings=DEP0040 /opt/homebrew/bin/agy\n"
 
 	ps := NewProcessScannerWithExec(nil)
 	got := ps.parse([]byte(output))
@@ -241,7 +241,7 @@ func TestParseKeepsDifferentTools(t *testing.T) {
 	// 異なるツールの親子は両方残ることを確認する。
 	output := "  PID  PPID COMM     ARGS\n" +
 		" 1000  500 claude   claude\n" +
-		" 2000 1000 node     node /opt/homebrew/bin/gemini\n"
+		" 2000 1000 node     node /opt/homebrew/bin/agy\n"
 
 	ps := NewProcessScannerWithExec(nil)
 	got := ps.parse([]byte(output))
@@ -256,12 +256,12 @@ func TestDetectFromArgs(t *testing.T) {
 		wantTool ToolType
 		wantOK   bool
 	}{
-		{"/opt/homebrew/bin/gemini", ToolGemini, true},
-		{"node --no-warnings=DEP0040 /opt/homebrew/bin/gemini", ToolGemini, true},
+		{"/opt/homebrew/bin/agy", ToolAntigravity, true},
+		{"node --no-warnings=DEP0040 /opt/homebrew/bin/agy", ToolAntigravity, true},
 		{"/usr/local/bin/claude", ToolClaude, true},
 		{"node /usr/local/bin/serve", ToolUnknown, false},
 		{"python script.py", ToolUnknown, false},
-		{"/usr/local/bin/gemini-beta", ToolUnknown, false},
+		{"/usr/local/bin/agy-beta", ToolUnknown, false},
 		{"node /opt/homebrew/bin/claude-wrapper", ToolUnknown, false},
 	}
 

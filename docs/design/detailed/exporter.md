@@ -55,7 +55,7 @@ type ProjectOutput struct {
 type SessionOutput struct {
     // --- 必須フィールド ---
     PaneID     string `json:"pane_id,omitempty"` // strconv.Itoa(Session.PaneID)。Ambiguous 時は省略
-    Tool       string `json:"tool"`         // ToolType.String(): "claude" | "codex" | "gemini"
+    Tool       string `json:"tool"`         // ToolType.String(): "claude" | "codex" | "agy"
     State      string `json:"state"`        // SessionState.String(): "idle" | "thinking" | "tool_use" | "waiting" | "error"
     PID        int    `json:"pid"`          // プロセス PID
     WorkingDir string `json:"working_dir"`  // 作業ディレクトリ
@@ -145,7 +145,7 @@ statusbar:
   tool_icons:
     claude:  ""
     codex:   ""
-    gemini:  ""
+    agy:     ""
     default: "●"
   show_tool_counts: true
 ```

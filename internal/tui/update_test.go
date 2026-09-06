@@ -672,7 +672,7 @@ func TestBuildEntriesStableProjectToolPIDOrder(t *testing.T) {
 			Path: "/p2",
 			Name: "p2",
 			Sessions: []*core.Session{
-				{PID: 4, State: core.ToolUse, Tool: core.ToolGemini},
+				{PID: 4, State: core.ToolUse, Tool: core.ToolAntigravity},
 				{PID: 2, State: core.Idle, Tool: core.ToolClaude},
 				{PID: 3, State: core.Waiting, Tool: core.ToolCodex},
 			},
@@ -712,9 +712,9 @@ func TestBuildEntriesStableProjectToolPIDOrder(t *testing.T) {
 	wantSessions := []string{
 		"p1/claude/1",
 		"p1/codex/5",
+		"p2/agy/4",
 		"p2/claude/2",
 		"p2/codex/3",
-		"p2/gemini/4",
 	}
 	if len(sessionOrder) != len(wantSessions) {
 		t.Fatalf("session entries = %d, want %d (%v)", len(sessionOrder), len(wantSessions), sessionOrder)
@@ -1361,13 +1361,13 @@ func TestApproveIgnoredOnNonWaitingState(t *testing.T) {
 	}
 }
 
-func TestApproveIgnoredOnGeminiTool(t *testing.T) {
+func TestApproveIgnoredOnAntigravityTool(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 	projects := []core.Project{
 		{
 			Path: "/project-a",
 			Sessions: []*core.Session{
-				{PID: 100, State: core.Waiting, Tool: core.ToolGemini, PaneID: "%1"},
+				{PID: 100, State: core.Waiting, Tool: core.ToolAntigravity, PaneID: "%1"},
 			},
 		},
 	}
@@ -1377,7 +1377,7 @@ func TestApproveIgnoredOnGeminiTool(t *testing.T) {
 	_, cmd := m.Update(msg)
 
 	if cmd != nil {
-		t.Error("expected nil cmd for Gemini tool (approve not supported)")
+		t.Error("expected nil cmd for Antigravity tool (approve not supported)")
 	}
 }
 
@@ -1605,9 +1605,9 @@ func TestCanInputOnClaudeSession(t *testing.T) {
 	}
 }
 
-// TestCanInputFalseOnNonClaude verifies canInput returns false for Codex and Gemini sessions.
+// TestCanInputFalseOnNonClaude verifies canInput returns false for Codex and Antigravity (agy) sessions.
 func TestCanInputFalseOnNonClaude(t *testing.T) {
-	for _, tool := range []core.ToolType{core.ToolCodex, core.ToolGemini} {
+	for _, tool := range []core.ToolType{core.ToolCodex, core.ToolAntigravity} {
 		m, _, _, _, _ := newTestModel()
 		projects := []core.Project{
 			{
@@ -2772,7 +2772,7 @@ func TestFilterWorkingStateAlias(t *testing.T) {
 			Sessions: []*core.Session{
 				{PID: 100, State: core.Thinking, Tool: core.ToolClaude, PaneID: "%1"},
 				{PID: 200, State: core.ToolUse, Tool: core.ToolCodex, PaneID: "%2"},
-				{PID: 300, State: core.Idle, Tool: core.ToolGemini, PaneID: "%3"},
+				{PID: 300, State: core.Idle, Tool: core.ToolAntigravity, PaneID: "%3"},
 			},
 		},
 	}

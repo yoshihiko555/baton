@@ -9,14 +9,14 @@
 
 ## 概要
 
-baton は AI コーディングエージェント（Claude Code, Codex CLI, Gemini CLI）のセッション状態をリアルタイム監視し、TUI ダッシュボードおよび tmux (デフォルト) / WezTerm ステータスバーに表示する Go アプリケーションである。
+baton は AI コーディングエージェント（Claude Code, Codex CLI, Antigravity CLI (agy)）のセッション状態をリアルタイム監視し、TUI ダッシュボードおよび tmux (デフォルト) / WezTerm ステータスバーに表示する Go アプリケーションである。
 
 ## システム構成
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │  tmux / WezTerm Panes (AI セッション実行環境)                 │
-│  各ペインで claude / codex / gemini が直接起動される           │
+│  各ペインで claude / codex / agy が直接起動される              │
 └──────────────────────┬──────────────────────────────────────┘
                        │
               ┌────────┴────────┐
@@ -142,15 +142,15 @@ ticker
 
 | State | 意味 | 対象ツール |
 |-------|------|-----------|
-| `idle` | ターン完了、ユーザー入力待ち | Claude Code, Codex, Gemini |
+| `idle` | ターン完了、ユーザー入力待ち | Claude Code, Codex, Antigravity CLI (agy) |
 | `thinking` | AI が推論中 / プロセスが動作中 | 全ツール |
 | `tool_use` | ツール実行中（承認済み） | Claude Code |
-| `waiting` | ユーザーの操作を待機中 | Claude Code, Codex, Gemini |
+| `waiting` | ユーザーの操作を待機中 | Claude Code, Codex, Antigravity CLI (agy) |
 | `error` | エラー発生 | Claude Code |
 
 - Claude Code: ペインテキスト（逆順スキャン）を主軸に、JSONL を補助データとして用いて詳細判定
 - Codex CLI: 子プロセスの有無で `idle`/`thinking` を判定し、ペインテキストから `waiting` を判定
-- Gemini CLI: プロセス存在を基本とし、ペインテキストから `idle`/`waiting` を判定
+- Antigravity CLI (agy): 子プロセスを生成しないため、ペインテキストの `toolPaneRules`（ADR-0016）で `idle`/`thinking`/`waiting` を判定
 
 ## 設計原則
 

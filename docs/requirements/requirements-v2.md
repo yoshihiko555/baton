@@ -13,14 +13,14 @@
 
 ### 1.1 baton とは
 
-baton は、AI コーディングエージェント（Claude Code, Codex CLI, Gemini CLI）のセッション状態をリアルタイム監視し、tmux（デフォルト）および WezTerm ステータスバーと TUI ダッシュボードに表示するツールである。
+baton は、AI コーディングエージェント（Claude Code, Codex CLI, Antigravity CLI (agy)）のセッション状態をリアルタイム監視し、tmux（デフォルト）および WezTerm ステータスバーと TUI ダッシュボードに表示するツールである。
 
 ### 1.2 ユーザーのワークフロー
 
 ```text
 tmux Window（プロジェクト X）= 8 ペイン同時表示
 ┌──────────────────┬──────────────────┬──────────┬──────────┐
-│ Claude 1         │ Claude 2         │ Codex    │ Gemini   │
+│ Claude 1         │ Claude 2         │ Codex    │ agy      │
 │ (branch: feat-A) │ (branch: feat-B) │          │          │
 ├──────────────────┼──────────────────┼──────────┼──────────┤
 │ SA監視 1         │ SA監視 2         │ 自由     │ 自由     │
@@ -68,7 +68,7 @@ tmux Window（プロジェクト X）= 8 ペイン同時表示
 
 **受け入れ基準**:
 - 現在**実行中の**セッションのみが表示される（過去のセッションは含まない）
-- 各セッションのツール種別（Claude/Codex/Gemini）が表示される
+- 各セッションのツール種別（Claude/Codex/agy）が表示される
 - 状態が色分けで視覚的に区別できる
 
 ### US-03: セッションの詳細情報
@@ -80,7 +80,7 @@ tmux Window（プロジェクト X）= 8 ペイン同時表示
 - 最後に実行されたツール名 or アクションが表示される（取得不能時は `-` 表示）
 - トークン使用量（入力/出力）が表示される（取得不能時は `-` 表示）
 
-> **注**: 詳細情報は Claude Code セッションでのみ取得可能。Codex/Gemini セッションでは取得不能な項目は `-` 表示とする。
+> **注**: 詳細情報は Claude Code セッションでのみ取得可能。Codex/agy セッションでは取得不能な項目は `-` 表示とする。
 > Claude Code セッションであっても、session-meta と JSONL の紐付けに失敗した場合は同様にフォールバックする。
 
 ### US-04: ステータスバーでの常時監視
@@ -120,10 +120,12 @@ tmux Window（プロジェクト X）= 8 ペイン同時表示
 |--------|---------|------|
 | Claude Code | COMM=`claude` または ARGS ベース | |
 | Codex CLI | COMM=`codex` または ARGS ベース | |
-| Gemini CLI | ARGS=`gemini` (COMM は `node`) | `node`起動のため、ARGSのbasename照合を行う |
+| Antigravity CLI (agy) | COMM=`agy` または ARGS ベース | nix 等のラッパー経由で絶対パス実行になる環境では COMM が途中で切り詰められる場合があり（例: COMM `/etc/profiles/pe`、ARGS `/etc/profiles/per-user/x/bin/agy`）、その場合は ARGS の basename 照合を行う |
 
 - tmux では `pane_current_command` による事前フィルタが可能。
-- Geminiは `node` コマンドで実行されるため、プロセス引数 (ARGS) をパースして `gemini` との完全一致でフォールバック検出を行う。
+- agy は native バイナリのため通常 COMM=`agy` で検出できるが、COMM 切り詰め環境ではプロセス引数 (ARGS) をパースして basename `agy` との完全一致でフォールバック検出を行う（[ADR-0016](../adr/0016-manifest-style-agent-detection.md)）。
+
+> **注（旧要件）**: v2 初版では Gemini CLI（Node.js ランタイム経由、COMM が `node` になる）を対象としていたが、[ADR-0010](../adr/0010-gemini-state-detection.md) の方式は [ADR-0016](../adr/0016-manifest-style-agent-detection.md) で Antigravity CLI (agy) 向けに置き換えられた。
 
 ### FR-02: セッション状態検出
 
@@ -160,11 +162,15 @@ tmux Window（プロジェクト X）= 8 ペイン同時表示
 - 作業用子プロセスなし → `Idle`
 - 更に `capture-pane` で承認プロンプトを検知した場合は `Waiting`。
 
-#### Gemini CLI の状態判定
+#### Antigravity CLI (agy) の状態判定
 
-- プロセスが存在する場合、基本的に `Thinking`。
-- `capture-pane` により、`workspace (...) ... sandbox` などのステータスバーを検知した場合は `Idle`。
-- 承認プロンプトを検知した場合は `Waiting`。
+agy は子プロセスを生成しないため Codex 方式は使えず、`capture-pane` 全文に対するルールテーブル判定（`toolPaneRules`/`classifyByRules`、[ADR-0016](../adr/0016-manifest-style-agent-detection.md)）を行う。
+
+- `Waiting`: `Requesting permission for:` かつ `Do you want to proceed?` を検知した場合
+- `Thinking`: 行頭 braille スピナーまたは `esc to cancel` を検知した場合
+- `Idle`: 上記いずれにも一致しない残余（実画面ではフッター `? for shortcuts`）
+
+> **注（旧要件）**: v2 初版では Gemini CLI（プロセス存在を基本に `Thinking`、ステータスバー `workspace (...) ... sandbox` の検知で `Idle`）を対象としていたが、[ADR-0010](../adr/0010-gemini-state-detection.md) の方式は [ADR-0016](../adr/0016-manifest-style-agent-detection.md) で置き換えられた。
 
 ### FR-03: セッション詳細情報の取得
 
@@ -254,7 +260,7 @@ tmux Window（プロジェクト X）= 8 ペイン同時表示
 ### v2 スコープ内
 
 - プロセス監視によるセッション生死判定
-- Claude Code / Codex CLI / Gemini CLI の 3 ツール対応
+- Claude Code / Codex CLI / Antigravity CLI (agy) の 3 ツール対応
 - tmux（主軸）および WezTerm 連携
 - ペインジャンプ機能
 
@@ -269,7 +275,7 @@ tmux Window（プロジェクト X）= 8 ペイン同時表示
 ## 6. 未決事項・検討課題
 
 > 本フェーズにおける未決事項はすべて **解決済み**。
-> （ADR-0008〜0011 にて、tmux 移行、Gemini 状態判定、Codex 子プロセス検査、Claude ペインテキスト判定の設計方針が確立・実装されたため）
+> （ADR-0008〜0011 にて、tmux 移行、Gemini 状態判定、Codex 子プロセス検査、Claude ペインテキスト判定の設計方針が確立・実装されたため。なお Gemini 状態判定（ADR-0010）は [ADR-0016](../adr/0016-manifest-style-agent-detection.md) で Antigravity CLI (agy) 向けに置き換え済み）
 
 ---
 

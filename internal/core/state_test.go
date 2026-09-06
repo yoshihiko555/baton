@@ -32,12 +32,12 @@ func newProc(pid int, tool ToolType, cwd string) DetectedProcess {
 }
 
 func TestStateManagerUpdateFromScanBasic(t *testing.T) {
-	// 正常系: Codex/Gemini プロセスが Thinking 状態でセッション化されることを確認する。
+	// 正常系: Codex/agy プロセスが Thinking 状態でセッション化されることを確認する。
 	manager := NewStateManager(nil)
 
 	result := newScanResult(
 		newProc(100, ToolCodex, "/home/user/project-a"),
-		newProc(200, ToolGemini, "/home/user/project-b"),
+		newProc(200, ToolAntigravity, "/home/user/project-b"),
 	)
 
 	if err := manager.UpdateFromScan(result); err != nil {
@@ -101,7 +101,7 @@ func TestStateManagerUpdateFromScanRemoval(t *testing.T) {
 	// 2プロセスを登録する。
 	if err := manager.UpdateFromScan(newScanResult(
 		newProc(100, ToolCodex, "/proj-a"),
-		newProc(200, ToolGemini, "/proj-b"),
+		newProc(200, ToolAntigravity, "/proj-b"),
 	)); err != nil {
 		t.Fatalf("UpdateFromScan: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestStateManagerUpdateFromScanGroupingByCWD(t *testing.T) {
 
 	if err := manager.UpdateFromScan(newScanResult(
 		newProc(100, ToolCodex, "/shared"),
-		newProc(200, ToolGemini, "/shared"),
+		newProc(200, ToolAntigravity, "/shared"),
 	)); err != nil {
 		t.Fatalf("UpdateFromScan: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestStateManagerUpdateFromScanWorkspaceGrouping(t *testing.T) {
 	}
 	procs := []DetectedProcess{
 		{PID: 100, ToolType: ToolCodex, PaneID: "1", CWD: "/proj-a"},
-		{PID: 200, ToolType: ToolGemini, PaneID: "2", CWD: "/proj-b"},
+		{PID: 200, ToolType: ToolAntigravity, PaneID: "2", CWD: "/proj-b"},
 	}
 	result := ScanResult{
 		Processes: procs,
@@ -188,7 +188,7 @@ func TestStateManagerUpdateFromScanDefaultWorkspace(t *testing.T) {
 	}
 	procs := []DetectedProcess{
 		{PID: 100, ToolType: ToolCodex, PaneID: "1", CWD: "/proj-a"},
-		{PID: 200, ToolType: ToolGemini, PaneID: "2", CWD: "/proj-b"},
+		{PID: 200, ToolType: ToolAntigravity, PaneID: "2", CWD: "/proj-b"},
 	}
 	result := ScanResult{
 		Processes: procs,
@@ -251,7 +251,7 @@ func TestStateManagerSummary(t *testing.T) {
 
 	if err := manager.UpdateFromScan(newScanResult(
 		newProc(100, ToolCodex, "/proj-a"),
-		newProc(200, ToolGemini, "/proj-b"),
+		newProc(200, ToolAntigravity, "/proj-b"),
 		newProc(300, ToolCodex, "/proj-c"),
 	)); err != nil {
 		t.Fatalf("UpdateFromScan: %v", err)
@@ -261,7 +261,7 @@ func TestStateManagerSummary(t *testing.T) {
 	if summary.TotalSessions != 3 {
 		t.Errorf("TotalSessions = %d, want 3", summary.TotalSessions)
 	}
-	// Codex/Gemini は Thinking → Active に含まれる。
+	// Codex/agy は Thinking → Active に含まれる。
 	if summary.Active != 3 {
 		t.Errorf("Active = %d, want 3", summary.Active)
 	}
@@ -271,8 +271,8 @@ func TestStateManagerSummary(t *testing.T) {
 	if summary.ByTool["codex"] != 2 {
 		t.Errorf("ByTool[codex] = %d, want 2", summary.ByTool["codex"])
 	}
-	if summary.ByTool["gemini"] != 1 {
-		t.Errorf("ByTool[gemini] = %d, want 1", summary.ByTool["gemini"])
+	if summary.ByTool["agy"] != 1 {
+		t.Errorf("ByTool[agy] = %d, want 1", summary.ByTool["agy"])
 	}
 }
 
@@ -550,12 +550,12 @@ func TestStateManagerCodexWithNilProcessScanner(t *testing.T) {
 	}
 }
 
-func TestStateManagerGeminiIgnoresChildProcesses(t *testing.T) {
-	// Gemini プロセスは子プロセスの有無に関わらず常に Thinking になることを確認する。
-	// pgrep が呼ばれた場合はテスト失敗とすることで、Gemini が HasChildProcesses を呼ばないことも検証する。
+func TestStateManagerAntigravityIgnoresChildProcesses(t *testing.T) {
+	// agy プロセスは子プロセスの有無に関わらず常に Thinking になることを確認する。
+	// pgrep が呼ばれた場合はテスト失敗とすることで、agy が HasChildProcesses を呼ばないことも検証する。
 	ps := NewProcessScannerWithExec(func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if name == "pgrep" {
-			t.Error("HasChildProcesses should NOT be called for Gemini process")
+			t.Error("HasChildProcesses should NOT be called for agy process")
 			return []byte("99999\n"), nil
 		}
 		return nil, fmt.Errorf("unexpected command: %s", name)
@@ -564,7 +564,7 @@ func TestStateManagerGeminiIgnoresChildProcesses(t *testing.T) {
 	manager := NewStateManager(nil)
 	manager.SetProcessScanner(ps)
 
-	result := newScanResult(newProc(400, ToolGemini, "/project"))
+	result := newScanResult(newProc(400, ToolAntigravity, "/project"))
 	if err := manager.UpdateFromScan(result); err != nil {
 		t.Fatalf("UpdateFromScan: %v", err)
 	}
@@ -574,7 +574,7 @@ func TestStateManagerGeminiIgnoresChildProcesses(t *testing.T) {
 		t.Fatalf("unexpected projects/sessions: %v", projects)
 	}
 	if got := projects[0].Sessions[0].State; got != Thinking {
-		t.Errorf("state = %v, want Thinking (gemini always Thinking)", got)
+		t.Errorf("state = %v, want Thinking (agy always Thinking)", got)
 	}
 }
 
@@ -803,153 +803,112 @@ func TestCodexApprovalPatternVariants(t *testing.T) {
 	}
 }
 
-func TestRefineGeminiThinkingToWaiting(t *testing.T) {
-	// Gemini の Thinking 状態がペインテキストの承認パターンで Waiting に変わることを確認する。
-	manager := NewStateManager(nil)
+const (
+	agyIdlePaneText = `────────────────────────────────────────────────────────────────
+>
+────────────────────────────────────────────────────────────────
+? for shortcuts                                                                          Gemini 3.8 Flash · high`
 
-	result := newScanResult(newProc(500, ToolGemini, "/project"))
-	if err := manager.UpdateFromScan(result); err != nil {
-		t.Fatalf("UpdateFromScan: %v", err)
-	}
+	agyWorkingPaneText = `> Count from 1 to 150, one number per line, each followed by a short comment. Do not use any tools.
+⣻  Generating...
+────────────────────────────────────────────────────────────────
+>
+────────────────────────────────────────────────────────────────
+esc to cancel                                                                            Gemini 3.8 Flash · high`
 
-	// ペインに承認プロンプトを設定
-	term := &paneTextTerminal{
-		texts: map[string]string{
-			"": "Some output...\nAllow? [y/N]\n",
-		},
-	}
+	agyWorkingSecondPaneText = `> Count from 1 to 150, one number per line, each followed by a short comment. Do not use any tools.
+⣽  Initiating the Number Sequence...
+────────────────────────────────────────────────────────────────
+>
+────────────────────────────────────────────────────────────────
+esc to cancel                                                                            Gemini 3.8 Flash · high`
 
-	manager.RefineToolUseState(term)
+	agyWaitingPaneText = `● Bash(touch probe3.txt) (ctrl+o to expand)
 
-	projects := manager.Projects()
-	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
-		t.Fatalf("unexpected projects/sessions: %v", projects)
-	}
-	if got := projects[0].Sessions[0].State; got != Waiting {
-		t.Errorf("state = %v, want Waiting (gemini approval prompt detected)", got)
-	}
-}
+Command
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-func TestRefineGeminiThinkingToIdle(t *testing.T) {
-	// Gemini のペインに "> " プロンプトがあれば Idle に変わることを確認する。
-	manager := NewStateManager(nil)
+Requesting permission for:
+   touch probe3.txt
 
-	result := newScanResult(newProc(500, ToolGemini, "/project"))
-	if err := manager.UpdateFromScan(result); err != nil {
-		t.Fatalf("UpdateFromScan: %v", err)
-	}
+Do you want to proceed?
+> 1. Yes
+  2. Yes, and always allow in this conversation for commands that start with 'touch'
+  3. Yes, and always allow for commands that start with 'touch' (Persist to settings.json)
+  4. No
 
-	term := &paneTextTerminal{
-		texts: map[string]string{
-			"": "Previous output...\n > baton\n workspace (/directory)                  branch      sandbox\n ~/ghq/github.com/yoshihiko555/baton     main        no sandbox\n",
-		},
-	}
+  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command
+esc to cancel                                                                            Gemini 3.8 Flash · high`
+)
 
-	manager.RefineToolUseState(term)
-
-	projects := manager.Projects()
-	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
-		t.Fatalf("unexpected projects/sessions: %v", projects)
-	}
-	if got := projects[0].Sessions[0].State; got != Idle {
-		t.Errorf("state = %v, want Idle (gemini input prompt detected)", got)
-	}
-}
-
-func TestRefineGeminiThinkingStaysThinking(t *testing.T) {
-	// Gemini のペインに承認パターンがなければ Thinking のまま。
-	manager := NewStateManager(nil)
-
-	result := newScanResult(newProc(500, ToolGemini, "/project"))
-	if err := manager.UpdateFromScan(result); err != nil {
-		t.Fatalf("UpdateFromScan: %v", err)
-	}
-
-	term := &paneTextTerminal{
-		texts: map[string]string{
-			"": "Thinking...\nGenerating response...\n",
-		},
-	}
-
-	manager.RefineToolUseState(term)
-
-	projects := manager.Projects()
-	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
-		t.Fatalf("unexpected projects/sessions: %v", projects)
-	}
-	if got := projects[0].Sessions[0].State; got != Thinking {
-		t.Errorf("state = %v, want Thinking (no approval prompt)", got)
-	}
-}
-
-func TestGeminiIdlePatternVariants(t *testing.T) {
-	// geminiIdlePattern が各種 Gemini ステータスバー形式に正しくマッチすることを確認する。
+func TestClassifyByRules(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     string
-		wantMatch bool
+		name string
+		text string
+		want SessionState
 	}{
+		{name: "agy idle", text: agyIdlePaneText, want: Idle},
+		{name: "agy working", text: agyWorkingPaneText, want: Thinking},
+		{name: "agy working 2", text: agyWorkingSecondPaneText, want: Thinking},
+		{name: "agy waiting", text: agyWaitingPaneText, want: Waiting},
 		{
-			name:      "empty prompt",
-			input:     " >   Type your message or @path/to/file\n workspace (/directory)                  branch      sandbox\n ~/ghq/github.com/yoshihiko555/baton     main        no sandbox\n",
-			wantMatch: true,
-		},
-		{
-			name:      "with input text",
-			input:     " > some user input\n workspace (/directory)                  branch      sandbox\n ~/path     main        no sandbox\n",
-			wantMatch: true,
-		},
-		{
-			name:      "with sandbox enabled",
-			input:     " > hello\n workspace (/directory)                  branch      sandbox\n ~/path     main        safe sandbox\n",
-			wantMatch: true,
-		},
-		{
-			name:      "processing (no status bar)",
-			input:     "Thinking...\nGenerating response...\n",
-			wantMatch: false,
-		},
-		{
-			name:      "approval without status bar",
-			input:     "Allow? [y/N]\n",
-			wantMatch: false,
+			name: "claude prompt screen does not false-positive as agy waiting/working",
+			text: "────────────────────────────────\n❯ \n",
+			want: Idle,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := geminiIdlePattern.MatchString(tc.input)
-			if got != tc.wantMatch {
-				t.Errorf("geminiIdlePattern.MatchString(%q) = %v, want %v", tc.input, got, tc.wantMatch)
+			got := classifyByRules(toolPaneRules[ToolAntigravity], tc.text)
+			if got != tc.want {
+				t.Errorf("classifyByRules() = %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestRefineGeminiWaitingPriority(t *testing.T) {
-	// ペインテキストに承認パターンとアイドルステータスバーが両方あるとき、
-	// Waiting が Idle より優先されることを確認する。
-	manager := NewStateManager(nil)
-
-	result := newScanResult(newProc(500, ToolGemini, "/project"))
-	if err := manager.UpdateFromScan(result); err != nil {
-		t.Fatalf("UpdateFromScan: %v", err)
+func TestRefineToolUseStateAntigravity(t *testing.T) {
+	tests := []struct {
+		name        string
+		paneText    string
+		hasPaneText bool
+		want        SessionState
+	}{
+		{name: "idle", paneText: agyIdlePaneText, hasPaneText: true, want: Idle},
+		{name: "waiting", paneText: agyWaitingPaneText, hasPaneText: true, want: Waiting},
+		{name: "working", paneText: agyWorkingPaneText, hasPaneText: true, want: Thinking},
+		{name: "pane fetch error keeps current state", want: Thinking},
 	}
 
-	term := &paneTextTerminal{
-		texts: map[string]string{
-			"": "Allow? [y/N]\n workspace (/directory)                  branch      sandbox\n ~/path     main        no sandbox\n",
-		},
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := NewStateManager(nil)
+			manager.projects = []Project{
+				{
+					Name: "proj",
+					Path: "/project",
+					Sessions: []*Session{
+						{PID: 500, Tool: ToolAntigravity, State: Thinking, PaneID: "%1", WorkingDir: "/project"},
+					},
+				},
+			}
+			manager.summary = calcSummary(manager.projects)
 
-	manager.RefineToolUseState(term)
+			texts := make(map[string]string)
+			if tc.hasPaneText {
+				texts["%1"] = tc.paneText
+			}
+			manager.RefineToolUseState(&paneTextTerminal{texts: texts})
 
-	projects := manager.Projects()
-	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
-		t.Fatalf("unexpected projects/sessions: %v", projects)
-	}
-	if got := projects[0].Sessions[0].State; got != Waiting {
-		t.Errorf("state = %v, want Waiting (approval prompt takes priority over idle status bar)", got)
+			projects := manager.Projects()
+			if len(projects) != 1 || len(projects[0].Sessions) != 1 {
+				t.Fatalf("unexpected projects/sessions: %v", projects)
+			}
+			if got := projects[0].Sessions[0].State; got != tc.want {
+				t.Errorf("state = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

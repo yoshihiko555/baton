@@ -97,7 +97,7 @@ type ToolType int
 const (
     ToolClaude ToolType = iota
     ToolCodex
-    ToolGemini
+    ToolAntigravity
     ToolUnknown
 )
 ```
@@ -183,7 +183,7 @@ ps -t <pane.TTYName> -o pid,ppid,comm
 |-------------------|----------|
 | `claude` | `ToolClaude` |
 | `codex` | `ToolCodex` |
-| `gemini` | `ToolGemini` |
+| `agy` | `ToolAntigravity` |
 | それ以外 | スキップ（DetectedProcess に含めない） |
 
 マッピングテーブルは ProcessScanner 内に定数として定義する。
@@ -192,7 +192,7 @@ ps -t <pane.TTYName> -o pid,ppid,comm
 var toolTypeMap = map[string]ToolType{
     "claude": ToolClaude,
     "codex":  ToolCodex,
-    "gemini": ToolGemini,
+    "agy":    ToolAntigravity,
 }
 ```
 
@@ -351,7 +351,7 @@ func TestProcessScanner(t *testing.T) {
 ```
 
 テストケース:
-- 正常: claude / codex / gemini の各 COMM 名を検出
+- 正常: claude / codex / agy の各 COMM 名を検出
 - ps 実行エラー: error を返す
 - フィールド不足行: スキップされる
 - PID 変換失敗: スキップされる
@@ -394,7 +394,7 @@ func TestProcessScanner(t *testing.T) {
 - 誤検出はステータスバーへの誤表示に直結するため、偽陽性より偽陰性を選ぶ
 
 **完全一致の利点**:
-- claude / codex / gemini は CLI として直接起動される場合、COMM 名は実行ファイル名と一致する
+- claude / codex / agy は CLI として直接起動される場合、COMM 名は実行ファイル名と一致する
 - 管理対象のツール名が増えた場合は `toolTypeMap` に追加するだけでよく、ロジック変更が不要
 
 ---
@@ -404,7 +404,7 @@ func TestProcessScanner(t *testing.T) {
 **判断**: ps 出力に PPID カラムを含めるが、DetectedProcess への変換には使用しない。
 
 **理由**（基本設計での確認事項）:
-- claude / codex / gemini は通常、ユーザーがシェルから直接起動する。シェルの子プロセスとして起動されるため、PPID によるフィルタリングは不要
+- claude / codex / agy は通常、ユーザーがシェルから直接起動する。シェルの子プロセスとして起動されるため、PPID によるフィルタリングは不要
 - PPID フィルタリングを追加した場合、ネスト起動（tmux 内の zsh から起動など）で偽陰性が発生するリスクがある
 - ツール検出のシンプルさを優先し、PPID は将来の拡張余地として ps 出力には含めておく（フィールドインデックスを安定させるため）
 
@@ -413,16 +413,12 @@ func TestProcessScanner(t *testing.T) {
 
 ---
 
-### 4. Gemini のベストエフォート対応方針
+### 4. Antigravity CLI (agy) の COMM 検出方針
 
-**課題**: Gemini は CLI ツールとして常に起動されているわけではなく、HTTP API 経由で呼ばれる場合もある。COMM 名 `gemini` で検出できるのはローカル CLI として起動された場合に限る。
+**背景（旧 Gemini CLI）**: Gemini CLI は Node.js ランタイム経由で動作し COMM が `node` になるなど、COMM 完全一致では検出が不安定だった（[ADR-0010](../../adr/0010-gemini-state-detection.md)）。
 
-**採用方針: ベストエフォート検出**
-
-- COMM 名 `gemini` に完全一致するプロセスを検出対象に含める
-- 検出できない場合（API 経由の利用など）はそのまま「未検出」とする
-- baton の主目的は Claude Code セッションの監視であり、Gemini の補助的な検出は「あれば表示する」レベルで十分
+**agy での解消**: Antigravity CLI (agy) は native バイナリのため、COMM 名は通常 `agy` に一致する（[ADR-0016](../../adr/0016-manifest-style-agent-detection.md)）。ただし nix 等のラッパー経由で絶対パス実行になる環境では、`ps -o comm` の COMM フィールドが途中で切り詰められることがある（例: COMM `/etc/profiles/pe`、ARGS `/etc/profiles/per-user/x/bin/agy`）。この場合は ARGS の basename 完全一致でフォールバック検出する。
 
 **将来の検討事項**:
-- Gemini CLI が COMM 名を変更した場合は `toolTypeMap` を更新する
-- API 経由の Gemini セッションを検出するには別の仕組み（ログファイル監視等）が必要になるが、v2 のスコープ外とする
+- COMM 切り詰めの幅は環境依存のため、ARGS フォールバックの判定条件は実機観測ベースで見直す
+- OpenCode 等、同様に COMM が不安定なツールを追加する際は同じフォールバック方式を適用する
