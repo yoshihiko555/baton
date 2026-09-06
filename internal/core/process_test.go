@@ -277,3 +277,67 @@ func TestDetectFromArgs(t *testing.T) {
 		})
 	}
 }
+
+func TestParseOpenCode(t *testing.T) {
+	tests := []struct {
+		name     string
+		output   string
+		wantLen  int
+		wantTool ToolType
+		wantName string
+	}{
+		{
+			name: "opencode detected via COMM",
+			output: "  PID  PPID COMM             ARGS\n" +
+				"65096 64858 opencode         opencode\n",
+			wantLen:  1,
+			wantTool: ToolOpenCode,
+			wantName: "opencode",
+		},
+		{
+			// takt が起動する HTTP バックエンド。対話セッションではないため除外する（ADR-0016）。
+			name: "opencode serve is excluded (takt HTTP backend)",
+			output: "  PID  PPID COMM             ARGS\n" +
+				"70000 64858 opencode         opencode serve --hostname=127.0.0.1 --port=4096\n",
+			wantLen: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ps := NewProcessScannerWithExec(nil)
+			got := ps.parse([]byte(tc.output))
+			if len(got) != tc.wantLen {
+				t.Fatalf("parse() returned %d results, want %d", len(got), tc.wantLen)
+			}
+			if tc.wantLen > 0 {
+				if got[0].ToolType != tc.wantTool {
+					t.Errorf("ToolType = %v, want %v", got[0].ToolType, tc.wantTool)
+				}
+				if got[0].Name != tc.wantName {
+					t.Errorf("Name = %q, want %q", got[0].Name, tc.wantName)
+				}
+			}
+		})
+	}
+}
+
+func TestIsOpenCodeServer(t *testing.T) {
+	tests := []struct {
+		args string
+		want bool
+	}{
+		{"opencode serve --hostname=127.0.0.1 --port=4096", true},
+		{"opencode", false},
+		{"opencode --version", false},
+		{"", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.args, func(t *testing.T) {
+			if got := isOpenCodeServer(tc.args); got != tc.want {
+				t.Errorf("isOpenCodeServer(%q) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}

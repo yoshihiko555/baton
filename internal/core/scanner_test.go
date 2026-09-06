@@ -128,6 +128,8 @@ func TestIsAICommand(t *testing.T) {
 		{"claude", true},
 		{"codex", true},
 		{"agy", true},
+		{"opencode", true},
+		{".opencode-wrapp", true},
 		{"Claude", true},
 		{"bash", false},
 		{"node", true},

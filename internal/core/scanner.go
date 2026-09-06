@@ -10,7 +10,9 @@ import (
 )
 
 // aiCommands は AI ツールの CurrentCommand 名。
-var aiCommands = []string{"claude", "codex", "agy"}
+// opencode: nix ラッパー経由では pane_current_command が ".opencode-wrapp" になるが、
+// isAICommand の Contains 判定で "opencode" を含むため通過する。
+var aiCommands = []string{"claude", "codex", "agy", "opencode"}
 
 // isAICommand は CurrentCommand が AI ツールかを判定する（大文字小文字無視）。
 // "node" は Node.js ベースの AI ツールラッパーの可能性があるため通過させる。

@@ -27,7 +27,8 @@ v2 では、ファイル監視（fsnotify）ベースのアーキテクチャか
 ToolClaude      = 0
 ToolCodex       = 1
 ToolAntigravity = 2
-ToolUnknown     = 3
+ToolOpenCode    = 3
+ToolUnknown     = 4
 ```
 
 **用途**: プロセス検出時にどの AI ツールが起動しているかを型安全に表現する。
@@ -39,6 +40,7 @@ ToolUnknown     = 3
 | ToolClaude | `"claude"` |
 | ToolCodex | `"codex"` |
 | ToolAntigravity | `"agy"` |
+| ToolOpenCode | `"opencode"` |
 | ToolUnknown | `"unknown"` |
 
 **設計判断**: `int` 列挙型を採用する理由は以下の通り。

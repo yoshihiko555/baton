@@ -98,6 +98,7 @@ const (
     ToolClaude ToolType = iota
     ToolCodex
     ToolAntigravity
+    ToolOpenCode
     ToolUnknown
 )
 ```
@@ -184,17 +185,23 @@ ps -t <pane.TTYName> -o pid,ppid,comm
 | `claude` | `ToolClaude` |
 | `codex` | `ToolCodex` |
 | `agy` | `ToolAntigravity` |
+| `opencode` | `ToolOpenCode` |
 | それ以外 | スキップ（DetectedProcess に含めない） |
 
 マッピングテーブルは ProcessScanner 内に定数として定義する。
 
 ```go
 var toolTypeMap = map[string]ToolType{
-    "claude": ToolClaude,
-    "codex":  ToolCodex,
-    "agy":    ToolAntigravity,
+    "claude":   ToolClaude,
+    "codex":    ToolCodex,
+    "agy":      ToolAntigravity,
+    "opencode": ToolOpenCode,
 }
 ```
+
+**opencode serve の除外**: takt が起動する `opencode serve --hostname=... --port=N` は HTTP バックエンドであり
+対話セッションではないため、ARGS の2番目のトークンが `serve` の場合は `parse` 内で検出対象から除外する
+（`isOpenCodeServer`、[ADR-0016](../../adr/0016-manifest-style-agent-detection.md)）。
 
 ### 3. DetectedProcess.CWD の正規化
 

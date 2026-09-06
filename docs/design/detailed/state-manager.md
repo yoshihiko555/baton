@@ -127,7 +127,7 @@ flowchart TD
     D --> E[各 DetectedProcess を処理]
     E --> F{ToolClaude?}
     F -- Yes --> G[StateResolver.ResolveState 呼び出し\nSession 構築]
-    F -- No --> H[ToolCodex / ToolAntigravity\nState=Thinking で最小 Session 構築]
+    F -- No --> H[ToolCodex / ToolAntigravity / ToolOpenCode\nState=Thinking で最小 Session 構築]
     G --> I[スナップショット照合]
     H --> I
     I --> J[prevPIDSet に含まれない PID\n→ 新規セッション追加]
@@ -189,13 +189,15 @@ for _, proc := range result.Processes {
         state, err := s.resolver.ResolveState(proc)
         // エラー時は Thinking にフォールバック
         session = buildSession(proc, state)
-    case ToolCodex, ToolAntigravity:
+    case ToolCodex, ToolAntigravity, ToolOpenCode:
         session = buildSession(proc, Thinking)
     }
 }
 ```
 
-`ToolCodex` / `ToolAntigravity` は JSONL を持たないため、State を `Thinking` とした最小構成のセッションを構築する。
+`ToolCodex` / `ToolAntigravity` / `ToolOpenCode` は JSONL を持たないため、State を `Thinking` とした最小構成のセッションを構築する。
+`ToolAntigravity` と `ToolOpenCode` はさらに子プロセスを生成しないため、`RefineToolUseState` で `toolPaneRules`/`classifyByRules`
+（manifest 型ルールテーブル、[ADR-0016](../../adr/0016-manifest-style-agent-detection.md)）による画面テキスト判定で Idle/Thinking/Waiting を精緻化する。
 
 **Step 4: スナップショット照合**
 
@@ -324,7 +326,7 @@ func calcSummary(sessions []Session) Summary {
 | `TotalSessions` | 全セッション数 |
 | `Active` | `Thinking + ToolUse + Waiting` の合計 |
 | `Waiting` | `Waiting` 状態のセッション数 |
-| `ByTool` | `{"claude": N, "codex": M, "agy": K, ...}` |
+| `ByTool` | `{"claude": N, "codex": M, "agy": K, "opencode": L, ...}` |
 
 ---
 

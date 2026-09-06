@@ -1,6 +1,6 @@
 # baton - AI Session Monitor
 
-**概要**: AI コーディングセッション（Claude Code / Codex / Antigravity CLI (agy)）の状態をリアルタイム監視し、TUI ダッシュボードとステータスバーに表示する Go アプリケーション
+**概要**: AI コーディングセッション（Claude Code / Codex / Antigravity CLI (agy) / OpenCode）の状態をリアルタイム監視し、TUI ダッシュボードとステータスバーに表示する Go アプリケーション
 
 ---
 
@@ -101,6 +101,7 @@ go vet ./...
 - Scanner 最適化: tmux の `CurrentCommand` で AI ペインのみ `ps` 実行（不要な呼び出しを削減）。`node` も通過させる（takt 等の node ベースツール用）
 - Codex 状態検出: `pgrep -P` で子プロセス有無を検査（子プロセスあり → Thinking、なし → Idle）
 - Antigravity CLI (agy) 状態検出: native バイナリ（COMM `agy`）で子プロセスを生成しないため Codex 方式の `pgrep -P` 検査は使えない。`capture-pane` 全文に対する `toolPaneRules`/`classifyByRules`（manifest 型ルールテーブル、ADR-0016）で判定する — Waiting は `Requesting permission for:` + `Do you want to proceed?`、Working は行頭 braille スピナーまたは `esc to cancel`、Idle は残余（実画面ではフッター `? for shortcuts`）
+- OpenCode 状態検出: native バイナリ（COMM `opencode`、nix ラッパー経由の pane_current_command は `.opencode-wrapp`）で子プロセスを生成しないため agy と同じ `toolPaneRules`/`classifyByRules` で判定する — Waiting は `△ Permission required` または `Allow once   Allow always   Reject`、Working は `esc interrupt` または進捗バー `■`/`⬝`、Idle は残余（実画面ではフッター `tab agents  ctrl+p commands`）。takt が起動する `opencode serve <host>:<port>` の HTTP バックエンドは対話セッションではないため検出対象から除外する（ADR-0016）
 - ペインジャンプ:
   - tmux: switch-client → select-window → select-pane（同期的、sleep 不要）
   - WezTerm: 同一 WS → `wezterm cli activate-pane`、別 WS → トリガーファイル経由

@@ -583,6 +583,16 @@ var toolPaneRules = map[ToolType]paneRules{
 			regexp.MustCompile(`(?i)esc to cancel`),
 		},
 	},
+	ToolOpenCode: {
+		waiting: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)△ permission required`),
+			regexp.MustCompile(`(?i)allow once\s+allow always\s+reject`),
+		},
+		working: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)esc (to )?interrupt`),
+			regexp.MustCompile(`(■|⬝){4,}`), // 進捗バー（例: "⬝⬝■■■■■■  esc interrupt"）
+		},
+	},
 }
 
 // classifyByRules は rules に基づいて画面テキストを判定する。
