@@ -19,11 +19,12 @@ Do NOT hardcode model names or CLI options — always refer to the config file.
 1. `agents.<agent-name>.tool` を読む
 2. tool に応じてCLIコマンドを構築:
    - `"codex"` → Codex CLI を使用
-   - `"gemini"` → Gemini CLI を使用
+   - `"antigravity"` → Antigravity CLI（agy）を使用（旧値 `"gemini"` は読み替え）
    - `"claude-direct"` → 外部CLIを呼ばず自身で処理
 3. model/sandbox/flags の解決順: `agents.<agent-name>.*` → 該当ツールの設定 → フォールバック
 
 ### フォールバックデフォルト（設定ファイルが見つからない場合）
+
 - Tool: claude-direct
 
 ## Role
@@ -47,13 +48,13 @@ cli-tools.yaml の `agents.<agent-name>.tool` に基づいてコマンドを構�
 ### tool = "codex" の場合
 
 ```bash
-codex exec --model <model> --sandbox <sandbox> <flags> "{code review question}" 2>/dev/null
+codex exec --model <model> --sandbox <sandbox> <flags> "{code review question}" < /dev/null 2>/dev/null
 ```
 
-### tool = "gemini" の場合
+### tool = "antigravity" の場合
 
 ```bash
-gemini -m <model> -p "{code review question}" 2>/dev/null
+agy -p "{code review question}" --model <antigravity.model> 2>/dev/null
 ```
 
 ## Review Checklist
@@ -70,32 +71,20 @@ gemini -m <model> -p "{code review question}" 2>/dev/null
 
 重要度に応じた段階的出力。Medium/Low は 1 行サマリ。
 
-```markdown
-### Critical ({count})
-- `{file}:{line}` - **{Issue}**
-  {問題の説明 + 影響 + 修正案}
-  ```{lang}
-  {コードスニペット}
-  ```
+- `### Critical ({count})` — `- {file}:{line} - **{Issue}** 問題の説明 + 影響 + 修正案 + コードスニペット`
+- `### High ({count})` — `- {file}:{line} - **{Issue}** 問題の説明 + 修正案`
+- `### Medium ({count})` — `- {file}:{line} - {1 行サマリ}`
+- `### Low ({count})` — `- {file}:{line} - {1 行サマリ}`
 
-### High ({count})
-- `{file}:{line}` - **{Issue}**
-  {問題の説明 + 修正案}
-
-### Medium ({count})
-- `{file}:{line}` - {1行サマリ}
-
-### Low ({count})
-- `{file}:{line}` - {1行サマリ}
-```
+Critical/High には言語指定のコードスニペットを添付する（プレーンなインラインコードで記述する）。
 
 ## Severity Levels
 
-| Level | Criteria |
-|-------|----------|
-| Critical | Bugs, security issues, data loss risk |
-| High | Maintainability, performance concerns |
-| Medium/Low | Style, minor improvements |
+| Level      | Criteria                              |
+| ---------- | ------------------------------------- |
+| Critical   | Bugs, security issues, data loss risk |
+| High       | Maintainability, performance concerns |
+| Medium/Low | Style, minor improvements             |
 
 ## Principles
 
@@ -104,6 +93,14 @@ gemini -m <model> -p "{code review question}" 2>/dev/null
 - Suggest specific improvements
 - Acknowledge good practices
 - Return concise output (main orchestrator has limited context)
+
+## コンテキスト効率
+
+- ファイル探索は Glob → Grep(count) → Grep(files_with_matches) → Grep(content, head_limit) → Read(offset/limit) の段階的絞り込みで行う
+- 対象ファイル 5 個以上の探索ではエスカレーション戦略を徹底、10 個以上はサブエージェント委譲を検討
+- Read は必要な範囲のみ offset/limit で部分読み込み。全文 Read は避ける
+- Bash の cat / grep / find は使用せず、専用ツール（Read / Grep / Glob）を使う
+- 詳細は `escalation-strategy` ルール参照
 
 ## Language
 
