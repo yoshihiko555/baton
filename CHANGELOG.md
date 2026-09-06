@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-06
+
 ### Added
 
 - 自動承認モードに安全判定を追加し、低リスク操作のみ自動承認し、危険・不明・判定失敗時は停止表示に留めるようにした
@@ -91,7 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - 既定のターミナルバックエンドを WezTerm から tmux 中心の構成へ整理した
 
-[Unreleased]: https://github.com/yoshihiko555/baton/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/yoshihiko555/baton/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/yoshihiko555/baton/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/yoshihiko555/baton/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/yoshihiko555/baton/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/yoshihiko555/baton/releases/tag/v0.1.0
