@@ -176,6 +176,50 @@ func TestToSessionOutputHookFieldsJSON(t *testing.T) {
 	}
 }
 
+func TestToSessionOutputViaField(t *testing.T) {
+	tests := []struct {
+		name    string
+		session Session
+		wantVia bool
+	}{
+		{
+			name:    "via set",
+			session: Session{Tool: ToolClaude, Via: ViaTakt},
+			wantVia: true,
+		},
+		{
+			name:    "via omitted when empty",
+			session: Session{Tool: ToolClaude},
+			wantVia: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			content, err := json.Marshal(toSessionOutput(tc.session))
+			if err != nil {
+				t.Fatalf("json.Marshal failed: %v", err)
+			}
+
+			var payload map[string]any
+			if err := json.Unmarshal(content, &payload); err != nil {
+				t.Fatalf("json.Unmarshal failed: %v", err)
+			}
+
+			via, ok := payload["via"]
+			if !tc.wantVia {
+				if ok {
+					t.Errorf("unexpected key \"via\" in JSON: %s", content)
+				}
+				return
+			}
+			if via != ViaTakt {
+				t.Errorf("via = %#v, want %q", via, ViaTakt)
+			}
+		})
+	}
+}
+
 func TestExporterWriteReadStatusRoundTrip(t *testing.T) {
 	tests := []struct {
 		name         string

@@ -279,7 +279,7 @@ func renderSessionEntry(e *sessionEntry, width int, isSelected bool, theme Theme
 	if !ok {
 		toolColor = lipgloss.Color("#AAAAAA")
 	}
-	toolName := lipgloss.NewStyle().Foreground(toolColor).Render(s.Tool.String())
+	toolName := lipgloss.NewStyle().Foreground(toolColor).Render(sessionToolLabel(s))
 
 	// カーソル
 	cursor := "  "
@@ -402,7 +402,7 @@ func renderAttentionEntry(entry sessionEntry, width int, theme Theme) string {
 	if !ok {
 		toolColor = lipgloss.Color("#AAAAAA")
 	}
-	toolName := lipgloss.NewStyle().Foreground(toolColor).Render(entry.session.Tool.String())
+	toolName := lipgloss.NewStyle().Foreground(toolColor).Render(sessionToolLabel(entry.session))
 	prefix := fmt.Sprintf("%s %s ", icon, toolName)
 
 	location := sessionDisplayName(&entry)
@@ -444,7 +444,7 @@ func (m Model) renderPreview(width, height int) string {
 	// セッション情報ヘッダー
 	s := sel.session
 	name := sessionDisplayName(sel)
-	info := fmt.Sprintf("  %s / %s  PID:%d", name, s.Tool, s.PID)
+	info := fmt.Sprintf("  %s / %s  PID:%d", name, sessionToolLabel(s), s.PID)
 	if s.Branch != "" {
 		info += fmt.Sprintf("  [%s]", s.Branch)
 	}

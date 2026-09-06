@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - TUI 常駐が status JSON を毎スキャン書き出すようになり、`--once` / `--exit` も hook 由来の承認待ちを反映するようにした（`hook.status_max_age` で有効期限を設定可能）。
 - agy セッションの Idle / Thinking / Waiting 検出（画面テキストのルールテーブル判定）
 - OpenCode セッションの Idle / Thinking / Waiting 検出（画面テキストのルールテーブル判定）。takt が起動する opencode serve は対象外
+- takt が起動した Claude / Codex セッションを takt 配下として識別し、TUI に "claude (takt)" と表示、status JSON に via を追加。takt 配下の非対話セッションは同一ディレクトリの対話セッションの状態判定に影響しなくなった
 
 ### Changed
 

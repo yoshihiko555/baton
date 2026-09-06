@@ -501,6 +501,7 @@ func sessionMatchesFilter(session *core.Session, project *core.Project, filter s
 		session.Branch,
 		session.CurrentTool,
 		session.FirstPrompt,
+		session.Via,
 	}
 	if project != nil {
 		searchTargets = append(searchTargets, project.Path, project.Name)
@@ -553,6 +554,18 @@ func sessionListLabel(e *sessionEntry) string {
 	default:
 		return fmt.Sprintf("%s / %s", project, primary)
 	}
+}
+
+// sessionToolLabel はツール名の表示ラベルを返す。Via が設定されている場合は
+// "claude (takt)" のように起動元を付記する（ADR-0016 Decision 3）。
+func sessionToolLabel(s *core.Session) string {
+	if s == nil {
+		return ""
+	}
+	if s.Via == "" {
+		return s.Tool.String()
+	}
+	return fmt.Sprintf("%s (%s)", s.Tool.String(), s.Via)
 }
 
 func displayStateLabel(state core.SessionState) string {
