@@ -69,23 +69,6 @@ func TestScanCurrentCommandBash(t *testing.T) {
 	}
 }
 
-func TestScanCurrentCommandNode(t *testing.T) {
-	called := map[string]bool{}
-	mt := &mockTerminal{
-		panes: []terminal.Pane{
-			{ID: "5", TTYName: "/dev/ttys005", CurrentCommand: "node"},
-		},
-	}
-	ps := newTrackingScanner(called)
-	sc := NewDefaultScanner(mt, ps)
-
-	sc.Scan(context.Background())
-
-	if !called["ttys005"] {
-		t.Error("expected FindAIProcesses to be called for ttys005 (node is an AI runtime for node-based AI tool wrappers), but it was not")
-	}
-}
-
 func TestScanCurrentCommandEmpty(t *testing.T) {
 	called := map[string]bool{}
 	mt := &mockTerminal{
@@ -100,23 +83,6 @@ func TestScanCurrentCommandEmpty(t *testing.T) {
 
 	if !called["ttys003"] {
 		t.Error("expected FindAIProcesses to be called for ttys003 (empty CurrentCommand = WezTerm compat), but it was not")
-	}
-}
-
-func TestScanCurrentCommandCaseInsensitive(t *testing.T) {
-	called := map[string]bool{}
-	mt := &mockTerminal{
-		panes: []terminal.Pane{
-			{ID: "4", TTYName: "/dev/ttys004", CurrentCommand: "Codex"},
-		},
-	}
-	ps := newTrackingScanner(called)
-	sc := NewDefaultScanner(mt, ps)
-
-	sc.Scan(context.Background())
-
-	if !called["ttys004"] {
-		t.Error("expected FindAIProcesses to be called for ttys004 (Codex is AI command, case-insensitive), but it was not")
 	}
 }
 

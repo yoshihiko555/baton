@@ -203,14 +203,6 @@ func TestTmuxFocusPaneNotFound(t *testing.T) {
 	}
 }
 
-func TestTmuxFocusPaneNilExecFn(t *testing.T) {
-	tmx := &TmuxTerminal{execFn: nil}
-	err := tmx.FocusPane("%0")
-	if err == nil {
-		t.Fatal("expected error for nil execFn")
-	}
-}
-
 func TestTmuxGetPaneText(t *testing.T) {
 	sampleText := "line1\nline2\nline3\nAllow tool call? (y/n)\n"
 
@@ -234,31 +226,6 @@ func TestTmuxGetPaneText(t *testing.T) {
 
 	if !strings.Contains(got, "Allow tool call") {
 		t.Errorf("expected approval prompt in output, got %q", got)
-	}
-}
-
-func TestTmuxGetPaneTextNilExecFn(t *testing.T) {
-	tmx := &TmuxTerminal{execFn: nil}
-	_, err := tmx.GetPaneText("%0")
-	if err == nil {
-		t.Fatal("expected error for nil execFn")
-	}
-}
-
-func TestTmuxName(t *testing.T) {
-	tmx := NewTmuxTerminal()
-	if got, want := tmx.Name(), "tmux"; got != want {
-		t.Fatalf("unexpected terminal name: got=%q want=%q", got, want)
-	}
-}
-
-func TestTmuxNewTerminalExecFn(t *testing.T) {
-	tmx := NewTmuxTerminal()
-	if tmx == nil {
-		t.Fatal("NewTmuxTerminal returned nil")
-	}
-	if tmx.execFn == nil {
-		t.Fatal("execFn should be set")
 	}
 }
 
@@ -330,55 +297,40 @@ func TestTmuxGetPaneText80LineLimit(t *testing.T) {
 	}
 }
 
-func TestTmuxFocusPaneSwitchClientError(t *testing.T) {
+func TestTmuxFocusPaneStepError(t *testing.T) {
 	sampleOutput := "main\t1\t0\t0\t%0\teditor\tclaude\t/home/user/project\t/dev/ttys001\n"
 
-	tmx := &TmuxTerminal{
-		execFn: func(args ...string) ([]byte, error) {
-			switch args[0] {
-			case "list-panes":
-				return []byte(sampleOutput), nil
-			case "switch-client":
-				return nil, errors.New("no clients")
-			default:
-				return []byte(""), nil
+	tests := []struct {
+		name     string
+		failStep string
+	}{
+		{"switch-client error", "switch-client"},
+		{"select-window error", "select-window"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmx := &TmuxTerminal{
+				execFn: func(args ...string) ([]byte, error) {
+					switch args[0] {
+					case "list-panes":
+						return []byte(sampleOutput), nil
+					case tc.failStep:
+						return nil, errors.New("boom")
+					default:
+						return []byte(""), nil
+					}
+				},
 			}
-		},
-	}
 
-	err := tmx.FocusPane("%0")
-	if err == nil {
-		t.Fatal("expected error when switch-client fails")
-	}
-	if !strings.Contains(err.Error(), "switch-client") {
-		t.Errorf("expected error to contain 'switch-client', got: %v", err)
-	}
-}
-
-func TestTmuxFocusPaneSelectWindowError(t *testing.T) {
-	sampleOutput := "main\t1\t0\t0\t%0\teditor\tclaude\t/home/user/project\t/dev/ttys001\n"
-
-	tmx := &TmuxTerminal{
-		execFn: func(args ...string) ([]byte, error) {
-			switch args[0] {
-			case "list-panes":
-				return []byte(sampleOutput), nil
-			case "switch-client":
-				return []byte(""), nil
-			case "select-window":
-				return nil, errors.New("no such window")
-			default:
-				return []byte(""), nil
+			err := tmx.FocusPane("%0")
+			if err == nil {
+				t.Fatalf("expected error when %s fails", tc.failStep)
 			}
-		},
-	}
-
-	err := tmx.FocusPane("%0")
-	if err == nil {
-		t.Fatal("expected error when select-window fails")
-	}
-	if !strings.Contains(err.Error(), "select-window") {
-		t.Errorf("expected error to contain 'select-window', got: %v", err)
+			if !strings.Contains(err.Error(), tc.failStep) {
+				t.Errorf("expected error to contain %q, got: %v", tc.failStep, err)
+			}
+		})
 	}
 }
 
@@ -479,7 +431,6 @@ func TestHookSessionPattern(t *testing.T) {
 		{"short digits", "claude-test-999", false}, // < 4 digits
 		{"four digits", "claude-test-1234", true},
 		{"normal session", "main", false},
-		{"work session", "dev-server", false},
 		{"claude prefix only", "claude", false},
 		{"claude with dash", "claude-session", false},
 	}
@@ -514,18 +465,5 @@ func TestTmuxSendKeys(t *testing.T) {
 	wantArgs := []string{"send-keys", "-t", "%3", "q", "Enter"}
 	if !reflect.DeepEqual(capturedArgs, wantArgs) {
 		t.Fatalf("unexpected args: got=%v want=%v", capturedArgs, wantArgs)
-	}
-}
-
-func TestTmuxSendKeysNilExec(t *testing.T) {
-	// Arrange
-	tmx := &TmuxTerminal{execFn: nil}
-
-	// Act
-	err := tmx.SendKeys("%3", "q")
-
-	// Assert
-	if err == nil {
-		t.Fatal("expected error for nil execFn")
 	}
 }

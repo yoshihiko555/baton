@@ -706,23 +706,3 @@ func (m *Model) checkAutoApprove() tea.Cmd {
 	}
 	return tea.Batch(cmds...)
 }
-
-// --- 以下は v1 互換のために残す型（テストが参照） ---
-
-// ProjectItem はプロジェクト一覧の1行を表す（後方互換）。
-type ProjectItem struct {
-	Project core.Project
-}
-
-func (i ProjectItem) Title() string       { return i.Project.Name }
-func (i ProjectItem) Description() string { return "" }
-func (i ProjectItem) FilterValue() string { return i.Project.Path }
-
-// SessionItem はセッション一覧の1行を表す（後方互換）。
-type SessionItem struct {
-	Session core.Session
-}
-
-func (i SessionItem) Title() string       { return i.Session.Tool.String() }
-func (i SessionItem) Description() string { return "" }
-func (i SessionItem) FilterValue() string { return i.Session.ID }

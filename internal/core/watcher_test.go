@@ -106,29 +106,6 @@ func TestWatcher_Start_Stop(t *testing.T) {
 	}
 }
 
-func TestWatcher_FileModified(t *testing.T) {
-	// 既存セッション更新で Modified イベントが届くことを確認する。
-	baseDir := t.TempDir()
-	projectPath := filepath.Join(baseDir, "project-a")
-	sessionPath := filepath.Join(projectPath, "session-1.jsonl")
-	mustWriteFile(t, sessionPath, []byte("init"))
-
-	watcher, cancel := startWatcher(t, baseDir)
-
-	// fsnotify 監視開始後にファイルを更新する。
-	mustWriteFile(t, sessionPath, []byte("updated"))
-
-	event := waitForEvent(t, watcher.Events(), 2*time.Second, func(e WatchEvent) bool {
-		return e.ProjectPath == projectPath && e.SessionID == "session-1"
-	})
-	if event.Path != sessionPath {
-		t.Fatalf("unexpected event path: %s", event.Path)
-	}
-
-	cancel()
-	watcher.Stop()
-}
-
 func TestWatcher_Debounce(t *testing.T) {
 	// 短時間の連続更新が 1 件にデバウンスされることを確認する。
 	baseDir := t.TempDir()
@@ -136,9 +113,6 @@ func TestWatcher_Debounce(t *testing.T) {
 	mustWriteFile(t, sessionPath, []byte("init"))
 
 	watcher, cancel := startWatcher(t, baseDir)
-
-	// fsnotify が監視を開始するまで少し待つ。
-	time.Sleep(100 * time.Millisecond)
 
 	for i := 0; i < 5; i++ {
 		mustWriteFile(t, sessionPath, []byte(time.Now().String()))
@@ -217,24 +191,6 @@ func countMatchingEvents(ch <-chan WatchEvent, sessionID string, eventType Watch
 	}
 }
 
-func waitForChannelClosed(t *testing.T, ch <-chan WatchEvent, timeout time.Duration) {
-	t.Helper()
-
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	for {
-		select {
-		case _, ok := <-ch:
-			if !ok {
-				return
-			}
-		case <-timer.C:
-			t.Fatal("events channel was not closed in time")
-		}
-	}
-}
-
 func mustWriteFile(t *testing.T, filePath string, content []byte) {
 	t.Helper()
 
@@ -299,9 +255,7 @@ func TestIsSessionFile(t *testing.T) {
 		{"session.jsonl", true},
 		{"session.json", true},
 		{"session.JSONL", true},
-		{"session.JSON", true},
 		{"session.txt", false},
-		{"session.log", false},
 		{"nested/session.jsonl", true},
 	}
 

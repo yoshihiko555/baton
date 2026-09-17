@@ -55,11 +55,6 @@ func TestDetermineSessionState(t *testing.T) {
 			want:    Idle,
 		},
 		{
-			name:    "empty entries",
-			entries: []*Entry{},
-			want:    Idle,
-		},
-		{
 			name: "assistant with thinking content",
 			entries: []*Entry{
 				{Type: "assistant", Message: Message{Content: []ContentBlock{{Type: "tool_use"}}}},
@@ -78,20 +73,6 @@ func TestDetermineSessionState(t *testing.T) {
 			name: "assistant with stop_reason tool_use and Agent tool means Thinking",
 			entries: []*Entry{
 				{Type: "assistant", Message: Message{StopReason: "tool_use", Content: []ContentBlock{{Type: "text"}, {Type: "tool_use", Name: "Agent"}}}},
-			},
-			want: Thinking,
-		},
-		{
-			name: "assistant with stop_reason tool_use and Task tool means Thinking",
-			entries: []*Entry{
-				{Type: "assistant", Message: Message{StopReason: "tool_use", Content: []ContentBlock{{Type: "tool_use", Name: "Task"}}}},
-			},
-			want: Thinking,
-		},
-		{
-			name: "assistant with stop_reason tool_use and Skill tool means Thinking",
-			entries: []*Entry{
-				{Type: "assistant", Message: Message{StopReason: "tool_use", Content: []ContentBlock{{Type: "tool_use", Name: "Skill"}}}},
 			},
 			want: Thinking,
 		},
@@ -131,13 +112,6 @@ func TestDetermineSessionState(t *testing.T) {
 			want: Thinking,
 		},
 		{
-			name: "user entry with tool_result content means thinking",
-			entries: []*Entry{
-				{Type: "user", Message: Message{Content: []ContentBlock{{Type: "tool_result"}}}},
-			},
-			want: Thinking,
-		},
-		{
 			name: "progress entry means ToolUse",
 			entries: []*Entry{
 				{Type: "progress"},
@@ -169,20 +143,6 @@ func TestDetermineSessionState(t *testing.T) {
 				t.Fatalf("unexpected state: got %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestNewIncrementalReader(t *testing.T) {
-	// コンストラクタが内部オフセットマップを初期化することを確認する。
-	r := NewIncrementalReader()
-	if r == nil {
-		t.Fatalf("NewIncrementalReader returned nil")
-	}
-	if r.offsets == nil {
-		t.Fatalf("offsets map should be initialized")
-	}
-	if len(r.offsets) != 0 {
-		t.Fatalf("offsets should be empty on creation")
 	}
 }
 

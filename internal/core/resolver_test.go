@@ -64,9 +64,13 @@ func TestStateResolverResolvePathRejectsInvalidFile(t *testing.T) {
 	if err := os.Mkdir(directoryPath, 0o755); err != nil {
 		t.Fatalf("os.Mkdir: %v", err)
 	}
+	fifoPath := filepath.Join(dir, "fifo.jsonl")
+	if err := syscall.Mkfifo(fifoPath, 0o600); err != nil {
+		t.Fatalf("syscall.Mkfifo: %v", err)
+	}
 	resolver := NewStateResolver(NewIncrementalReader(), dir, dir, time.Second)
 
-	for _, path := range []string{txtPath, directoryPath} {
+	for _, path := range []string{txtPath, directoryPath, fifoPath} {
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			resolved, normalizedPath, err := resolver.ResolvePath(path)
 			if err == nil {
@@ -137,26 +141,6 @@ func TestStateResolverResolvePathSymlinkMatchesExclude(t *testing.T) {
 	}
 	if len(remaining) != 0 {
 		t.Fatalf("len(remaining) = %d, want 0", len(remaining))
-	}
-}
-
-func TestStateResolverResolvePathRejectsFIFO(t *testing.T) {
-	dir := t.TempDir()
-	fifoPath := filepath.Join(dir, "session.jsonl")
-	if err := syscall.Mkfifo(fifoPath, 0o600); err != nil {
-		t.Fatalf("syscall.Mkfifo: %v", err)
-	}
-	resolver := NewStateResolver(NewIncrementalReader(), dir, dir, time.Second)
-
-	resolved, normalizedPath, err := resolver.ResolvePath(fifoPath)
-	if err == nil {
-		t.Fatal("ResolvePath returned nil error for a FIFO")
-	}
-	if normalizedPath != "" {
-		t.Errorf("normalized path = %q, want empty", normalizedPath)
-	}
-	if resolved.State != Thinking {
-		t.Errorf("fallback State = %v, want %v", resolved.State, Thinking)
 	}
 }
 

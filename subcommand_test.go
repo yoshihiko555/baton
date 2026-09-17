@@ -123,22 +123,20 @@ func TestRunApproveOrDenyArgErrors(t *testing.T) {
 	}
 }
 
-// TestRunApproveOrDenyHelp verifies that -h/--help exits 0 (not exitUsageError)
+// TestRunApproveHelp verifies that -h/--help exits 0 (not exitUsageError)
 // and does not print the usage text twice: flag.Parse itself already prints
 // the error/usage via fs.Usage() when it returns flag.ErrHelp, so
-// runApproveOrDeny must not print anything a second time.
-func TestRunApproveOrDenyHelp(t *testing.T) {
-	for _, name := range []string{"approve", "deny"} {
-		t.Run(name, func(t *testing.T) {
-			var out, errOut bytes.Buffer
-			code := runSubcommand(name, []string{"-h"}, &out, &errOut)
-			if code != exitOK {
-				t.Fatalf("exit code = %d, want %d (stderr: %s)", code, exitOK, errOut.String())
-			}
-			if got := strings.Count(errOut.String(), "usage:"); got != 1 {
-				t.Errorf("usage text printed %d times, want exactly 1 (stderr: %q)", got, errOut.String())
-			}
-		})
+// runApproveOrDeny must not print anything a second time. The -h code path
+// is identical for approve/deny (only the name embedded in the usage text
+// differs), so approve alone is sufficient to cover it.
+func TestRunApproveHelp(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := runSubcommand("approve", []string{"-h"}, &out, &errOut)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (stderr: %s)", code, exitOK, errOut.String())
+	}
+	if got := strings.Count(errOut.String(), "usage:"); got != 1 {
+		t.Errorf("usage text printed %d times, want exactly 1 (stderr: %q)", got, errOut.String())
 	}
 }
 
@@ -201,33 +199,23 @@ func TestRunApproveWithPaneNotFound(t *testing.T) {
 	}
 }
 
-// TestRunApproveOrDenyWithNonWaitingSession covers both approve and deny
-// against a non-Waiting session: neither action should ever reach SendKeys.
-func TestRunApproveOrDenyWithNonWaitingSession(t *testing.T) {
-	cases := []struct {
-		name   string
-		action core.ApprovalAction
-	}{
-		{"approve", core.ApprovalApprove},
-		{"deny", core.ApprovalDeny},
+// TestRunApproveWithNonWaitingSession covers the gate against a non-Waiting
+// session: the action should never reach SendKeys. CanRespondToApproval does
+// not branch on core.ApprovalAction, so approve alone is sufficient to cover
+// the gate (deny would take the identical path).
+func TestRunApproveWithNonWaitingSession(t *testing.T) {
+	projects := []core.Project{
+		{Path: "/home/user/proj", Sessions: []*core.Session{idleSession("%5")}},
 	}
+	deps, term := newFakeDeps(projects)
+	var out, errOut bytes.Buffer
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			projects := []core.Project{
-				{Path: "/home/user/proj", Sessions: []*core.Session{idleSession("%5")}},
-			}
-			deps, term := newFakeDeps(projects)
-			var out, errOut bytes.Buffer
-
-			code := runApproveWith(deps, "%5", tc.action, &out, &errOut)
-			if code != exitNotApprovable {
-				t.Fatalf("exit code = %d, want %d (stderr: %s)", code, exitNotApprovable, errOut.String())
-			}
-			if term.sendKeysCalls != 0 {
-				t.Errorf("SendKeys called %d times, want 0", term.sendKeysCalls)
-			}
-		})
+	code := runApproveWith(deps, "%5", core.ApprovalApprove, &out, &errOut)
+	if code != exitNotApprovable {
+		t.Fatalf("exit code = %d, want %d (stderr: %s)", code, exitNotApprovable, errOut.String())
+	}
+	if term.sendKeysCalls != 0 {
+		t.Errorf("SendKeys called %d times, want 0", term.sendKeysCalls)
 	}
 }
 

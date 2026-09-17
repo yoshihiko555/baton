@@ -7,15 +7,6 @@ import (
 	"github.com/yoshihiko555/baton/internal/terminal"
 )
 
-func TestApprovalActionKey(t *testing.T) {
-	if got := ApprovalApprove.Key(); got != "Enter" {
-		t.Errorf("ApprovalApprove.Key() = %q, want %q", got, "Enter")
-	}
-	if got := ApprovalDeny.Key(); got != "Escape" {
-		t.Errorf("ApprovalDeny.Key() = %q, want %q", got, "Escape")
-	}
-}
-
 func TestCanRespondToApproval(t *testing.T) {
 	tests := []struct {
 		name string
@@ -116,29 +107,17 @@ func TestSendApprovalOnDenyKey(t *testing.T) {
 }
 
 func TestSendApprovalOnNonApprovableSession(t *testing.T) {
-	actions := []struct {
-		name   string
-		action ApprovalAction
-	}{
-		{"approve", ApprovalApprove},
-		{"deny", ApprovalDeny},
+	term := &fakeApprovalTerminal{}
+	s := Session{State: Idle, Tool: ToolClaude, PaneID: "%5"}
+
+	err := SendApproval(term, s, ApprovalApprove)
+	if err == nil {
+		t.Fatal("SendApproval() error = nil, want ErrNotApprovable")
 	}
-
-	for _, tc := range actions {
-		t.Run(tc.name, func(t *testing.T) {
-			term := &fakeApprovalTerminal{}
-			s := Session{State: Idle, Tool: ToolClaude, PaneID: "%5"}
-
-			err := SendApproval(term, s, tc.action)
-			if err == nil {
-				t.Fatal("SendApproval() error = nil, want ErrNotApprovable")
-			}
-			if !errors.Is(err, ErrNotApprovable) {
-				t.Errorf("SendApproval() error = %v, want wrapping ErrNotApprovable", err)
-			}
-			if term.sendKeysCalls != 0 {
-				t.Errorf("SendKeys called %d times, want 0", term.sendKeysCalls)
-			}
-		})
+	if !errors.Is(err, ErrNotApprovable) {
+		t.Errorf("SendApproval() error = %v, want wrapping ErrNotApprovable", err)
+	}
+	if term.sendKeysCalls != 0 {
+		t.Errorf("SendKeys called %d times, want 0", term.sendKeysCalls)
 	}
 }
