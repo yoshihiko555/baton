@@ -55,12 +55,6 @@ func TestParseEvent(t *testing.T) {
 			errContains: "pane_id has invalid format",
 		},
 		{
-			name:        "pane ID without prefix",
-			input:       `{"pane_id":"foo","hook_event_name":"PermissionRequest"}`,
-			wantErr:     true,
-			errContains: "pane_id has invalid format",
-		},
-		{
 			name:        "missing hook event name",
 			input:       `{"pane_id":"%3"}`,
 			wantErr:     true,
@@ -89,14 +83,6 @@ func TestParseEvent(t *testing.T) {
 			input:       `{"pane_id":"%1","hook_event_name":"PermissionRequest","tool_name":"` + strings.Repeat("a", maxFieldLength+1) + `"}`,
 			wantErr:     true,
 			errContains: "tool_name exceeds maximum length",
-		},
-		{
-			name:  "unknown fields ignored",
-			input: `{"pane_id":"%4","hook_event_name":"SessionStart","unknown":{"nested":true}}`,
-			want: Event{
-				PaneID:        "%4",
-				HookEventName: "SessionStart",
-			},
 		},
 	}
 

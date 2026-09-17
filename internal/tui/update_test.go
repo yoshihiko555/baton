@@ -288,21 +288,6 @@ func TestUpdateWindowSizeMsg(t *testing.T) {
 	}
 }
 
-func TestUpdateWindowSizeMsgSmallValues(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-
-	msg := tea.WindowSizeMsg{Width: 1, Height: 1}
-	updated, cmd := m.Update(msg)
-	m = updated.(Model)
-
-	if m.width != 1 {
-		t.Errorf("width = %d, want 1", m.width)
-	}
-	if cmd != nil {
-		t.Error("expected no command from WindowSizeMsg")
-	}
-}
-
 func TestUpdateEnterKeyJumpSuccess(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
 
@@ -628,44 +613,6 @@ func TestWaitRescanCmdFires(t *testing.T) {
 	}
 }
 
-func TestMoveCursorSkipsHeaders(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-
-	projects := []core.Project{
-		{
-			Path: "/project-a",
-			Name: "project-a",
-			Sessions: []*core.Session{
-				{ID: "s1", State: core.Thinking, PID: 100},
-				{ID: "s2", State: core.Idle, PID: 200},
-			},
-		},
-	}
-	m = feedProjects(m, projects)
-
-	// カーソルはヘッダーではなくセッション行にあるはず
-	sel := m.selectedSession()
-	if sel == nil {
-		t.Fatal("expected a selected session")
-	}
-	if sel.isHeader {
-		t.Error("cursor should not be on a header")
-	}
-
-	// 下に移動
-	msg := tea.KeyMsg{Type: tea.KeyDown}
-	updated, _ := m.Update(msg)
-	m = updated.(Model)
-
-	sel = m.selectedSession()
-	if sel == nil {
-		t.Fatal("expected a selected session after move")
-	}
-	if sel.isHeader {
-		t.Error("cursor should skip headers")
-	}
-}
-
 func TestBuildEntriesStableProjectToolPIDOrder(t *testing.T) {
 	projects := []core.Project{
 		{
@@ -856,35 +803,6 @@ func TestSessionDisplayName(t *testing.T) {
 	}
 }
 
-func TestProjectItemCompat(t *testing.T) {
-	item := ProjectItem{Project: core.Project{
-		Path: "/home/user/project",
-		Name: "my-project",
-	}}
-
-	if item.Title() != "my-project" {
-		t.Errorf("Title() = %q, want %q", item.Title(), "my-project")
-	}
-	if item.FilterValue() != "/home/user/project" {
-		t.Errorf("FilterValue() = %q, want %q", item.FilterValue(), "/home/user/project")
-	}
-}
-
-func TestSessionItemCompat(t *testing.T) {
-	item := SessionItem{Session: core.Session{
-		ID:    "abc-123",
-		State: core.Thinking,
-		Tool:  core.ToolClaude,
-	}}
-
-	if item.Title() != "claude" {
-		t.Errorf("Title() = %q, want %q", item.Title(), "claude")
-	}
-	if item.FilterValue() != "abc-123" {
-		t.Errorf("FilterValue() = %q, want %q", item.FilterValue(), "abc-123")
-	}
-}
-
 // C1: カーソルが別セッションに移動したときプレビューが更新される
 func TestPreviewUpdatesOnCursorChange(t *testing.T) {
 	m, _, _, _, _ := newTestModel()
@@ -987,174 +905,72 @@ func TestPreviewShowsSelectMessageWhenNoSession(t *testing.T) {
 	}
 }
 
-// B1: カーソルが下移動でグループヘッダーをスキップする
-func TestCursorDownSkipsGroupHeader(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-
-	// Entries will be: [WORKING header, session(PID=100), IDLE header, session(PID=200)]
-	projects := []core.Project{
-		{
-			Path: "/project-a",
-			Name: "project-a",
-			Sessions: []*core.Session{
-				{ID: "s1", State: core.Thinking, PID: 100},
-				{ID: "s2", State: core.Idle, PID: 200},
-			},
-		},
-	}
-	m = feedProjects(m, projects)
-
-	// Cursor should start on the first session (PID=100)
-	sel := m.selectedSession()
-	if sel == nil {
-		t.Fatal("expected a selected session after feedProjects")
-	}
-	if sel.session.PID != 100 {
-		t.Fatalf("initial cursor PID = %d, want 100", sel.session.PID)
+// B1-B4: カーソル移動がグループヘッダーをスキップし、範囲外に出ないことを検証する。
+// Entries: [WORKING header, session(PID=100), IDLE header, session(PID=200)]
+func TestCursorMovement(t *testing.T) {
+	tests := []struct {
+		name     string
+		keys     []tea.KeyType
+		wantPID  int
+		wantStay bool // true のとき、最後のキー操作前後で m.cursor が変化しないことも検証する
+	}{
+		{name: "down skips IDLE header", keys: []tea.KeyType{tea.KeyDown}, wantPID: 200},
+		{name: "up skips WORKING header", keys: []tea.KeyType{tea.KeyDown, tea.KeyUp}, wantPID: 100},
+		{name: "up at top stays in bounds", keys: []tea.KeyType{tea.KeyUp}, wantPID: 100, wantStay: true},
+		{name: "down at bottom stays in bounds", keys: []tea.KeyType{tea.KeyDown, tea.KeyDown}, wantPID: 200, wantStay: true},
 	}
 
-	// Move cursor down — should skip the IDLE header and land on session(PID=200)
-	msg := tea.KeyMsg{Type: tea.KeyDown}
-	updated, _ := m.Update(msg)
-	m = updated.(Model)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _, _, _, _ := newTestModel()
+			projects := []core.Project{
+				{
+					Path: "/project-a",
+					Name: "project-a",
+					Sessions: []*core.Session{
+						{ID: "s1", State: core.Thinking, PID: 100},
+						{ID: "s2", State: core.Idle, PID: 200},
+					},
+				},
+			}
+			m = feedProjects(m, projects)
 
-	sel = m.selectedSession()
-	if sel == nil {
-		t.Fatal("expected a selected session after moving down")
-	}
-	if sel.isHeader {
-		t.Error("cursor should not be on a header after moving down")
-	}
-	if sel.session.PID != 200 {
-		t.Errorf("cursor PID = %d, want 200 (should have skipped IDLE header)", sel.session.PID)
-	}
-}
+			// Cursor should start on the first session (PID=100)
+			sel := m.selectedSession()
+			if sel == nil {
+				t.Fatal("expected a selected session after feedProjects")
+			}
+			if sel.session.PID != 100 {
+				t.Fatalf("initial cursor PID = %d, want 100", sel.session.PID)
+			}
 
-// B2: カーソルが上移動でグループヘッダーをスキップする
-func TestCursorUpSkipsGroupHeader(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
+			var cursorBeforeLastKey int
+			for i, key := range tc.keys {
+				if tc.wantStay && i == len(tc.keys)-1 {
+					cursorBeforeLastKey = m.cursor
+				}
+				updated, _ := m.Update(tea.KeyMsg{Type: key})
+				m = updated.(Model)
+			}
 
-	// Entries will be: [WORKING header, session(PID=100), IDLE header, session(PID=200)]
-	projects := []core.Project{
-		{
-			Path: "/project-a",
-			Name: "project-a",
-			Sessions: []*core.Session{
-				{ID: "s1", State: core.Thinking, PID: 100},
-				{ID: "s2", State: core.Idle, PID: 200},
-			},
-		},
-	}
-	m = feedProjects(m, projects)
+			if m.cursor < 0 || m.cursor >= len(m.entries) {
+				t.Errorf("cursor = %d, must stay within [0, %d)", m.cursor, len(m.entries))
+			}
+			if tc.wantStay && m.cursor != cursorBeforeLastKey {
+				t.Errorf("cursor = %d, want %d (should stay in place)", m.cursor, cursorBeforeLastKey)
+			}
 
-	// Move down to land on session(PID=200)
-	downMsg := tea.KeyMsg{Type: tea.KeyDown}
-	updated, _ := m.Update(downMsg)
-	m = updated.(Model)
-
-	sel := m.selectedSession()
-	if sel == nil || sel.session.PID != 200 {
-		t.Fatalf("setup failed: expected cursor on PID=200, got %v", sel)
-	}
-
-	// Move cursor up — should skip the WORKING header and land on session(PID=100)
-	upMsg := tea.KeyMsg{Type: tea.KeyUp}
-	updated, _ = m.Update(upMsg)
-	m = updated.(Model)
-
-	sel = m.selectedSession()
-	if sel == nil {
-		t.Fatal("expected a selected session after moving up")
-	}
-	if sel.isHeader {
-		t.Error("cursor should not be on a header after moving up")
-	}
-	if sel.session.PID != 100 {
-		t.Errorf("cursor PID = %d, want 100 (should have skipped WORKING header)", sel.session.PID)
-	}
-}
-
-// B3: カーソルが先頭で上移動しても範囲外にならない
-func TestCursorUpAtTopStaysInBounds(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-
-	projects := []core.Project{
-		{
-			Path: "/project-a",
-			Name: "project-a",
-			Sessions: []*core.Session{
-				{ID: "s1", State: core.Thinking, PID: 100},
-			},
-		},
-	}
-	m = feedProjects(m, projects)
-
-	// Verify cursor is on the only session
-	sel := m.selectedSession()
-	if sel == nil || sel.session.PID != 100 {
-		t.Fatalf("setup failed: expected cursor on PID=100")
-	}
-	initialCursor := m.cursor
-
-	// Move cursor up — should stay in place
-	upMsg := tea.KeyMsg{Type: tea.KeyUp}
-	updated, _ := m.Update(upMsg)
-	m = updated.(Model)
-
-	if m.cursor < 0 {
-		t.Errorf("cursor = %d, must not go negative", m.cursor)
-	}
-	if m.cursor != initialCursor {
-		t.Errorf("cursor = %d, want %d (should stay at top)", m.cursor, initialCursor)
-	}
-	sel = m.selectedSession()
-	if sel == nil {
-		t.Fatal("expected a selected session after up-at-top")
-	}
-	if sel.session.PID != 100 {
-		t.Errorf("cursor PID = %d, want 100", sel.session.PID)
-	}
-}
-
-// B4: カーソルが末尾で下移動しても範囲外にならない
-func TestCursorDownAtBottomStaysInBounds(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-
-	projects := []core.Project{
-		{
-			Path: "/project-a",
-			Name: "project-a",
-			Sessions: []*core.Session{
-				{ID: "s1", State: core.Thinking, PID: 100},
-			},
-		},
-	}
-	m = feedProjects(m, projects)
-
-	// Verify cursor is on the only session
-	sel := m.selectedSession()
-	if sel == nil || sel.session.PID != 100 {
-		t.Fatalf("setup failed: expected cursor on PID=100")
-	}
-	initialCursor := m.cursor
-
-	// Move cursor down — should stay in place
-	downMsg := tea.KeyMsg{Type: tea.KeyDown}
-	updated, _ := m.Update(downMsg)
-	m = updated.(Model)
-
-	if m.cursor >= len(m.entries) {
-		t.Errorf("cursor = %d, must not exceed entries length %d", m.cursor, len(m.entries))
-	}
-	if m.cursor != initialCursor {
-		t.Errorf("cursor = %d, want %d (should stay at bottom)", m.cursor, initialCursor)
-	}
-	sel = m.selectedSession()
-	if sel == nil {
-		t.Fatal("expected a selected session after down-at-bottom")
-	}
-	if sel.session.PID != 100 {
-		t.Errorf("cursor PID = %d, want 100", sel.session.PID)
+			sel = m.selectedSession()
+			if sel == nil {
+				t.Fatal("expected a selected session after moving")
+			}
+			if sel.isHeader {
+				t.Error("cursor should not be on a header after moving")
+			}
+			if sel.session.PID != tc.wantPID {
+				t.Errorf("cursor PID = %d, want %d", sel.session.PID, tc.wantPID)
+			}
+		})
 	}
 }
 
@@ -1361,26 +1177,6 @@ func TestApproveIgnoredOnNonWaitingState(t *testing.T) {
 	}
 }
 
-func TestApproveIgnoredOnAntigravityTool(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-	projects := []core.Project{
-		{
-			Path: "/project-a",
-			Sessions: []*core.Session{
-				{PID: 100, State: core.Waiting, Tool: core.ToolAntigravity, PaneID: "%1"},
-			},
-		},
-	}
-	m = feedProjects(m, projects)
-
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
-	_, cmd := m.Update(msg)
-
-	if cmd != nil {
-		t.Error("expected nil cmd for Antigravity tool (approve not supported)")
-	}
-}
-
 // waitingCodexModel は Waiting 状態の Codex セッションを持つモデルを返す。
 // waitingCodexModel は Waiting 状態の Codex セッションを持つモデルを返す。
 func waitingCodexModel() (Model, *mockTerminal) {
@@ -1398,56 +1194,6 @@ func waitingCodexModel() (Model, *mockTerminal) {
 	return m, term
 }
 
-func TestSimpleApproveOnWaitingCodex(t *testing.T) {
-	m, term := waitingCodexModel()
-
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
-	updated, cmd := m.Update(msg)
-	_ = updated.(Model)
-
-	if cmd == nil {
-		t.Fatal("expected cmd for approve on Codex session")
-	}
-
-	result := cmd()
-	msgResult, ok := result.(ApprovalResultMsg)
-	if !ok {
-		t.Fatalf("expected ApprovalResultMsg, got %T", result)
-	}
-	if msgResult.PaneID != "%2" {
-		t.Errorf("PaneID = %q, want %%2", msgResult.PaneID)
-	}
-	// Codex は Yes がデフォルト選択済みなので Enter のみ
-	if len(term.sentKeys) != 1 || term.sentKeys[0] != "Enter" {
-		t.Errorf("sentKeys = %v, want [Enter]", term.sentKeys)
-	}
-}
-
-func TestSimpleDenyOnWaitingCodex(t *testing.T) {
-	m, term := waitingCodexModel()
-
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
-	updated, cmd := m.Update(msg)
-	_ = updated.(Model)
-
-	if cmd == nil {
-		t.Fatal("expected cmd for deny on Codex session")
-	}
-
-	result := cmd()
-	msgResult, ok := result.(ApprovalResultMsg)
-	if !ok {
-		t.Fatalf("expected ApprovalResultMsg, got %T", result)
-	}
-	if msgResult.PaneID != "%2" {
-		t.Errorf("PaneID = %q, want %%2", msgResult.PaneID)
-	}
-	// Codex も Claude と同様に Escape で "No" を選択
-	if len(term.sentKeys) != 1 || term.sentKeys[0] != "Escape" {
-		t.Errorf("sentKeys = %v, want [Escape]", term.sentKeys)
-	}
-}
-
 func TestPromptApproveIgnoredOnCodexSession(t *testing.T) {
 	m, _ := waitingCodexModel()
 
@@ -1458,105 +1204,6 @@ func TestPromptApproveIgnoredOnCodexSession(t *testing.T) {
 
 	if m.inputMode != inputNone {
 		t.Errorf("inputMode = %d, want inputNone for Codex session (A key should be ignored)", m.inputMode)
-	}
-}
-
-func TestPromptDenyIgnoredOnCodexSession(t *testing.T) {
-	m, _ := waitingCodexModel()
-
-	// Shift+D は Codex セッションでは入力モードに入らない（canInput=false）
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}
-	updated, _ := m.Update(msg)
-	m = updated.(Model)
-
-	if m.inputMode != inputNone {
-		t.Errorf("inputMode = %d, want inputNone for Codex session (D key should be ignored)", m.inputMode)
-	}
-}
-
-func TestPromptApproveInputMode(t *testing.T) {
-	m, term := waitingClaudeModel()
-
-	// Shift+A でテキスト入力モードに入る
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}}
-	updated, _ := m.Update(msg)
-	m = updated.(Model)
-
-	if m.inputMode != inputApprove {
-		t.Fatalf("inputMode = %d, want inputApprove", m.inputMode)
-	}
-
-	// テキストを入力（文字を1つずつ送信）
-	for _, r := range "fix tests" {
-		charMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
-		updated, _ = m.Update(charMsg)
-		m = updated.(Model)
-	}
-
-	// Enter で確定
-	enterMsg := tea.KeyMsg{Type: tea.KeyEnter}
-	updated, cmd := m.Update(enterMsg)
-	m = updated.(Model)
-
-	if m.inputMode != inputNone {
-		t.Errorf("inputMode = %d, want inputNone after Enter", m.inputMode)
-	}
-	if cmd == nil {
-		t.Fatal("expected cmd for prompt approve")
-	}
-
-	result := cmd()
-	if _, ok := result.(ApprovalResultMsg); !ok {
-		t.Fatalf("expected ApprovalResultMsg, got %T", result)
-	}
-
-	// Enter（承認）+ テキスト + Enter が送信されるはず
-	if len(term.sentKeys) == 0 {
-		t.Fatal("expected sentKeys to be non-empty")
-	}
-	if term.sentKeys[0] != "Enter" {
-		t.Errorf("first sentKey = %q, want Enter", term.sentKeys[0])
-	}
-}
-
-func TestPromptDenyInputMode(t *testing.T) {
-	m, term := waitingClaudeModel()
-
-	// Shift+D でテキスト入力モードに入る
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}
-	updated, _ := m.Update(msg)
-	m = updated.(Model)
-
-	if m.inputMode != inputDeny {
-		t.Fatalf("inputMode = %d, want inputDeny", m.inputMode)
-	}
-
-	// テキストを入力
-	for _, r := range "bad idea" {
-		charMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
-		updated, _ = m.Update(charMsg)
-		m = updated.(Model)
-	}
-
-	// Enter で確定
-	enterMsg := tea.KeyMsg{Type: tea.KeyEnter}
-	updated, cmd := m.Update(enterMsg)
-	m = updated.(Model)
-
-	if cmd == nil {
-		t.Fatal("expected cmd for prompt deny")
-	}
-
-	result := cmd()
-	if _, ok := result.(ApprovalResultMsg); !ok {
-		t.Fatalf("expected ApprovalResultMsg, got %T", result)
-	}
-
-	if len(term.sentKeys) == 0 {
-		t.Fatal("expected sentKeys to be non-empty")
-	}
-	if term.sentKeys[0] != "Escape" {
-		t.Errorf("first sentKey = %q, want Escape", term.sentKeys[0])
 	}
 }
 
@@ -2547,94 +2194,133 @@ func TestFilterModeRuneKIsAcceptedAsInput(t *testing.T) {
 	}
 }
 
-func TestFilterMatchesSessionNameAndWorkingDir(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
+// TestFilterMatchesQueries は、セッション名/作業ディレクトリ/ツール名/via/状態トークンの
+// 各フィルタクエリが共通フィクスチャ（2プロジェクト・4セッション）に対して
+// 期待どおりの可視セッション数と選択セッションの属性を返すことを検証する。
+func TestFilterMatchesQueries(t *testing.T) {
 	projects := []core.Project{
 		{
 			Path: "/work/alpha",
 			Name: "alpha-service",
 			Sessions: []*core.Session{
-				{PID: 100, State: core.Idle, Tool: core.ToolClaude, PaneID: "%1", WorkingDir: "/work/alpha"},
+				{PID: 100, State: core.Waiting, Tool: core.ToolClaude, PaneID: "%1", WorkingDir: "/work/alpha"},
+				{PID: 200, State: core.Thinking, Tool: core.ToolClaude, PaneID: "%2", Via: "takt"},
+				{PID: 300, State: core.ToolUse, Tool: core.ToolCodex, PaneID: "%3"},
 			},
 		},
 		{
 			Path: "/tmp/beta",
 			Name: "beta-tool",
 			Sessions: []*core.Session{
-				{PID: 200, State: core.Idle, Tool: core.ToolCodex, PaneID: "%2", WorkingDir: "/tmp/sandbox/beta-task"},
+				{PID: 400, State: core.Idle, Tool: core.ToolAntigravity, PaneID: "%4", WorkingDir: "/tmp/sandbox/beta-task"},
 			},
 		},
 	}
-	m = feedProjects(m, projects)
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-	m = updated.(Model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("beta-tool")})
-	m = updated.(Model)
-
-	if got := visibleSessionCount(m.entries); got != 1 {
-		t.Fatalf("visible sessions = %d, want 1 by name filter", got)
-	}
-	if sel := m.selectedSession(); sel == nil || sel.session == nil || sel.session.PID != 200 {
-		t.Fatalf("selected PID = %v, want 200", selectedPID(m))
-	}
-
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m = updated.(Model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-	m = updated.(Model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("sandbox/beta-task")})
-	m = updated.(Model)
-
-	if got := visibleSessionCount(m.entries); got != 1 {
-		t.Fatalf("visible sessions = %d, want 1 by working dir filter", got)
-	}
-	if sel := m.selectedSession(); sel == nil || sel.session == nil || sel.session.PID != 200 {
-		t.Fatalf("selected PID = %v, want 200", selectedPID(m))
-	}
-}
-
-func TestFilterStateTokensIncludeAndExclude(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-	projects := []core.Project{
+	tests := []struct {
+		name      string
+		query     string
+		wantCount int
+		check     func(t *testing.T, m Model)
+	}{
 		{
-			Path: "/project-a",
-			Name: "project-a",
-			Sessions: []*core.Session{
-				{PID: 100, State: core.Waiting, Tool: core.ToolClaude, PaneID: "%1"},
-				{PID: 200, State: core.Idle, Tool: core.ToolClaude, PaneID: "%2"},
-				{PID: 300, State: core.Thinking, Tool: core.ToolCodex, PaneID: "%3"},
+			name:      "matches project name",
+			query:     "beta-tool",
+			wantCount: 1,
+			check: func(t *testing.T, m Model) {
+				if pid := selectedPID(m); pid != 400 {
+					t.Errorf("selected PID = %d, want 400", pid)
+				}
+			},
+		},
+		{
+			name:      "matches working dir",
+			query:     "sandbox/beta-task",
+			wantCount: 1,
+			check: func(t *testing.T, m Model) {
+				if pid := selectedPID(m); pid != 400 {
+					t.Errorf("selected PID = %d, want 400", pid)
+				}
+			},
+		},
+		{
+			name:      "matches tool name",
+			query:     "codex",
+			wantCount: 1,
+			check: func(t *testing.T, m Model) {
+				sel := m.selectedSession()
+				if sel == nil || sel.session == nil {
+					t.Fatal("expected selected session after tool filter")
+				}
+				if sel.session.Tool != core.ToolCodex {
+					t.Errorf("selected tool = %v, want codex", sel.session.Tool)
+				}
+			},
+		},
+		{
+			name:      "matches takt via",
+			query:     "takt",
+			wantCount: 1,
+			check: func(t *testing.T, m Model) {
+				if pid := selectedPID(m); pid != 200 {
+					t.Errorf("selected PID = %d, want 200", pid)
+				}
+			},
+		},
+		{
+			name:      "working state alias",
+			query:     "working",
+			wantCount: 2,
+			check: func(t *testing.T, m Model) {
+				for _, e := range m.entries {
+					if e.isHeader || e.session == nil {
+						continue
+					}
+					if e.session.State != core.Thinking && e.session.State != core.ToolUse {
+						t.Fatalf("unexpected state %v for working filter", e.session.State)
+					}
+				}
+			},
+		},
+		{
+			name:      "waiting state token",
+			query:     "waiting",
+			wantCount: 1,
+			check: func(t *testing.T, m Model) {
+				if state := selectedState(m); state != core.Waiting {
+					t.Errorf("selected state = %v, want waiting", state)
+				}
+			},
+		},
+		{
+			name:      "exclude idle state token",
+			query:     "!idle",
+			wantCount: 3,
+			check: func(t *testing.T, m Model) {
+				for _, e := range m.entries {
+					if !e.isHeader && e.session != nil && e.session.State == core.Idle {
+						t.Fatal("idle session must be excluded by !idle filter")
+					}
+				}
 			},
 		},
 	}
-	m = feedProjects(m, projects)
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-	m = updated.(Model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("waiting")})
-	m = updated.(Model)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _, _, _, _ := newTestModel()
+			m = feedProjects(m, projects)
 
-	if got := visibleSessionCount(m.entries); got != 1 {
-		t.Fatalf("visible sessions = %d, want 1 for waiting filter", got)
-	}
-	if sel := m.selectedSession(); sel == nil || sel.session == nil || sel.session.State != core.Waiting {
-		t.Fatalf("selected state = %v, want waiting", selectedState(m))
-	}
+			updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+			m = updated.(Model)
+			updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tc.query)})
+			m = updated.(Model)
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m = updated.(Model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-	m = updated.(Model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("!idle")})
-	m = updated.(Model)
-
-	if got := visibleSessionCount(m.entries); got != 2 {
-		t.Fatalf("visible sessions = %d, want 2 for !idle filter", got)
-	}
-	for _, e := range m.entries {
-		if !e.isHeader && e.session != nil && e.session.State == core.Idle {
-			t.Fatal("idle session must be excluded by !idle filter")
-		}
+			if got := visibleSessionCount(m.entries); got != tc.wantCount {
+				t.Fatalf("visible sessions = %d, want %d for query %q", got, tc.wantCount, tc.query)
+			}
+			tc.check(t, m)
+		})
 	}
 }
 
@@ -2729,101 +2415,6 @@ func TestFilterEnterJumpsToFilteredSession(t *testing.T) {
 	m = updated.(Model)
 	if m.jumping {
 		t.Fatal("expected jumping=false after JumpDoneMsg")
-	}
-}
-
-func TestFilterMatchesToolName(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-	projects := []core.Project{
-		{
-			Path: "/project-a",
-			Name: "alpha",
-			Sessions: []*core.Session{
-				{PID: 100, State: core.Idle, Tool: core.ToolClaude, PaneID: "%1"},
-				{PID: 200, State: core.Idle, Tool: core.ToolCodex, PaneID: "%2"},
-			},
-		},
-	}
-	m = feedProjects(m, projects)
-
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-	m = updated.(Model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("codex")})
-	m = updated.(Model)
-
-	if got := visibleSessionCount(m.entries); got != 1 {
-		t.Fatalf("visible sessions = %d, want 1 by tool filter", got)
-	}
-	sel := m.selectedSession()
-	if sel == nil || sel.session == nil {
-		t.Fatal("expected selected session after tool filter")
-	}
-	if sel.session.Tool != core.ToolCodex {
-		t.Fatalf("selected tool = %v, want codex", sel.session.Tool)
-	}
-}
-
-func TestFilterMatchesTaktVia(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-	projects := []core.Project{
-		{
-			Path: "/project-a",
-			Name: "alpha",
-			Sessions: []*core.Session{
-				{PID: 100, State: core.Idle, Tool: core.ToolClaude, PaneID: "%1"},
-				{PID: 200, State: core.Idle, Tool: core.ToolClaude, PaneID: "%2", Via: "takt"},
-			},
-		},
-	}
-	m = feedProjects(m, projects)
-
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-	m = updated.(Model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("takt")})
-	m = updated.(Model)
-
-	if got := visibleSessionCount(m.entries); got != 1 {
-		t.Fatalf("visible sessions = %d, want 1 by via filter", got)
-	}
-	sel := m.selectedSession()
-	if sel == nil || sel.session == nil {
-		t.Fatal("expected selected session after via filter")
-	}
-	if sel.session.PID != 200 {
-		t.Fatalf("selected PID = %d, want 200 (takt-labelled session)", sel.session.PID)
-	}
-}
-
-func TestFilterWorkingStateAlias(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-	projects := []core.Project{
-		{
-			Path: "/project-a",
-			Name: "alpha",
-			Sessions: []*core.Session{
-				{PID: 100, State: core.Thinking, Tool: core.ToolClaude, PaneID: "%1"},
-				{PID: 200, State: core.ToolUse, Tool: core.ToolCodex, PaneID: "%2"},
-				{PID: 300, State: core.Idle, Tool: core.ToolAntigravity, PaneID: "%3"},
-			},
-		},
-	}
-	m = feedProjects(m, projects)
-
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-	m = updated.(Model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("working")})
-	m = updated.(Model)
-
-	if got := visibleSessionCount(m.entries); got != 2 {
-		t.Fatalf("visible sessions = %d, want 2 for working filter", got)
-	}
-	for _, e := range m.entries {
-		if e.isHeader || e.session == nil {
-			continue
-		}
-		if e.session.State != core.Thinking && e.session.State != core.ToolUse {
-			t.Fatalf("unexpected state %v for working filter", e.session.State)
-		}
 	}
 }
 

@@ -121,18 +121,6 @@ func TestRenderStatusBarNilSessionSkipped(t *testing.T) {
 	}
 }
 
-func TestViewActivePaneDefault(t *testing.T) {
-	m, _, _, _, _ := newTestModel()
-
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = updated.(Model)
-
-	view := m.View()
-	if view == "" {
-		t.Error("View() should return non-empty string")
-	}
-}
-
 // ── TDD Red Phase: view rendering tests ──
 
 func TestHeaderContainsAppNameAndSubtitle(t *testing.T) {

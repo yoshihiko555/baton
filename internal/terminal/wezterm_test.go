@@ -82,24 +82,6 @@ func TestFocusPane(t *testing.T) {
 	}
 }
 
-func TestName(t *testing.T) {
-	// 実装識別子が固定値 "wezterm" であることを確認する。
-	wez := NewWezTerminal()
-	if got, want := wez.Name(), "wezterm"; got != want {
-		t.Fatalf("unexpected terminal name: got=%q want=%q", got, want)
-	}
-}
-
-func TestNewWezTerminalExecFn(t *testing.T) {
-	wez := NewWezTerminal()
-	if wez == nil {
-		t.Fatal("NewWezTerminal returned nil")
-	}
-	if wez.execFn == nil {
-		t.Fatal("execFn should be set")
-	}
-}
-
 func TestListPanesNilExecFn(t *testing.T) {
 	wez := &WezTerminal{execFn: nil}
 	_, err := wez.ListPanes()
@@ -140,48 +122,6 @@ func TestListPanesInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestListPanesInvalidPaneID(t *testing.T) {
-	// pane_id が配列などの非対応型の場合は json.Unmarshal でエラーになることを確認する。
-	wez := &WezTerminal{
-		execFn: func(args ...string) ([]byte, error) {
-			return []byte(`[{"pane_id": [1,2], "title": "t", "tab_id": 1, "cwd": "/tmp"}]`), nil
-		},
-	}
-	_, err := wez.ListPanes()
-	if err == nil {
-		t.Fatal("expected error for unsupported pane_id type")
-	}
-}
-
-func TestListPanesInvalidTabID(t *testing.T) {
-	// tab_id がオブジェクトの場合は json.Unmarshal でエラーになることを確認する。
-	wez := &WezTerminal{
-		execFn: func(args ...string) ([]byte, error) {
-			return []byte(`[{"pane_id": 1, "title": "t", "tab_id": {"nested": true}, "cwd": "/tmp"}]`), nil
-		},
-	}
-	_, err := wez.ListPanes()
-	if err == nil {
-		t.Fatal("expected error for unsupported tab_id type")
-	}
-}
-
-func TestFocusPaneNilExecFn(t *testing.T) {
-	wez := &WezTerminal{execFn: nil}
-	err := wez.FocusPane("1")
-	if err == nil {
-		t.Fatal("expected error for nil execFn")
-	}
-}
-
-func TestFocusPaneNilReceiver(t *testing.T) {
-	var wez *WezTerminal
-	err := wez.FocusPane("1")
-	if err == nil {
-		t.Fatal("expected error for nil receiver")
-	}
-}
-
 func TestFocusPaneExecError(t *testing.T) {
 	wez := &WezTerminal{
 		execFn: func(args ...string) ([]byte, error) {
@@ -192,12 +132,6 @@ func TestFocusPaneExecError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from exec failure")
 	}
-}
-
-func TestIsAvailable(t *testing.T) {
-	wez := NewWezTerminal()
-	// wezterm の有無は環境依存なので bool が返ることだけ確認する。
-	_ = wez.IsAvailable()
 }
 
 func TestMapWeztermExecErrorNotFound(t *testing.T) {

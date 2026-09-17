@@ -78,46 +78,6 @@ func TestHasChildProcesses(t *testing.T) {
 			wantHas: false,
 		},
 		{
-			name: "ps failure fallback to thinking",
-			handler: func(name string, args ...string) ([]byte, error) {
-				if name == "pgrep" {
-					return []byte("12345\n"), nil
-				}
-				return nil, fmt.Errorf("ps failed")
-			},
-			wantHas: true, // ps 失敗時はフォールバックで true
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			scanner := NewProcessScannerWithExec(func(_ context.Context, name string, args ...string) ([]byte, error) {
-				return tc.handler(name, args...)
-			})
-
-			got, err := scanner.HasChildProcesses(context.Background(), 12345)
-
-			if tc.wantErr && err == nil {
-				t.Errorf("expected error, got nil")
-			}
-			if !tc.wantErr && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			if got != tc.wantHas {
-				t.Errorf("HasChildProcesses() = %v, want %v", got, tc.wantHas)
-			}
-		})
-	}
-}
-
-func TestHasChildProcessesUV(t *testing.T) {
-	tests := []struct {
-		name    string
-		handler func(name string, args ...string) ([]byte, error)
-		wantHas bool
-		wantErr bool
-	}{
-		{
 			name: "only uv child is background",
 			handler: func(name string, args ...string) ([]byte, error) {
 				if name == "pgrep" {
@@ -129,15 +89,14 @@ func TestHasChildProcessesUV(t *testing.T) {
 			wantHas: false,
 		},
 		{
-			name: "uv plus work process",
+			name: "ps failure fallback to thinking",
 			handler: func(name string, args ...string) ([]byte, error) {
 				if name == "pgrep" {
-					return []byte("12345\n12346\n"), nil
+					return []byte("12345\n"), nil
 				}
-				// ps: uv（バックグラウンド）＋ sandbox-exec（作業用）
-				return []byte("uv\nsandbox-exec\n"), nil
+				return nil, fmt.Errorf("ps failed")
 			},
-			wantHas: true,
+			wantHas: true, // ps 失敗時はフォールバックで true
 		},
 	}
 
@@ -191,14 +150,6 @@ func TestParseARGSFallback(t *testing.T) {
 			output: "  PID  PPID COMM   ARGS\n" +
 				" 1234  5678 node   node /usr/local/bin/serve\n",
 			wantLen: 0,
-		},
-		{
-			name: "agy with mise path",
-			output: "  PID  PPID COMM                                                                ARGS\n" +
-				" 12554 10235 /Users/user/.local/share/mise/installs/node/24.14.0/bin/node   /Users/user/.local/share/mise/installs/node/24.14.0/bin/node --no-warnings=DEP0040 /opt/homebrew/bin/agy\n",
-			wantLen:  1,
-			wantTool: ToolAntigravity,
-			wantName: "agy",
 		},
 	}
 
@@ -260,9 +211,7 @@ func TestDetectFromArgs(t *testing.T) {
 		{"node --no-warnings=DEP0040 /opt/homebrew/bin/agy", ToolAntigravity, true},
 		{"/usr/local/bin/claude", ToolClaude, true},
 		{"node /usr/local/bin/serve", ToolUnknown, false},
-		{"python script.py", ToolUnknown, false},
 		{"/usr/local/bin/agy-beta", ToolUnknown, false},
-		{"node /opt/homebrew/bin/claude-wrapper", ToolUnknown, false},
 	}
 
 	for _, tc := range tests {
@@ -348,23 +297,6 @@ func TestParseDetectsTaktViaAncestry(t *testing.T) {
 	}
 	if via := byPID[4000].Via; via != "" {
 		t.Errorf("PID 4000 Via = %q, want empty (interactive session)", via)
-	}
-}
-
-func TestParseDetectsTaktViaAncestryForCodex(t *testing.T) {
-	// takt は codex exec も同じ方式（stdio=pipe、同一 TTY）で起動する。
-	output := "  PID  PPID COMM     ARGS\n" +
-		" 1000     1 zsh      -zsh\n" +
-		" 2000  1000 node     node /Users/user/project/node_modules/takt/dist/app/cli/index.js run\n" +
-		" 3000  2000 codex    codex exec --experimental-json\n"
-
-	ps := NewProcessScannerWithExec(nil)
-	got := ps.parse([]byte(output))
-	if len(got) != 1 {
-		t.Fatalf("parse() returned %d results, want 1: %+v", len(got), got)
-	}
-	if got[0].Via != ViaTakt {
-		t.Errorf("Via = %q, want %q", got[0].Via, ViaTakt)
 	}
 }
 

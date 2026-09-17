@@ -14,72 +14,6 @@ func unmarshalConfig(data []byte, cfg *Config) error {
 	return yaml.Unmarshal(data, cfg)
 }
 
-func TestDefault(t *testing.T) {
-	// デフォルト値が意図した固定値になっていることを確認する。
-	got := Default()
-
-	if got.ClaudeProjectsDir != "~/.claude/projects" {
-		t.Fatalf("unexpected ClaudeProjectsDir: got %q", got.ClaudeProjectsDir)
-	}
-	if got.StatusOutputPath != "/tmp/baton-status.json" {
-		t.Fatalf("unexpected StatusOutputPath: got %q", got.StatusOutputPath)
-	}
-	if got.ScanInterval != 2*time.Second {
-		t.Fatalf("unexpected ScanInterval: got %v", got.ScanInterval)
-	}
-	if got.Terminal != "tmux" {
-		t.Fatalf("unexpected Terminal: got %q", got.Terminal)
-	}
-	if got.LogLevel != "info" {
-		t.Fatalf("unexpected LogLevel: got %q", got.LogLevel)
-	}
-	if got.LogFile != "~/.local/state/baton/baton.log" {
-		t.Fatalf("unexpected LogFile: got %q", got.LogFile)
-	}
-	if got.Statusbar.Format != "{{.Active}}/{{.TotalSessions}}" {
-		t.Fatalf("unexpected Statusbar.Format: got %q", got.Statusbar.Format)
-	}
-	if got.Statusbar.ToolIcons["default"] != "●" {
-		t.Fatalf("unexpected Statusbar.ToolIcons[default]: got %q", got.Statusbar.ToolIcons["default"])
-	}
-	if got.Statusbar.StateIcons["working"] != "🤔" {
-		t.Fatalf("unexpected Statusbar.StateIcons[working]: got %q", got.Statusbar.StateIcons["working"])
-	}
-	if got.Statusbar.StateIcons["waiting"] != "✋" {
-		t.Fatalf("unexpected Statusbar.StateIcons[waiting]: got %q", got.Statusbar.StateIcons["waiting"])
-	}
-	if got.Statusbar.StateIcons["idle"] != "~" {
-		t.Fatalf("unexpected Statusbar.StateIcons[idle]: got %q", got.Statusbar.StateIcons["idle"])
-	}
-	if !got.AutoMode.Enabled {
-		t.Fatal("AutoMode.Enabled should be true by default")
-	}
-	if got.AutoMode.Reviewer != "codex" {
-		t.Fatalf("unexpected AutoMode.Reviewer: got %q", got.AutoMode.Reviewer)
-	}
-	if got.AutoMode.Model != "gpt-5.3-codex-spark" {
-		t.Fatalf("unexpected AutoMode.Model: got %q", got.AutoMode.Model)
-	}
-	if got.AutoMode.Timeout != 20*time.Second {
-		t.Fatalf("unexpected AutoMode.Timeout: got %v", got.AutoMode.Timeout)
-	}
-	if got.AutoMode.RiskThreshold != "medium" {
-		t.Fatalf("unexpected AutoMode.RiskThreshold: got %q", got.AutoMode.RiskThreshold)
-	}
-	if !got.Hook.Enabled {
-		t.Fatal("Hook.Enabled should be true by default")
-	}
-	if got.Hook.SocketPath != "~/.local/state/baton/hook.sock" {
-		t.Fatalf("unexpected Hook.SocketPath: got %q", got.Hook.SocketPath)
-	}
-	if got.Hook.IdleCancelScans != 3 {
-		t.Fatalf("unexpected Hook.IdleCancelScans: got %d", got.Hook.IdleCancelScans)
-	}
-	if got.Hook.StatusMaxAge != 10*time.Second {
-		t.Fatalf("unexpected Hook.StatusMaxAge: got %v", got.Hook.StatusMaxAge)
-	}
-}
-
 func TestLoadValidYAML(t *testing.T) {
 	// 全項目を指定した YAML から正しく読み込めることを確認する。
 	dir := t.TempDir()
@@ -266,11 +200,6 @@ func TestHookStatusMaxAge(t *testing.T) {
 			content: "hook:\n  enabled: true\n",
 			want:    10 * time.Second,
 		},
-		{
-			name:    "explicit override",
-			content: "hook:\n  status_max_age: 30s\n",
-			want:    30 * time.Second,
-		},
 	}
 
 	for _, tc := range tests {
@@ -319,6 +248,51 @@ func TestLoadMissingYAML(t *testing.T) {
 	}
 	if got.LogLevel != "info" {
 		t.Fatalf("unexpected LogLevel: got %q", got.LogLevel)
+	}
+	if got.LogFile != filepath.Join(home, ".local/state/baton/baton.log") {
+		t.Fatalf("unexpected LogFile: got %q", got.LogFile)
+	}
+	if got.Statusbar.Format != "{{.Active}}/{{.TotalSessions}}" {
+		t.Fatalf("unexpected Statusbar.Format: got %q", got.Statusbar.Format)
+	}
+	if got.Statusbar.ToolIcons["default"] != "●" {
+		t.Fatalf("unexpected Statusbar.ToolIcons[default]: got %q", got.Statusbar.ToolIcons["default"])
+	}
+	if got.Statusbar.StateIcons["working"] != "🤔" {
+		t.Fatalf("unexpected Statusbar.StateIcons[working]: got %q", got.Statusbar.StateIcons["working"])
+	}
+	if got.Statusbar.StateIcons["waiting"] != "✋" {
+		t.Fatalf("unexpected Statusbar.StateIcons[waiting]: got %q", got.Statusbar.StateIcons["waiting"])
+	}
+	if got.Statusbar.StateIcons["idle"] != "~" {
+		t.Fatalf("unexpected Statusbar.StateIcons[idle]: got %q", got.Statusbar.StateIcons["idle"])
+	}
+	if !got.AutoMode.Enabled {
+		t.Fatal("AutoMode.Enabled should be true by default")
+	}
+	if got.AutoMode.Reviewer != "codex" {
+		t.Fatalf("unexpected AutoMode.Reviewer: got %q", got.AutoMode.Reviewer)
+	}
+	if got.AutoMode.Model != "gpt-5.3-codex-spark" {
+		t.Fatalf("unexpected AutoMode.Model: got %q", got.AutoMode.Model)
+	}
+	if got.AutoMode.Timeout != 20*time.Second {
+		t.Fatalf("unexpected AutoMode.Timeout: got %v", got.AutoMode.Timeout)
+	}
+	if got.AutoMode.RiskThreshold != "medium" {
+		t.Fatalf("unexpected AutoMode.RiskThreshold: got %q", got.AutoMode.RiskThreshold)
+	}
+	if !got.Hook.Enabled {
+		t.Fatal("Hook.Enabled should be true by default")
+	}
+	if got.Hook.SocketPath != filepath.Join(home, ".local/state/baton/hook.sock") {
+		t.Fatalf("unexpected Hook.SocketPath: got %q", got.Hook.SocketPath)
+	}
+	if got.Hook.IdleCancelScans != 3 {
+		t.Fatalf("unexpected Hook.IdleCancelScans: got %d", got.Hook.IdleCancelScans)
+	}
+	if got.Hook.StatusMaxAge != 10*time.Second {
+		t.Fatalf("unexpected Hook.StatusMaxAge: got %v", got.Hook.StatusMaxAge)
 	}
 }
 

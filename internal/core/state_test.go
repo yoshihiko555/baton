@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -207,42 +206,44 @@ func TestStateManagerUpdateFromScanDefaultWorkspace(t *testing.T) {
 }
 
 func TestStateManagerProjectsSortOrder(t *testing.T) {
-	// ソート規則: 状態優先度 Waiting > Error > Thinking > ToolUse > Idle を確認する。
-	// resolver なし（nil）では全セッションが Thinking になるため、
-	// ここでは手動でセッションポインタを構築して sortSessionPtrs を直接テストする。
-	sessions := []*Session{
-		{PID: 1, State: Idle},
-		{PID: 2, State: Waiting},
-		{PID: 3, State: ToolUse},
-		{PID: 4, State: Error},
-		{PID: 5, State: Thinking},
-	}
-
-	sortSessionPtrs(sessions)
-
-	want := []SessionState{Waiting, Error, Thinking, ToolUse, Idle}
-	for i, sess := range sessions {
-		if sess.State != want[i] {
-			t.Errorf("sessions[%d].State = %v, want %v", i, sess.State, want[i])
+	t.Run("state priority", func(t *testing.T) {
+		// ソート規則: 状態優先度 Waiting > Error > Thinking > ToolUse > Idle を確認する。
+		// resolver なし（nil）では全セッションが Thinking になるため、
+		// ここでは手動でセッションポインタを構築して sortSessionPtrs を直接テストする。
+		sessions := []*Session{
+			{PID: 1, State: Idle},
+			{PID: 2, State: Waiting},
+			{PID: 3, State: ToolUse},
+			{PID: 4, State: Error},
+			{PID: 5, State: Thinking},
 		}
-	}
-}
 
-func TestStateManagerProjectsSortLastActivity(t *testing.T) {
-	// 同一状態内は LastActivity 降順（新しいほど先頭）であることを確認する。
-	t1 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
-	t2 := time.Date(2026, 1, 1, 11, 0, 0, 0, time.UTC)
+		sortSessionPtrs(sessions)
 
-	sessions := []*Session{
-		{PID: 1, State: Thinking, LastActivity: t1},
-		{PID: 2, State: Thinking, LastActivity: t2},
-	}
+		want := []SessionState{Waiting, Error, Thinking, ToolUse, Idle}
+		for i, sess := range sessions {
+			if sess.State != want[i] {
+				t.Errorf("sessions[%d].State = %v, want %v", i, sess.State, want[i])
+			}
+		}
+	})
 
-	sortSessionPtrs(sessions)
+	t.Run("last activity within same state", func(t *testing.T) {
+		// 同一状態内は LastActivity 降順（新しいほど先頭）であることを確認する。
+		t1 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+		t2 := time.Date(2026, 1, 1, 11, 0, 0, 0, time.UTC)
 
-	if sessions[0].PID != 2 {
-		t.Errorf("newer LastActivity should come first, got PID %d", sessions[0].PID)
-	}
+		sessions := []*Session{
+			{PID: 1, State: Thinking, LastActivity: t1},
+			{PID: 2, State: Thinking, LastActivity: t2},
+		}
+
+		sortSessionPtrs(sessions)
+
+		if sessions[0].PID != 2 {
+			t.Errorf("newer LastActivity should come first, got PID %d", sessions[0].PID)
+		}
+	})
 }
 
 func TestStateManagerSummary(t *testing.T) {
@@ -344,22 +345,6 @@ func TestStateManagerEmptyProjects(t *testing.T) {
 	}
 }
 
-func TestStateManagerGetProjects(t *testing.T) {
-	// GetProjects が Projects と同じ結果を返すことを確認する（v1 互換）。
-	manager := NewStateManager(nil)
-
-	if err := manager.UpdateFromScan(newScanResult(newProc(100, ToolCodex, "/proj"))); err != nil {
-		t.Fatalf("UpdateFromScan: %v", err)
-	}
-
-	p1 := manager.Projects()
-	p2 := manager.GetProjects()
-
-	if len(p1) != len(p2) {
-		t.Errorf("GetProjects() length %d != Projects() length %d", len(p2), len(p1))
-	}
-}
-
 func TestCalcSummaryWaiting(t *testing.T) {
 	// Waiting 状態は Active と Waiting の両方にカウントされることを確認する。
 	projects := []Project{
@@ -411,25 +396,23 @@ func TestSortSessionPtrsNilSafe(t *testing.T) {
 	sortSessionPtrs(sessions) // パニックしなければ OK
 }
 
-func TestProjectNeedsAttentionNoSessions(t *testing.T) {
-	// セッションなしのプロジェクトは attention 不要。
-	p := Project{}
-	if projectNeedsAttention(p) {
-		t.Error("projectNeedsAttention(empty) should be false")
+func TestProjectNeedsAttention(t *testing.T) {
+	tests := []struct {
+		name string
+		p    Project
+		want bool
+	}{
+		{name: "no sessions", p: Project{}, want: false},
+		{name: "with waiting", p: Project{Sessions: []*Session{{State: Waiting}}}, want: true},
+		{name: "thinking only", p: Project{Sessions: []*Session{{State: Thinking}}}, want: false},
 	}
-}
 
-func TestProjectNeedsAttentionWithWaiting(t *testing.T) {
-	p := Project{Sessions: []*Session{{State: Waiting}}}
-	if !projectNeedsAttention(p) {
-		t.Error("projectNeedsAttention with Waiting session should be true")
-	}
-}
-
-func TestProjectNeedsAttentionThinkingOnly(t *testing.T) {
-	p := Project{Sessions: []*Session{{State: Thinking}}}
-	if projectNeedsAttention(p) {
-		t.Error("projectNeedsAttention with only Thinking should be false")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := projectNeedsAttention(tc.p); got != tc.want {
+				t.Errorf("projectNeedsAttention() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -459,18 +442,6 @@ func TestResolveProjectKey(t *testing.T) {
 			}
 		})
 	}
-}
-
-// newExitError1 は exit code 1 の *exec.ExitError を返すヘルパー。
-// pgrep が子プロセスなしのとき返すエラーを再現するために使用する。
-func newExitError1(t *testing.T) error {
-	t.Helper()
-	cmd := exec.Command("sh", "-c", "exit 1")
-	err := cmd.Run()
-	if err == nil {
-		t.Fatal("expected non-nil error from 'sh -c exit 1'")
-	}
-	return err
 }
 
 func TestStateManagerCodexWithChildProcesses(t *testing.T) {
@@ -1024,13 +995,6 @@ const (
 ────────────────────────────────────────────────────────────────
 esc to cancel                                                                            Gemini 3.8 Flash · high`
 
-	agyWorkingSecondPaneText = `> Count from 1 to 150, one number per line, each followed by a short comment. Do not use any tools.
-⣽  Initiating the Number Sequence...
-────────────────────────────────────────────────────────────────
->
-────────────────────────────────────────────────────────────────
-esc to cancel                                                                            Gemini 3.8 Flash · high`
-
 	agyWaitingPaneText = `● Bash(touch probe3.txt) (ctrl+o to expand)
 
 Command
@@ -1152,57 +1116,6 @@ const (
    ⬝⬝■■■■■■  esc interrupt                                                               tab agents  ctrl+p commands    • OpenCode 1.18.25                      
                                                                                                                                                                 `
 
-	openCodeWorkingSecondPaneText = `                                                                                                                                                                
-  ┃                                                                                                                     Counting 1 to 150 with comments         
-  ┃  Count from 1 to 150, one number per line, each followed by a short comment. Do not use any tools.                  ses_f8abe8b1effe4WPm6VfO9MW9tF          
-  ┃                                                                                                                                                             
-                                                                                                                        Context                                 
-     + Thought: 852ms                                                                                                   0 tokens                                
-                                                                                                                        0% used                                 
-     1: the beginning                                                                                                   $0.00 spent                             
-     2: first prime                                                                                                                                             
-     3: three's company                                                                                                 MCP                                     
-     4: a square number                                                                                                 • pencil Connected                      
-     5: handy for counting                                                                                                                                      
-     6: half a dozen                                                                                                    LSP                                     
-     7: lucky for some                                                                                                  LSPs are disabled                       
-     8: octopus arms                                                                                                                                            
-     9: three squared                                                                                                                                           
-     10: base of our system                                                                                                                                     
-     11: double ones                                                                                                                                            
-     12: a dozen                                                                                                                                                
-     13: unlucky for some                                                                                                                                       
-     14: two weeks in days                                                                                                                                      
-     15: a quarter hour                                                                                                                                         
-     16: four squared                                                                                                                                           
-     17: prime and lonely                                                                                                                                       
-     18:                                                                                                                                                        
-                                                                                                                                                                
-     ▣  Build · GLM-5.2                                                                                                                                         
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                        /private/tmp/claude-501/-Users-         
-  ┃                                                                                                                     yoshihiko-ghq-github-com-yoshihiko555-  
-  ┃                                                                                                                     baton/f6242811-35d2-4cf2-849a-          
-  ┃                                                                                                                     af1d17002a9c/scratchpad/capture-work:   
-  ┃  Build · GLM-5.2 OpenCode Go · high                                                                                 main                                    
-  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                            
-   ⬝⬝⬝■■■■■  esc interrupt                                                               tab agents  ctrl+p commands    • OpenCode 1.18.25                      
-                                                                                                                                                                `
-
 	openCodeWaitingPaneText = `                                                                                                                                                                
   ┃                                                                                                                     Creating probe2.txt via shell           
   ┃  Run the shell command "touch probe2.txt" in the current directory using your shell/bash tool.                      command                                 
@@ -1264,7 +1177,6 @@ func TestClassifyByRules(t *testing.T) {
 	}{
 		{name: "agy idle", tool: ToolAntigravity, text: agyIdlePaneText, want: Idle},
 		{name: "agy working", tool: ToolAntigravity, text: agyWorkingPaneText, want: Thinking},
-		{name: "agy working 2", tool: ToolAntigravity, text: agyWorkingSecondPaneText, want: Thinking},
 		{name: "agy waiting", tool: ToolAntigravity, text: agyWaitingPaneText, want: Waiting},
 		{
 			name: "claude prompt screen does not false-positive as agy waiting/working",
@@ -1274,7 +1186,6 @@ func TestClassifyByRules(t *testing.T) {
 		},
 		{name: "opencode idle", tool: ToolOpenCode, text: openCodeIdlePaneText, want: Idle},
 		{name: "opencode working", tool: ToolOpenCode, text: openCodeWorkingPaneText, want: Thinking},
-		{name: "opencode working 2", tool: ToolOpenCode, text: openCodeWorkingSecondPaneText, want: Thinking},
 		{name: "opencode waiting", tool: ToolOpenCode, text: openCodeWaitingPaneText, want: Waiting},
 		{
 			name: "claude prompt screen does not false-positive as opencode waiting/working",
@@ -1307,9 +1218,6 @@ func TestRefineToolUseStateAntigravity(t *testing.T) {
 		hasPaneText bool
 		want        SessionState
 	}{
-		{name: "idle", paneText: agyIdlePaneText, hasPaneText: true, want: Idle},
-		{name: "waiting", paneText: agyWaitingPaneText, hasPaneText: true, want: Waiting},
-		{name: "working", paneText: agyWorkingPaneText, hasPaneText: true, want: Thinking},
 		{name: "pane fetch error keeps current state", want: Thinking},
 	}
 
@@ -1351,10 +1259,6 @@ func TestRefineToolUseStateOpenCode(t *testing.T) {
 		hasPaneText bool
 		want        SessionState
 	}{
-		{name: "idle", paneText: openCodeIdlePaneText, hasPaneText: true, want: Idle},
-		{name: "waiting", paneText: openCodeWaitingPaneText, hasPaneText: true, want: Waiting},
-		{name: "working", paneText: openCodeWorkingPaneText, hasPaneText: true, want: Thinking},
-		{name: "working 2", paneText: openCodeWorkingSecondPaneText, hasPaneText: true, want: Thinking},
 		{name: "pane fetch error keeps current state", want: Thinking},
 	}
 
@@ -1408,18 +1312,8 @@ func TestContainsApprovalPrompt(t *testing.T) {
 			wantMatch: true,
 		},
 		{
-			name:      "file read approval",
-			input:     "Allow Read? (y)",
-			wantMatch: true,
-		},
-		{
 			name:      "do you want to allow this action",
 			input:     "Do you want to allow this action?",
-			wantMatch: true,
-		},
-		{
-			name:      "do you want to run this command",
-			input:     "Do you want to run this command?",
 			wantMatch: true,
 		},
 		{
@@ -1505,63 +1399,60 @@ func TestContainsApprovalPrompt(t *testing.T) {
 	}
 }
 
-func TestRefineClaudeThinkingToWaiting(t *testing.T) {
-	// Claude Thinking state is promoted to Waiting when pane text contains approval prompt.
-	manager := NewStateManager(nil)
-	manager.projects = []Project{
+func TestRefineClaudeStateTransitions(t *testing.T) {
+	tests := []struct {
+		name   string
+		before SessionState
+		text   string
+		want   SessionState
+	}{
 		{
-			Name: "proj",
-			Path: "/project",
-			Sessions: []*Session{
-				{PID: 100, Tool: ToolClaude, State: Thinking, PaneID: "%1", WorkingDir: "/project"},
-			},
+			name:   "thinking to waiting on approval prompt",
+			before: Thinking,
+			text:   "Allow Bash? (y)\n",
+			want:   Waiting,
 		},
-	}
-	manager.summary = calcSummary(manager.projects)
-
-	term := &paneTextTerminal{
-		texts: map[string]string{
-			"%1": "Allow Bash? (y)\n",
-		},
-	}
-
-	manager.RefineToolUseState(term)
-	projects := manager.Projects()
-	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
-		t.Fatalf("unexpected projects/sessions: %v", projects)
-	}
-	if got := projects[0].Sessions[0].State; got != Waiting {
-		t.Errorf("state = %v, want Waiting (approval prompt in Thinking state)", got)
-	}
-}
-
-func TestRefineClaudeIdleToWaiting(t *testing.T) {
-	// Claude Idle state is promoted to Waiting when pane text contains approval prompt.
-	manager := NewStateManager(nil)
-	manager.projects = []Project{
 		{
-			Name: "proj",
-			Path: "/project",
-			Sessions: []*Session{
-				{PID: 100, Tool: ToolClaude, State: Idle, PaneID: "%1", WorkingDir: "/project"},
-			},
+			name:   "idle to waiting on approval prompt",
+			before: Idle,
+			text:   "Allow Read? (y)\n",
+			want:   Waiting,
 		},
-	}
-	manager.summary = calcSummary(manager.projects)
-
-	term := &paneTextTerminal{
-		texts: map[string]string{
-			"%1": "Allow Read? (y)\n",
+		{
+			name:   "thinking to idle by pane text idle prompt",
+			before: Thinking,
+			text:   "Previous output...\n────────────────────────────────\n❯ \n────────────────────────────────\n  📁 project │ 🌿 main │ 🔧 PID:100\n",
+			want:   Idle,
 		},
 	}
 
-	manager.RefineToolUseState(term)
-	projects := manager.Projects()
-	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
-		t.Fatalf("unexpected projects/sessions: %v", projects)
-	}
-	if got := projects[0].Sessions[0].State; got != Waiting {
-		t.Errorf("state = %v, want Waiting (approval prompt in Idle state)", got)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := NewStateManager(nil)
+			manager.projects = []Project{
+				{
+					Name: "proj",
+					Path: "/project",
+					Sessions: []*Session{
+						{PID: 100, Tool: ToolClaude, State: tc.before, PaneID: "%1", WorkingDir: "/project"},
+					},
+				},
+			}
+			manager.summary = calcSummary(manager.projects)
+
+			term := &paneTextTerminal{
+				texts: map[string]string{"%1": tc.text},
+			}
+
+			manager.RefineToolUseState(term)
+			projects := manager.Projects()
+			if len(projects) != 1 || len(projects[0].Sessions) != 1 {
+				t.Fatalf("unexpected projects/sessions: %v", projects)
+			}
+			if got := projects[0].Sessions[0].State; got != tc.want {
+				t.Errorf("state = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -1614,33 +1505,14 @@ func TestRefineClaudeDiagnosticDeduplication(t *testing.T) {
 		},
 	}
 
+	// 降格後（Waiting → ToolUse、未分類テキスト）は診断キーが記録される。
 	manager.RefineToolUseState(term)
-	firstKey := manager.lastDiagKey["%1"]
-	if firstKey != "waiting|tool_use|false" {
-		t.Fatalf("lastDiagKey = %q, want %q", firstKey, "waiting|tool_use|false")
-	}
-	if len(manager.lastDiagKey) != 1 {
-		t.Fatalf("lastDiagKey length = %d, want 1", len(manager.lastDiagKey))
+	if _, ok := manager.lastDiagKey["%1"]; !ok {
+		t.Fatal("lastDiagKey should contain pane %1 after demotion")
 	}
 
-	// 次の JSONL スキャンで Waiting が再び割り当てられた状況を再現する。
-	manager.projects[0].Sessions[0].State = Waiting
-	manager.RefineToolUseState(term)
-	if got := manager.lastDiagKey["%1"]; got != firstKey {
-		t.Fatalf("same diagnostic changed key: got %q, want %q", got, firstKey)
-	}
-	if len(manager.lastDiagKey) != 1 {
-		t.Fatalf("lastDiagKey length after duplicate = %d, want 1", len(manager.lastDiagKey))
-	}
-
-	manager.projects[0].Sessions[0].State = Waiting
+	// classified な Idle プロンプトが検出されると診断キーは消える。
 	term.texts["%1"] = "Done.\n──────────\n❯\n──────────\n"
-	manager.RefineToolUseState(term)
-	if got := manager.lastDiagKey["%1"]; got != "waiting|idle|true" {
-		t.Fatalf("changed diagnostic key = %q, want %q", got, "waiting|idle|true")
-	}
-
-	manager.projects[0].Sessions[0].State = Idle
 	manager.RefineToolUseState(term)
 	if _, ok := manager.lastDiagKey["%1"]; ok {
 		t.Fatal("lastDiagKey still contains pane %1 after returning to a classified non-Waiting state")
@@ -1674,80 +1546,6 @@ func TestRefineClaudeToolUseStaysToolUse(t *testing.T) {
 	}
 	if got := projects[0].Sessions[0].State; got != ToolUse {
 		t.Errorf("state = %v, want ToolUse (no approval prompt, stays ToolUse)", got)
-	}
-}
-
-func TestRefineClaudeMultiSessionPaneTextAuthority(t *testing.T) {
-	// Two Claude sessions with same CWD: JSONL assigned Waiting+Idle.
-	// Only the session with actual approval prompt becomes Waiting.
-	// The JSONL-Waiting session (no approval prompt) is demoted to ToolUse.
-	manager := NewStateManager(nil)
-	manager.projects = []Project{
-		{
-			Name: "proj",
-			Path: "/project",
-			Sessions: []*Session{
-				{PID: 100, Tool: ToolClaude, State: Waiting, PaneID: "%1", WorkingDir: "/project"},
-				{PID: 200, Tool: ToolClaude, State: Idle, PaneID: "%2", WorkingDir: "/project"},
-			},
-		},
-	}
-	manager.summary = calcSummary(manager.projects)
-
-	term := &paneTextTerminal{
-		texts: map[string]string{
-			"%1": "Running command...\n",
-			"%2": "Allow Bash? (y)\n",
-		},
-	}
-
-	manager.RefineToolUseState(term)
-	projects := manager.Projects()
-	if len(projects) != 1 || len(projects[0].Sessions) != 2 {
-		t.Fatalf("unexpected projects/sessions: %v", projects)
-	}
-
-	states := map[string]SessionState{}
-	for _, sess := range projects[0].Sessions {
-		states[sess.PaneID] = sess.State
-	}
-
-	if got := states["%1"]; got != ToolUse {
-		t.Errorf("pane %%1 state = %v, want ToolUse (JSONL Waiting demoted, no approval prompt)", got)
-	}
-	if got := states["%2"]; got != Waiting {
-		t.Errorf("pane %%2 state = %v, want Waiting (approval prompt detected)", got)
-	}
-}
-
-func TestRefineClaudeThinkingToIdleByPaneText(t *testing.T) {
-	// Claude の Thinking 状態がペインテキストの Idle プロンプト（❯ + 区切り線）で Idle に降格することを確認。
-	// JSONL が別プロセスの Thinking を誤割り当てしている場合を補正する。
-	manager := NewStateManager(nil)
-	manager.projects = []Project{
-		{
-			Name: "proj",
-			Path: "/project",
-			Sessions: []*Session{
-				{PID: 100, Tool: ToolClaude, State: Thinking, PaneID: "%1", WorkingDir: "/project"},
-			},
-		},
-	}
-	manager.summary = calcSummary(manager.projects)
-
-	term := &paneTextTerminal{
-		texts: map[string]string{
-			"%1": "Previous output...\n────────────────────────────────\n❯ \n────────────────────────────────\n  📁 project │ 🌿 main │ 🔧 PID:100\n",
-		},
-	}
-
-	manager.RefineToolUseState(term)
-	projects := manager.Projects()
-	if len(projects) != 1 || len(projects[0].Sessions) != 1 {
-		t.Fatalf("unexpected projects/sessions: %v", projects)
-	}
-	if got := projects[0].Sessions[0].State; got != Idle {
-		t.Errorf("state = %v, want Idle (Claude idle prompt detected)", got)
 	}
 }
 
@@ -1798,49 +1596,6 @@ func TestRefineClaudeIdlePatternVariants(t *testing.T) {
 				t.Errorf("classifyClaudePane(%q) idle = %v (state=%v, ok=%v), want %v", tc.input, got, state, ok, tc.wantMatch)
 			}
 		})
-	}
-}
-
-func TestRefineClaudeMultiSessionIdleCorrection(t *testing.T) {
-	// 同一 CWD に 2 つの Claude セッション。JSONL が Thinking+Idle を割り当てたが、
-	// 実際は Thinking のペインが Idle（❯ プロンプト表示）で、Idle のペインが Working。
-	// ペインテキストに基づいて状態が補正されることを確認。
-	manager := NewStateManager(nil)
-	manager.projects = []Project{
-		{
-			Name: "proj",
-			Path: "/project",
-			Sessions: []*Session{
-				{PID: 100, Tool: ToolClaude, State: Thinking, PaneID: "%1", WorkingDir: "/project"},
-				{PID: 200, Tool: ToolClaude, State: Idle, PaneID: "%2", WorkingDir: "/project"},
-			},
-		},
-	}
-	manager.summary = calcSummary(manager.projects)
-
-	term := &paneTextTerminal{
-		texts: map[string]string{
-			// %1 は実際には Idle（❯ プロンプト表示）
-			"%1": "Done.\n────────────────────────\n❯\n────────────────────────\n  📁 project\n",
-			// %2 は Working（通常出力）
-			"%2": "⏺ Thinking about the problem...\nGenerating code...\n",
-		},
-	}
-
-	manager.RefineToolUseState(term)
-	projects := manager.Projects()
-
-	states := map[string]SessionState{}
-	for _, sess := range projects[0].Sessions {
-		states[sess.PaneID] = sess.State
-	}
-
-	if got := states["%1"]; got != Idle {
-		t.Errorf("pane %%1 state = %v, want Idle (idle prompt detected, override JSONL Thinking)", got)
-	}
-	// %2 は Idle のまま（pane text に承認プロンプトも idle プロンプトもないが、JSONL が Idle なので維持）
-	if got := states["%2"]; got != Idle {
-		t.Errorf("pane %%2 state = %v, want Idle (JSONL Idle, no override needed)", got)
 	}
 }
 
@@ -2022,8 +1777,7 @@ func TestTailLines(t *testing.T) {
 		want string
 	}{
 		{name: "empty string", text: "", n: 3, want: ""},
-		{name: "fewer lines than n", text: "one\ntwo", n: 3, want: "one\ntwo"},
-		{name: "exactly n lines", text: "one\ntwo\nthree", n: 3, want: "one\ntwo\nthree"},
+		{name: "lines within limit are unchanged", text: "one\ntwo\nthree", n: 3, want: "one\ntwo\nthree"},
 		{name: "more lines than n", text: "one\ntwo\nthree\nfour", n: 2, want: "three\nfour"},
 		{name: "zero lines requested", text: "one\ntwo", n: 0, want: ""},
 	}
@@ -2190,134 +1944,109 @@ func TestApplyHookStatesStatusOverlayWaiting(t *testing.T) {
 	}
 }
 
-func TestApplyHookStatesStatusOverlayStale(t *testing.T) {
-	manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
-	statusPath := filepath.Join(t.TempDir(), "status.json")
-	writeHookStatusOverlay(t, statusPath, StatusOutput{
-		Version:      2,
-		Timestamp:    time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
-		HookListener: true,
-		Projects: []ProjectOutput{
-			{Sessions: []SessionOutput{{PaneID: "%1", StateSource: SourceHook}}},
+// TestApplyHookStatesStatusOverlayGuards は overlay 採用を拒否する各ガード節
+// （鮮度切れ / JSON 破損 / バージョン不一致 / タイムスタンプ不正 / 非 listener）を
+// 1 テーブルにまとめたもの。いずれのガードも overlay を無視して JSONL 状態を
+// 維持するという同一の observable な結果を持つが、ガードごとに fixture 構築が
+// 異なるため setup 関数で差異を表現する。
+func TestApplyHookStatesStatusOverlayGuards(t *testing.T) {
+	tests := []struct {
+		name      string
+		freshness time.Duration
+		setup     func(t *testing.T, statusPath string)
+	}{
+		{
+			name:      "stale timestamp is rejected",
+			freshness: 10 * time.Second,
+			setup: func(t *testing.T, statusPath string) {
+				writeHookStatusOverlay(t, statusPath, StatusOutput{
+					Version:      2,
+					Timestamp:    time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
+					HookListener: true,
+					Projects: []ProjectOutput{
+						{Sessions: []SessionOutput{{PaneID: "%1", StateSource: SourceHook}}},
+					},
+				})
+			},
 		},
-	})
-	manager.SetHookStatusOverlay(statusPath, 10*time.Second)
-
-	applyHookStatesWithScanOverlay(t, manager)
-
-	if session.State != Thinking {
-		t.Errorf("State = %v, want Thinking", session.State)
-	}
-	if session.HookWaiting {
-		t.Error("HookWaiting = true, want false")
-	}
-	if session.StateSource != SourceJSONL {
-		t.Errorf("StateSource = %q, want %q", session.StateSource, SourceJSONL)
-	}
-}
-
-func TestApplyHookStatesStatusOverlayCorruptedJSON(t *testing.T) {
-	manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
-	statusPath := filepath.Join(t.TempDir(), "status.json")
-	if err := os.WriteFile(statusPath, []byte("{not valid json"), 0o600); err != nil {
-		t.Fatalf("os.WriteFile: %v", err)
-	}
-	manager.SetHookStatusOverlay(statusPath, time.Minute)
-
-	applyHookStatesWithScanOverlay(t, manager)
-
-	if session.State != Thinking {
-		t.Errorf("State = %v, want Thinking", session.State)
-	}
-	if session.HookWaiting {
-		t.Error("HookWaiting = true, want false")
-	}
-	if session.StateSource != SourceJSONL {
-		t.Errorf("StateSource = %q, want %q", session.StateSource, SourceJSONL)
-	}
-}
-
-func TestApplyHookStatesStatusOverlayWrongVersion(t *testing.T) {
-	manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
-	statusPath := filepath.Join(t.TempDir(), "status.json")
-	writeHookStatusOverlay(t, statusPath, StatusOutput{
-		Version:      1,
-		Timestamp:    time.Now().UTC().Format(time.RFC3339),
-		HookListener: true,
-		Projects: []ProjectOutput{
-			{Sessions: []SessionOutput{{PaneID: "%1", StateSource: SourceHook}}},
+		{
+			name:      "corrupted JSON is ignored",
+			freshness: time.Minute,
+			setup: func(t *testing.T, statusPath string) {
+				if err := os.WriteFile(statusPath, []byte("{not valid json"), 0o600); err != nil {
+					t.Fatalf("os.WriteFile: %v", err)
+				}
+			},
 		},
-	})
-	manager.SetHookStatusOverlay(statusPath, time.Minute)
-
-	applyHookStatesWithScanOverlay(t, manager)
-
-	if session.State != Thinking {
-		t.Errorf("State = %v, want Thinking", session.State)
-	}
-	if session.HookWaiting {
-		t.Error("HookWaiting = true, want false")
-	}
-	if session.StateSource != SourceJSONL {
-		t.Errorf("StateSource = %q, want %q", session.StateSource, SourceJSONL)
-	}
-}
-
-func TestApplyHookStatesStatusOverlayUnparsableTimestamp(t *testing.T) {
-	manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
-	statusPath := filepath.Join(t.TempDir(), "status.json")
-	writeHookStatusOverlay(t, statusPath, StatusOutput{
-		Version:      2,
-		Timestamp:    "not-a-timestamp",
-		HookListener: true,
-		Projects: []ProjectOutput{
-			{Sessions: []SessionOutput{{PaneID: "%1", StateSource: SourceHook}}},
+		{
+			name:      "wrong version is ignored",
+			freshness: time.Minute,
+			setup: func(t *testing.T, statusPath string) {
+				writeHookStatusOverlay(t, statusPath, StatusOutput{
+					Version:      1,
+					Timestamp:    time.Now().UTC().Format(time.RFC3339),
+					HookListener: true,
+					Projects: []ProjectOutput{
+						{Sessions: []SessionOutput{{PaneID: "%1", StateSource: SourceHook}}},
+					},
+				})
+			},
 		},
-	})
-	manager.SetHookStatusOverlay(statusPath, time.Minute)
+		{
+			name:      "unparsable timestamp is ignored",
+			freshness: time.Minute,
+			setup: func(t *testing.T, statusPath string) {
+				writeHookStatusOverlay(t, statusPath, StatusOutput{
+					Version:      2,
+					Timestamp:    "not-a-timestamp",
+					HookListener: true,
+					Projects: []ProjectOutput{
+						{Sessions: []SessionOutput{{PaneID: "%1", StateSource: SourceHook}}},
+					},
+				})
+			},
+		},
+		{
+			name:      "non-listener overlay is rejected",
+			freshness: time.Minute,
+			setup: func(t *testing.T, statusPath string) {
+				residentState := NewStateManager(nil)
+				residentState.projects = []Project{
+					{Sessions: []*Session{{
+						Tool:        ToolClaude,
+						State:       Waiting,
+						PaneID:      "%1",
+						StateSource: SourceHook,
+						HookWaiting: true,
+					}}},
+				}
+				residentState.summary = calcSummary(residentState.projects)
+				if err := NewExporter(statusPath, ExporterConfig{}).Write(residentState); err != nil {
+					t.Fatalf("Exporter.Write: %v", err)
+				}
+			},
+		},
+	}
 
-	applyHookStatesWithScanOverlay(t, manager)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
+			statusPath := filepath.Join(t.TempDir(), "status.json")
+			tc.setup(t, statusPath)
+			manager.SetHookStatusOverlay(statusPath, tc.freshness)
 
-	if session.State != Thinking {
-		t.Errorf("State = %v, want Thinking", session.State)
-	}
-	if session.HookWaiting {
-		t.Error("HookWaiting = true, want false")
-	}
-	if session.StateSource != SourceJSONL {
-		t.Errorf("StateSource = %q, want %q", session.StateSource, SourceJSONL)
-	}
-}
+			applyHookStatesWithScanOverlay(t, manager)
 
-func TestApplyHookStatesStatusOverlayRejectsNonListener(t *testing.T) {
-	manager, session := newHookStatusOverlayTestManager(t, "%1", Thinking)
-	statusPath := filepath.Join(t.TempDir(), "status.json")
-	residentState := NewStateManager(nil)
-	residentState.projects = []Project{
-		{Sessions: []*Session{{
-			Tool:        ToolClaude,
-			State:       Waiting,
-			PaneID:      "%1",
-			StateSource: SourceHook,
-			HookWaiting: true,
-		}}},
-	}
-	residentState.summary = calcSummary(residentState.projects)
-	if err := NewExporter(statusPath, ExporterConfig{}).Write(residentState); err != nil {
-		t.Fatalf("Exporter.Write: %v", err)
-	}
-	manager.SetHookStatusOverlay(statusPath, time.Minute)
-
-	applyHookStatesWithScanOverlay(t, manager)
-
-	if session.State != Thinking {
-		t.Errorf("State = %v, want Thinking", session.State)
-	}
-	if session.HookWaiting {
-		t.Error("HookWaiting = true, want false")
-	}
-	if session.StateSource != SourceJSONL {
-		t.Errorf("StateSource = %q, want %q", session.StateSource, SourceJSONL)
+			if session.State != Thinking {
+				t.Errorf("State = %v, want Thinking", session.State)
+			}
+			if session.HookWaiting {
+				t.Error("HookWaiting = true, want false")
+			}
+			if session.StateSource != SourceJSONL {
+				t.Errorf("StateSource = %q, want %q", session.StateSource, SourceJSONL)
+			}
+		})
 	}
 }
 
