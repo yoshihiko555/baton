@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-24
+
 ### Added
 
 - TUI を開かずに承認プロンプトへ応答できる `baton list` / `baton approve <pane>` / `baton deny <pane>` サブコマンドを追加
@@ -101,7 +103,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - 既定のターミナルバックエンドを WezTerm から tmux 中心の構成へ整理した
 
-[Unreleased]: https://github.com/yoshihiko555/baton/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/yoshihiko555/baton/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/yoshihiko555/baton/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/yoshihiko555/baton/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/yoshihiko555/baton/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/yoshihiko555/baton/compare/v0.1.0...v0.1.1
