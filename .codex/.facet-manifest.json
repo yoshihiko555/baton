@@ -16,7 +16,6 @@
   ],
   "rules": [
     "agent-routing-policy",
-    "cocoindex-usage",
     "codex-delegation",
     "codex-suggestion-compliance",
     "coding-principles",
