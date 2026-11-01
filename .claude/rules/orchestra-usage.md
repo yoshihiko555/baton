@@ -113,9 +113,9 @@ agy -p "{質問}" --model <antigravity.model> --add-dir . 2>/dev/null
 | 大きな出力が予想される | サブエージェント経由                     |
 | 複数の分析が必要       | 並列サブエージェント                     |
 | 詳細なレビュー         | `/review` スキル使用                     |
-| Codex/Gemini 相談      | サブエージェント経由（出力が大きい場合） |
+| Codex/Antigravity 相談 | サブエージェント経由（出力が大きい場合） |
 
-### Codex/Gemini 呼び出しパターン
+### Codex/Antigravity 呼び出しパターン
 
 ```
 # 大きな出力が予想される場合はサブエージェント経由
@@ -191,6 +191,18 @@ codex exec --model <codex.model> --sandbox <codex.sandbox.analysis> <codex.flags
 | `support-executive-summary-generator` | 経営層向けサマリー生成  |
 | `testing-reality-checker`             | 実装状況の現実性検証    |
 
+### Specialists（agency-agents パッケージ）
+
+OSS の agency-agents から取り込んだエージェント（`specialized-mcp-builder` / `support-executive-summary-generator` も同じパッケージ）。
+
+| Agent                                       | Role                                                  |
+| ------------------------------------------- | ----------------------------------------------------- |
+| `engineering-privacy-engineer`              | 個人情報の検出・最小化・削除対応の設計とレビュー      |
+| `engineering-identity-access-engineer`      | OAuth/OIDC・SSO・SCIM の実装目線の設計とレビュー      |
+| `engineering-payments-billing-engineer`     | 決済連携・冪等性・PCI スコープの設計とレビュー        |
+| `engineering-database-reliability-engineer` | DB の冗長化・バックアップ・無停止移行の設計とレビュー |
+| `engineering-minimal-change-engineer`       | 依頼された範囲だけを直す最小差分の実装                |
+
 ---
 
 ## `tool: auto` 時の使い分け目安
@@ -208,6 +220,9 @@ codex exec --model <codex.model> --sandbox <codex.sandbox.analysis> <codex.flags
 ---
 
 ## ワークフロー例
+
+開発全体の進め方（対話で決める → `/order` で発注書 → 実行エンジン → PR）は `development-workflow` ルール
+（git-workflow パッケージ）に従う。以下はエージェントを直接呼び出す場合の例。
 
 ### 新機能開発
 

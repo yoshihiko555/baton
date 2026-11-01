@@ -1,24 +1,21 @@
 ---
 name: design
 description:
-  'Interactive design skill for software projects — covers requirements
+  "Interactive design skill for software projects — covers requirements
   definition,
 
   basic design, and detailed design through dialogue with the user.
 
   Use this skill when the user wants to define requirements, design architecture,
 
-  plan screens/API/database, or any pre-implementation design work.
+  plan screens/API/database, or otherwise decide what to build before implementation
 
-  Trigger on: "設計", "要件定義", "基本設計", "詳細設計", "画面設計", "API設計",
+  (設計・要件定義・アーキテクチャ検討など、実装前に何を作るかを決める作業).
 
-  "アーキテクチャ", "design", "requirements", "system design",
+  This skill produces design documents that /order references when writing the work
+  order.
 
-  or when the user discusses what to build before implementation.
-
-  This skill produces design documents that feed into /preflight and /startproject.
-
-  '
+  "
 ---
 
 # Dialog Rules Policy
@@ -90,12 +87,12 @@ description:
 ```
 /design → 設計ドキュメント（docs/）
     ↓
-/preflight → タスク分解（Plans.md）
+/order → 発注書（plan ファイルまたは GitHub Issue）
     ↓
-/startproject → 実装
+実行エンジン（/goal・Codex 直接・/loop-issue・TAKT）→ 実装
 ```
 
-実運用では `/preflight` を起点にし、その設計要否判定で必要と判断されたら `/design` を呼ぶ流れも標準（preflight スキルの「設計要否判定」参照）。どちらの入り方でも、`/design` の成果物（`docs/`）が `/preflight` のタスク分解と `/startproject` の実装・レビューの入力になる。
+実運用では grill-me 等の対話を起点にし、正式な設計書が要ると判断したときだけ `/design` を呼ぶ流れも標準（`/order` も、設計書が無くアーキテクチャ・API・データモデルに触る発注では `/design` の先行を提案する）。どちらの入り方でも、`/design` の設計書（`docs/requirements/` `docs/architecture/` `docs/screens/` `docs/api/` `docs/database/`）は `/order` が発注書の Context に載せ、実行エンジンの入力になる。拡張トラックの成果物（`docs/testing/` 等）は `/order` の対話で Context に明示する。`/order` と実行エンジンの使い分けは git-workflow パッケージの `/order` スキルと `development-workflow` ルールを参照。git-workflow を導入していない環境では、`/task-state` で plan ファイルに発注書の節（Goal / Context 等）と Phase を書いて `/goal` に渡す。
 
 ## Workflow（俯瞰図）
 
@@ -119,13 +116,13 @@ Phase 3: 詳細設計（Detailed Design）
   ゲート: セルフチェック → spec-reviewer
   遷移: 全個別設計書作成 + 実装可能レベル + ゲート通過 + ユーザー合意
     ↓
-/preflight → タスク分解（Plans.md 作成）
+/order → 発注書（plan ファイルまたは GitHub Issue）
     ↓
-/startproject → 実装開始
+実行エンジンで実装
 ```
 
 各フェーズの終わりで **二段品質ゲート**（下記）を通し、レビュー結果を添えて **受け入れ確認** を行い、ユーザーの明示的な合意を得てから次に進む。
-Phase 3 完了後は `/preflight` でタスク分解し、`/startproject` で実装に入る流れになる。
+Phase 3 完了後は `/order` で発注書に固め、実行エンジンで実装に入る流れになる。
 
 ---
 
@@ -233,7 +230,7 @@ Phase 0 は **必ず `researcher` サブエージェント経由で実施する*
 
 - 大量のコード読み込み結果でメインコンテキストを消費させない
 - 調査内容を要約形式で受け取り、後続フェーズで参照しやすくする
-- `cli-tools.yaml` の `agents.researcher.tool` 設定に従って実行ツール（Gemini 等）が決まる
+- 実行ツールは `cli-tools.yaml` の `agents.researcher.tool`（と `.local.yaml`）から hook が解決する
 
 依頼テンプレート:
 
@@ -500,7 +497,7 @@ Phase 1-3 の基本フローに加えて、プロジェクトの性質に応じ�
 ## Tips
 
 - 全フェーズを一度にやる必要はない — 要件定義だけで止めてもよい
-- 設計ドキュメントは `/preflight` や `/startproject` への入力になる
+- 設計書（`docs/requirements/` 〜 `docs/database/`）は `/order` が発注書の Context として参照する
 - 大きなプロジェクトではフェーズごとにセッションを分けることを推奨
 - 既存コードのあるプロジェクトでは、どの Phase から始める場合でも Phase 0（既存コード調査と影響範囲分析）を先に実施する
 - Phase 0 の成果物（`.claude/docs/impact-analysis/*.md`）は Phase 1 以降で既存コードとの整合性を確認する際の参照元になる

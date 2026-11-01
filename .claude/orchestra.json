@@ -1,5 +1,6 @@
 {
   "installed_packages": [
+    "agency-agents",
     "agent-routing",
     "antigravity-suggestions",
     "audit",
@@ -11,11 +12,10 @@
     "git-workflow",
     "issue-workflow",
     "quality-gates",
-    "route-audit",
-    "tmux-monitor"
+    "route-audit"
   ],
   "orchestra_dir": "/Users/yoshihiko/ghq/github.com/yoshihiko555/ai-orchestra",
-  "last_sync": "2026-09-05T03:57:16.232113+00:00",
+  "last_sync": "2026-11-01T04:55:23.882733+00:00",
   "synced_files": [
     "agents/adversarial-reviewer.md",
     "agents/ai-architect.md",
@@ -30,6 +30,11 @@
     "agents/data-modeler.md",
     "agents/debugger.md",
     "agents/docs-writer.md",
+    "agents/engineering-database-reliability-engineer.md",
+    "agents/engineering-identity-access-engineer.md",
+    "agents/engineering-minimal-change-engineer.md",
+    "agents/engineering-payments-billing-engineer.md",
+    "agents/engineering-privacy-engineer.md",
     "agents/finding-verifier.md",
     "agents/frontend-dev.md",
     "agents/general-purpose.md",
@@ -53,38 +58,62 @@
     "config/codd/codd.yaml",
     "config/core/task-memory.yaml",
     "config/git-workflow/sandbox-requirements.json",
-    "config/quality-gates/evaluation-set-mapping.yaml"
+    "config/quality-gates/evaluation-set-mapping.yaml",
+    "config/quality-gates/quality-gates.json"
   ],
   "file_hashes": {
     "codd": {
-      "config/codd/codd.yaml": "34b39501ced4cf12868fe6c0eea0071350cc68dd7a0ae413d686ed8d39491bd2"
+      "config/codd/codd.yaml": "cae91ecf120cfa1be382a5d1303a1ffdd208d59033d5fb062ffa4353c0a9a7c9"
     },
     "agent-routing": {
-      "agents/adversarial-reviewer.md": "325d46142944ae27c8949a81b1fae631b5234a6ea6a31ae686bf6c277b1c4fcf",
-      "agents/ai-architect.md": "3be893e1959d4c442abf2b7f194586de833be36afef31c2a0a62b231f05ec648",
-      "agents/ai-dev.md": "308456714b203c6611c7252295bb606bcae71614db4f257ff7018ace12ae3bfd",
-      "agents/api-designer.md": "87a0c1dec114a730a030acfd1a895b4fb7ed1299babd3a2e43c4ee1e928d023a",
-      "agents/architect.md": "8410efa67bcf68710c5461205e93c1e1cf2ef58a46f265e3ef423708de7aab38",
-      "agents/architecture-reviewer.md": "082869eaaf14d0b3bd92f02787f7acb33b1e95be79071637f1b4de9107935b2a",
-      "agents/auth-designer.md": "ef55fa0fc60358dc4214cc5947ef4f2db414c92fc8a8b22b3376f57fd163b95a",
-      "agents/backend-go-dev.md": "0ead2c91d95c2fe7a8aceed24f5ff3d1f37103bbd9479882f89d0de6f333baa2",
-      "agents/backend-python-dev.md": "f8c535ad89d9da9744db028e945bae3f3ee14e92d0d3efa5db19de3f83e5a26e",
-      "agents/code-reviewer.md": "cde375c82619ac70161f4852e3d0e0b637af661ed4425b0bc1fca63c9cedaf79",
-      "agents/data-modeler.md": "39a4c93f53424ad222849903ab63df2fea720188f216836feacb6a36bedc4e29",
-      "agents/debugger.md": "985ca62c6f8105af0b2f9fa0edbb74c6ec18949b0deb8ba779fbf679ce35d4dc",
-      "agents/finding-verifier.md": "e04bd7a7469ea64532a8dc288c16b5418e53ce7e1cb0b6e29fac06cc4ab48032",
-      "agents/frontend-dev.md": "f4822996f701de23fa0b68df85c28da4e2a5749e3d3ece7323bf53aa4c008df8",
-      "agents/general-purpose.md": "33688cad3c211463a426e78ec9b88045d73e1a8d47be9229f9de8179ff7ffd22",
-      "agents/performance-reviewer.md": "d1b6bc8469246751e1c7b2507a29657127f324ae18b63fad4fe0f0762143461e",
-      "agents/rag-engineer.md": "76ca7b0990d3599204ea9c479ef1bf19679fb4ba03b87a96d491e9b3eb4af3cd",
-      "agents/researcher.md": "9aba653662e28455fef71c367388680051c8ab4f3d1599c15c58f4b673ddf419",
-      "agents/security-reviewer.md": "f1736624758132eecd0a3e6abd18b1be23a3fc2dae7f9467fcef79d78ff63610",
-      "agents/spec-reviewer.md": "cf7593f3427dca6d9f98a9f427ac73ac1e2a08adcb59321279bdd47e3abecd45",
-      "agents/spec-writer.md": "f8f61fdfef9c550e6bc328ba083ec17da71b7fd6e529eaf32e6eca662877b5ad",
+      "agents/adversarial-reviewer.md": "bc1747da5f84cfca2c45d51c9c45e9878ca285aae06259a6e676b29a4be9a960",
+      "agents/ai-architect.md": "d04bcb1017752f8bd3e1f6ffc5b7f292809357fa3c0b6c807617ebdc480ed446",
+      "agents/ai-dev.md": "f1c53f1064c0fe7be172f235837dc511597fe169678f06e102e66c3562a8dd30",
+      "agents/api-designer.md": "bb81a221c98b8a0b88513c1c040e844aae7b317679c8f7e6952168108b511a2b",
+      "agents/architect.md": "e01416309b10f6579856a61d75d192aae4206db3d467013ef906d7de3ae5aa99",
+      "agents/architecture-reviewer.md": "272ce8be8a0f83c8da58a46a9c6cc73928834e61b190748a2f11d92b4f34286f",
+      "agents/auth-designer.md": "105a02485834df45b8c43144c48cb3aeeba6f44c06f0f0ea4f3b7a451726716d",
+      "agents/backend-go-dev.md": "e225840c78136102f99f55d7e6b67d53d965a0660845ee8c6c9a888fea254c47",
+      "agents/backend-python-dev.md": "f1ade146112f56a91e33f1f97b0556d04a1ce211be58523ebf0846c8bcd71b0e",
+      "agents/code-reviewer.md": "d09b80b81a8da9cdbdb4a944ab5a97b8a2d6a170b19defe422c14962924b7f46",
+      "agents/data-modeler.md": "7ea023eb2b83ea66ef2b19833767bcb4e5fc9a135a00609e00e82ffa8df05c82",
+      "agents/debugger.md": "bd772d779561b701e3bee73ff78fdfd12cc30b30cc6167c5c350b637a71033da",
+      "agents/finding-verifier.md": "6c2622006f2179a4a9d214e0b053013206248599b59aaf16b0455539829efcfa",
+      "agents/frontend-dev.md": "6874d8292180a204d7e9f891bc6b38affde690c6ea0aa55cc3ba789c8e0bb57f",
+      "agents/general-purpose.md": "3c452337d1e74bd9172bda078b94b56fdb9b92541275878255eed3a0bd83a250",
+      "agents/performance-reviewer.md": "bb3e0d227fd27971158168dc96cec003688a353f7cbe2c1a6009865a3dadf4eb",
+      "agents/rag-engineer.md": "79e53050901369c5e632eb5bc3ad0dee5736b9620c72fed03a0f458eb674978b",
+      "agents/researcher.md": "8991379bf322028d281aa523a8399ced200a5a3c312a21e1298b13637ed2904f",
+      "agents/security-reviewer.md": "d77159767829a1d767e996a204308bca5437755853982e4a01a16c9164628108",
+      "agents/spec-reviewer.md": "5b7a399d83b4470eb638ed67cd3a964aaaa4e94e503040ea8f92aeab410f1d93",
+      "agents/spec-writer.md": "398fff232122039a6c261ce5c6e57ca17cfc6af4facc71b897cfae870fc654ed",
       "agents/specialized-mcp-builder.md": "3f8f1734b882d95b4fcd84b95e3334016fd80e147180bd80cad6587297a9fe37",
-      "agents/tester.md": "b54a17294585229c95d0dfd8fa9416bc8bb1e8e45f812e9bfa413c9604fb6560",
-      "agents/testing-reality-checker.md": "259fef00ea8cb37dc3ed3097b4c3f6852b35198feb54a5984a21bd3bc36f26cd",
-      "agents/ux-reviewer.md": "b5fe9d6d08e7496e81af590395fbd46e15f70dcb3154e3f573efae30a15167e8"
+      "agents/tester.md": "5f7f7acf7ffaf98f590dd5e60a8e470cfe75425aeedb4b2ee5ef2f9d3e9383a4",
+      "agents/testing-reality-checker.md": "999f8925e2f27680e4d36a6818fe644c0f473c44bcc29b693b0557ac5217eb27",
+      "agents/ux-reviewer.md": "7add48f0d79497fe701ca97f642c5c346ce69657442a35a8a716e81369a4cbf1",
+      "agents/docs-writer.md": "387b272ccefd506197562f9da9b10de3f360355e2ae8dd07754e5dca8f2d0d95",
+      "agents/planner.md": "e820cc5b6e9e42b106edad324ab927edc9b53b13dc1dde62c456620736ac4079",
+      "agents/prompt-engineer.md": "ad9b55d225805b47a50160c9ea4095dc11ff02466c56a1f934b44b135bb27148",
+      "agents/requirements.md": "4caaa703214dd3ddd0f68f76038a238860df61bf29131e71485794e4c03033db",
+      "config/agent-routing/cli-tools.yaml": "e4faa061b5150a9e1594ee2fb6533d399fe97fcab927f9e48f672dc9e43c6f2f"
+    },
+    "agency-agents": {
+      "agents/engineering-database-reliability-engineer.md": "b5ce83bef3616184e116046e53571ccd8bd3dc67285ce24f435f046d047230ef",
+      "agents/engineering-identity-access-engineer.md": "04df59cf81f2784e379da9d50c669ddcc52761c9fa71e6b050caed9af9c80881",
+      "agents/engineering-minimal-change-engineer.md": "d805db14d2ba3e22e7ca936467c08d33e9d36295670bf38876446ea6d053b376",
+      "agents/engineering-payments-billing-engineer.md": "56fdc1ffa32c03c97aec0a44e4fca7b167db27c9d4ea261e5065b76507791f38",
+      "agents/engineering-privacy-engineer.md": "f824ec2b45dcd077556a75aca0baa3adf8252a3b718ec2d53b110994ce636381",
+      "agents/specialized-mcp-builder.md": "25a791df57e5e770254c32667cf029eb8d47edb216f7981ad2f9d4e515408613",
+      "agents/support-executive-summary-generator.md": "002da3b51d632067ee5aed6a137af548328cc2b01e4142ad6d29e831b6b777ea"
+    },
+    "audit": {
+      "config/audit/audit-flags.json": "b39f2cba905759c88c29db260ea940ee71a9202a4b4794b56d6f43f9edbbc399"
+    },
+    "core": {
+      "config/core/task-memory.yaml": "c059d1d84cd186fcf7f20bb9ffcb7475b3355784a3a0c890f1a39312f4ffe9b1"
+    },
+    "quality-gates": {
+      "config/quality-gates/quality-gates.json": "6efbb1c0c84106d598a8019808f50b2af99189b0617b7aaa49801d3e5c8a6a43"
     }
   },
   "codex_file_hashes": {

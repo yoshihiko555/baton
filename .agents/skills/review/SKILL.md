@@ -5,6 +5,7 @@ description: "Run code reviews using specialized reviewer agents.
   Supports individual or batch review modes with smart reviewer selection.
 
   "
+argument-hint: "[all|code|security|performance|spec|architecture|ux|adversarial|impl|design]"
 metadata:
   short-description: Multi-agent code review (smart selection)
 ---
@@ -93,7 +94,7 @@ metadata:
 
 ```
 /review              # ベースライン(code + adversarial) + スマート選定（デフォルト）
-/review all          # 全 7 レビュアー並列実行（旧デフォルト）
+/review all          # 全 7 レビュアー並列実行
 /review code         # コードレビューのみ
 /review security     # セキュリティレビューのみ
 /review performance  # パフォーマンスレビューのみ
@@ -132,13 +133,15 @@ metadata:
 3. 変更ファイルのソースコードを収集:
    - **500 行以下**: ファイル全文を Read
    - **500 行超**: 変更ハンク + 前後 30 行のみ（diff から特定）
-4. 収集結果を変数に保持（後続フェーズで注入）
+4. **設計書の収集**: `docs/requirements/` `docs/architecture/` `docs/screens/` `docs/api/` `docs/database/` のいずれかに設計書（`.md`）があり、変更に `.md` 以外のファイルが含まれる場合、変更ファイルに関係する設計書を集める。変更ファイルのパス・モジュール名・API パス・テーブル名等で上記ディレクトリを検索してヒットした設計書（大きい場合は該当節のみ）と、`docs/architecture/` の概要を対象にする。ヒットが無い場合は設計書の一覧（パスと見出し）を渡し、`spec-reviewer` に関係する設計書を選ばせる
+5. 収集結果を変数に保持（後続フェーズで注入）
 
 ```
 # 実行例
 diff_stat = git diff --stat の結果
 diff_full = git diff の結果
 file_contexts = 各変更ファイルのソースコード（上記ルールで収集）
+design_docs = 関係する設計書（手順 4。設計書が無いプロジェクトでは空）
 ```
 
 **ドキュメントのみ判定**: `.md` ファイルのみの変更 → 原則レビュースキップ（ユーザーに報告して終了）
@@ -182,6 +185,8 @@ Phase 0 で収集した diff の**追加行（`+` プレフィックス）のみ
 | 仕様整合       | API コントラクト変更, スキーマ変更, OpenAPI/Swagger 定義                                                                                                                                                                                     | + spec-reviewer         |
 
 **選定結果**: Step 2 と Step 3 の union（どちらかでマッチすれば追加、重複は 1 回のみ）
+
+**設計書がある場合**: Phase 0 の手順 4 の条件（上記ディレクトリに設計書があり、`.md` 以外の変更を含む）を満たすときは、Step 2・3 のシグナルに関係なく `spec-reviewer` を union に加える。Step 4 の優先順位で `spec-reviewer` は `security-reviewer` の次なので、専門枠 2 名に必ず残る。設計書が無いプロジェクトでは従来どおりシグナルがある場合だけ選ぶ
 
 #### Step 4: 上限キャップ
 
@@ -235,6 +240,8 @@ Tiered Output 形式（Critical/High/Medium/Low）で報告してください。
 """)
 ```
 
+`spec-reviewer` を起動するときは、`design_docs` があれば `## 設計書` 節として追加で注入し、実装 diff を設計書と突合して承認されていない逸脱（設計書に無い振る舞い、設計書と食い違う API / スキーマ / 画面）を指摘させる。設計書側を更新すべき逸脱は、その旨を添えて報告させる。
+
 **注意**: プロンプトには事前収集コンテキストが含まれるため、サブエージェント内で git diff や Read を再実行する必要はない。
 
 ### Phase 3.5: 指摘検証（Findings Verification）
@@ -242,7 +249,7 @@ Tiered Output 形式（Critical/High/Medium/Low）で報告してください。
 Phase 3 で集まった Critical/High 指摘を `finding-verifier` で反証し、誤検知・過大評価を除去してから集約する。
 
 1. `cli-tools.yaml` の `review.verify_findings` を確認する（config-loading ルールに従い `.local.yaml` 上書きを適用。デフォルト `true`）
-2. `verify_findings: false` の場合 → Phase 3.5 全体をスキップし、Phase 3 の全指摘をそのまま Phase 4 へ渡す（従来動作）
+2. `verify_findings: false` の場合 → Phase 3.5 全体をスキップし、Phase 3 の全指摘をそのまま Phase 4 へ渡す
 3. `verify_findings: true` の場合 → 以下の起動ルールで `finding-verifier` を並列起動する:
    - **Critical**: 1 finding = 1 起動
    - **High**: レビュアー出力単位でバッチ化し、1 起動あたり最大 6 件まで
@@ -350,7 +357,7 @@ Task(subagent_type="finding-verifier", run_in_background=true, prompt="""
 Phase 4 の集約結果から通過判定を行う。
 
 1. `cli-tools.yaml` の `review.auto_fix` を確認する（config-loading ルールに従い `.local.yaml` 上書きを適用。詳細は `config-loading.md` 参照）
-2. `auto_fix: false` の場合 → Phase 4 の Review Summary を出力してスキル終了（従来動作）
+2. `auto_fix: false` の場合 → Phase 4 の Review Summary を出力してスキル終了
 3. `auto_fix: true` の場合 → 通過基準を `review.pass_threshold` から取得
 4. 通過基準の評価:
    - `critical_zero`: Critical 指摘が 0 件で通過
@@ -364,7 +371,7 @@ Critical 指摘をサブエージェントで自動修正する。
 
 **対象範囲**:
 - `review.verify_findings: true`（デフォルト）の場合 → **`verdict: confirmed` の Critical のみ**が対象。`refuted` は除外済み、`uncertain` は Phase 5 で Fail 扱いだが人手確認に回すため auto-fix の対象外
-- `review.verify_findings: false` の場合 → 従来通り、Phase 3 で報告された全 Critical が対象
+- `review.verify_findings: false` の場合 → Phase 3 で報告された全 Critical が対象
 
 1. 対象範囲の Critical 指摘をファイルごとにグループ化
 2. 各ファイルの拡張子から修正エージェントを決定（マッピングテーブル参照）
@@ -495,7 +502,7 @@ Phase 3.5（指摘検証）と Phase 5-7（Pass/Fail 判定 → Auto-Fix → Re-
 
 ## Execution: Full Review (`/review all`)
 
-全 7 レビュアーを並列起動する（旧 `/review` のデフォルト動作）。
+全 7 レビュアーを並列起動する（スマート選定をスキップ）。
 
 1. Phase 0 のコンテキスト事前収集を実行
 2. モデル選択を実行（Phase 2 と同じ）
@@ -541,11 +548,11 @@ Phase 3.5（指摘検証）と Phase 5-7（Pass/Fail 判定 → Auto-Fix → Re-
 - `/review design` は大規模リファクタリング前に推奨
 - リリース前は `/review all` を推奨
 
-## Quality Gate Rule（v3: Auto-Loop）
+## Quality Gate Rule（Auto-Loop）
 
 デフォルトで自動修正ループが有効。詳細は Phase 5-7 を参照。
 
-- `review.auto_fix: false` で従来動作（報告のみ）に切替可能
+- `review.auto_fix: false` で報告のみ（自動修正なし）に切替可能
 - デフォルトで Critical/High 指摘は `finding-verifier` による反証検証（Phase 3.5）を経てから集約・自動修正に回る
-- `review.verify_findings: false` で検証をスキップし、全指摘をそのまま集約・自動修正対象にする従来動作に切替可能
+- `review.verify_findings: false` で検証をスキップし、全指摘をそのまま集約・自動修正対象にできる
 - テストコード作成は `/tdd` の責務であり、`/review` の責務ではない

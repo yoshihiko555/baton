@@ -100,11 +100,19 @@ Task tool parameters:
     sandbox を無効化して codex を実行する（codex-delegation.md の Bash サンドボックス制約に従う）。
     エラー時は claude-direct にフォールバック。
 
-    PROMPT_FILE=$(mktemp)
+    1) Bash (keep the sandbox on):
+    PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/codex-prompt.XXXXXX")
     cat > "$PROMPT_FILE" <<'PROMPT'
     {question}
     PROMPT
-    codex exec --model <codex.model> --sandbox <codex.sandbox.analysis> <codex.flags> "$(cat "$PROMPT_FILE")" < /dev/null 2>/dev/null
+    echo "$PROMPT_FILE"
+
+    2) Bash (disable the sandbox only when the codex-delegation conditions allow it; run `codex exec`
+       alone; write the printed path literally because shell variables do not survive
+       between Bash calls). `<codex.sandbox>` is `codex.sandbox` from `[Resolved Routing]`;
+       if the block lists `codex.sandbox.analysis` / `codex.sandbox.implementation` instead,
+       use the analysis one. Resolve from the config files only when there is no block:
+    codex exec --model <codex.model> --sandbox <codex.sandbox> <codex.flags> "$(cat '<printed path>')" < /dev/null 2>/dev/null
 
     Return CONCISE summary (recommendation + rationale).
 ```
@@ -119,13 +127,23 @@ codex exec --model <codex.model> --sandbox <codex.sandbox.analysis> <codex.flags
 
 ### Implementation Task (when route == codex)
 
+サブエージェント内であれば `[Resolved Routing]` の `codex.sandbox` を使う（ブロックに
+`codex.sandbox.implementation` が出ている場合はその値。ブロックがなければ
+`<codex.sandbox.implementation>` のまま）。
+
 ```bash
-# タスク本文は一時ファイル経由で渡す（シェル文字列への直接埋め込み禁止）
-PROMPT_FILE=$(mktemp)
+# 1 回目（sandbox 内のまま）: タスク本文を一時ファイルへ書き出し絶対パスを表示
+# （シェル文字列への直接埋め込み禁止）
+PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/codex-prompt.XXXXXX")
 cat > "$PROMPT_FILE" <<'PROMPT'
 {implementation task}
 PROMPT
-codex exec --model <codex.model> --sandbox <codex.sandbox.implementation> <codex.flags> "$(cat "$PROMPT_FILE")" < /dev/null 2>/dev/null
+echo "$PROMPT_FILE"
+```
+
+```bash
+# 2 回目（`codex exec` 単体。表示されたパスを文字列で書く）
+codex exec --model <codex.model> --sandbox <codex.sandbox.implementation> <codex.flags> "$(cat '<表示されたパス>')" < /dev/null 2>/dev/null
 ```
 
 ### Sandbox Modes
@@ -135,27 +153,17 @@ codex exec --model <codex.model> --sandbox <codex.sandbox.implementation> <codex
 | `read-only`       | 分析、レビュー、デバッグ助言 |
 | `workspace-write` | 実装、修正、リファクタリング |
 
-## Integration with Gemini
+## Integration with Antigravity
 
-| Task                                | Use                       |
-| ----------------------------------- | ------------------------- |
-| 外部調査が必要                      | Gemini → (必要なら) Codex |
-| 実装タスクで route が codex         | Codex                     |
-| 実装タスクで route が claude-direct | Claude direct             |
-| route が auto                       | タスク特性で選択          |
+| Task                                | Use                            |
+| ----------------------------------- | ------------------------------ |
+| 外部調査が必要                      | Antigravity → (必要なら) Codex |
+| 実装タスクで route が codex         | Codex                          |
+| 実装タスクで route が claude-direct | Claude direct                  |
+| route が auto                       | タスク特性で選択               |
 
 ## Why This Skill
 
 - config 変更だけで Codex の役割を切り替えられる
 - エージェント定義とスキル文書の責務齟齬を防げる
 - 将来のモデル評価変化（実装担当の入れ替え）に追従しやすい
-
----
-
-## Additional resources
-
-- For agent-prompts details, see [references/agent-prompts.md](references/agent-prompts.md)
-- For code-review-task details, see [references/code-review-task.md](references/code-review-task.md)
-- For delegation-patterns details, see [references/delegation-patterns.md](references/delegation-patterns.md)
-- For refactoring-task details, see [references/refactoring-task.md](references/refactoring-task.md)
-- For troubleshooting details, see [references/troubleshooting.md](references/troubleshooting.md)
