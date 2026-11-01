@@ -101,8 +101,11 @@ IMPORTANT: Do not ask any clarifying questions.
 ## 呼び出し方法
 
 > **Bash サンドボックスの制約**
-> Antigravity CLI は認証 + macOS システム API を使用するため、sandbox 内では動作しない場合がある。
-> ただし `sandbox.excludedCommands` に `agy` が設定済みなら sandbox 内でも実行可能。
+> `agy` は sandbox 内で実行する（`sandbox.excludedCommands` に `agy` を入れても、現行の Claude Code では
+> sandbox の外に出ない）。認証と推論の通信先（`daily-cloudcode-pa.googleapis.com` / `www.googleapis.com` /
+> `antigravity-unleash.goog` / `lh3.googleusercontent.com`）が sandbox のネットワーク許可に無いと、
+> `Eligibility check failed: ... Forbidden` で exit 1 になる。その場合は通信先を許可して再実行するか、
+> claude-direct にフォールバックする。
 
 ### サブエージェント経由（推奨）
 
@@ -124,7 +127,7 @@ based on the available information." --model <antigravity.model> 2>/dev/null
 sandbox エラーや権限拒否が発生した場合は claude-direct にフォールバックすること。
 
 結果を .claude/docs/research/{topic}.md に保存し、
-要約を返してください（5-7ポイント）。
+要点を絞った要約を返してください。
 """)
 ```
 
@@ -146,11 +149,10 @@ IMPORTANT: Do not ask any clarifying questions." --model <antigravity.model> --a
 
 ## Antigravity の強み
 
-| 機能                           | 説明                                                     |
-| ------------------------------ | -------------------------------------------------------- |
-| 大規模コンテキスト             | コードベース全体を一度に分析可能                         |
-| Google Search グラウンディング | 最新情報へのアクセス                                     |
-| 複数モデル                     | Gemini 3.5 Flash / 3.1 Pro / Claude 4.6 / GPT-OSS の切替 |
+| 機能                           | 説明                                                   |
+| ------------------------------ | ------------------------------------------------------ |
+| Google Search グラウンディング | 最新情報へのアクセス                                   |
+| 複数モデル                     | `antigravity.model_allowlist` に登録されたモデルを切替 |
 
 ## 無効化
 
